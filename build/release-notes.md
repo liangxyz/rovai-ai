@@ -1,21 +1,21 @@
-# Rovai AI v0.4.13
+# Rovai AI v0.4.14
 
 <!-- lang:zh-CN -->
 
-本次更新为网页版补充文件下载入口，并将更新检查与下载来源切换到 liangxyz/rovai-ai。
+本次更新修复定时任务产出的会话无法永久删除的问题。该问题会让页面每次刷新都弹出“删除未完成，请重试”，点击重试也无效。
 
-- 【功能】**网页版可直接下载文件。** 会话中的文件附件卡片在“打开”旁新增“下载”按钮；文件预览面板顶部也新增下载按钮，浏览器会按原文件名保存。
-- 【变更】**更新来源改为 liangxyz/rovai-ai。** 设置 → 关于与更新中的检查更新、下载更新和发布页链接，以及 Server 更新通道、安装脚本和 Desktop 更新配置，全部指向 liangxyz/rovai-ai 的 Release。
+- 【修复】**定时任务产出的会话现在可以永久删除。** 之前删除这类会话时，数据库会被定时运行记录的外键挡住，反复报 `FOREIGN KEY constraint failed`。现在删除会话时会一并删除它对应的那一次定时运行记录及其通知记录；定时任务本身和其他次运行记录不受影响。
+- 【说明】**已卡住的删除，升级后点一次“重试”即可完成。** 不需要手动修改数据库。
 
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.12...v0.4.13)
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.13...v0.4.14)
 
 ---
 
 <!-- lang:en -->
 
-This release adds a file download action to the Web app and moves update checks and downloads to liangxyz/rovai-ai.
+This release fixes a bug where a conversation produced by a scheduled task could not be permanently deleted. The page showed "Deletion incomplete, please retry" on every refresh, and retrying did not help.
 
-- [Feature] **Download files directly from the Web app.** File attachment cards in a conversation now show a Download button next to Open, and the file preview pane has a Download button in its header. The browser saves the file under its original name.
-- [Change] **Update source is now liangxyz/rovai-ai.** In Settings → About & Updates, the update check, update download and release-page links now point to Releases of liangxyz/rovai-ai. The Server update channel, install scripts and Desktop updater configuration use the same repository.
+- [Fix] **Conversations produced by scheduled tasks can now be permanently deleted.** Deleting such a conversation used to fail on a foreign key from the scheduled-run record, repeatedly reporting `FOREIGN KEY constraint failed`. Deletion now also removes the scheduled-run record of that one occurrence and its notification records. The scheduled task itself and its other runs are not affected.
+- [Note] **A deletion that is already stuck completes after upgrading: click Retry once.** No manual database edit is needed.
 
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.12...v0.4.13)
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.13...v0.4.14)
