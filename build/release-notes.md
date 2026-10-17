@@ -1,35 +1,21 @@
-# Rovai AI v0.4.12
+# Rovai AI v0.4.13
 
 <!-- lang:zh-CN -->
 
-本次更新在执行过程中加入插话记录，调整队员卡片和邀请操作，并修复网页版新建会话、附件发送及删除会话后的错误提示。
+本次更新为网页版补充文件下载入口，并将更新检查与下载来源切换到 liangxyz/rovai-ai。
 
-- 【功能】**执行过程中可直接查看插话记录。** 插话在对应位置单独显示，可展开查看原文和投递状态，并点击“原消息”返回会话定位；前后的工具操作分组会保留清楚的边界。
-- 【交互】**调整队员卡片与邀请列表。** 角色、智能体和模型信息分层显示，长模型名称不再挤压智能体名称。邀请候选改用行尾复选框；邀请弹窗与 `@` 候选统一检查可用性，避免加入未配置或不可用的队员。
-- 【界面】**改善手机网页版的队员邀请体验。** 邀请窗口改为底部弹层，搜索和确认区域固定，候选列表独立滚动；首次打开不自动聚焦搜索框，适配横屏和键盘弹出后的可视区域。
-- 【交互】**调整队员的文件发送指引。** 普通文件引用优先使用 Markdown 链接，明确需要附件时再发送文件；为 Lark 和钉钉补齐与飞书一致的文件交付提示。
-- 【修复】**修复网页版新建会话时输入框无法初始化的问题。** 解决打开新对话后提示操作未开放、无法正常输入和发送的问题。
-- 【修复】**修复网页版上传附件后无法发送的问题。** 正确识别上传后的附件状态，同时修复草稿恢复后的附件预览与可用性检查。
-- 【修复】**修复删除会话后误报“会话不存在”的问题。** 删除或切换会话后，不再让过期刷新结果干扰当前页面；其他客户端删除会话后也能正确更新。
+- 【功能】**网页版可直接下载文件。** 会话中的文件附件卡片在“打开”旁新增“下载”按钮；文件预览面板顶部也新增下载按钮，浏览器会按原文件名保存。
+- 【变更】**更新来源改为 liangxyz/rovai-ai。** 设置 → 关于与更新中的检查更新、下载更新和发布页链接，以及 Server 更新通道、安装脚本和 Desktop 更新配置，全部指向 liangxyz/rovai-ai 的 Release。
 
-感谢 [@liangxyz](https://github.com/liangxyz) 在 [#779](https://github.com/murray17/rovai-ai/issues/779) 中反馈网页版附件发送问题。
-
-[完整变更](https://github.com/murray17/rovai-ai/compare/v0.4.11...v0.4.12)
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.12...v0.4.13)
 
 ---
 
 <!-- lang:en -->
 
-This release adds steering records to the execution view, updates teammate cards and invitations, and fixes new conversations, attachment sending, and misleading errors after conversation deletion in the Web app.
+This release adds a file download action to the Web app and moves update checks and downloads to liangxyz/rovai-ai.
 
-- [Feature] **See steering records directly in the execution view.** Follow-up instructions appear as separate rows at their corresponding positions. Expand them to read the original text and delivery status, or select “Original message” to return to the source in the conversation. Tool operations before and after an input keep clear grouping boundaries.
-- [Interaction] **Update teammate cards and invitation lists.** Roles, runtimes, and models are shown separately, so long model names no longer squeeze runtime names. Invitation checkboxes move to the end of each row. The invitation dialog and `@` suggestions use the same availability checks to avoid adding unconfigured or unavailable teammates.
-- [UI] **Improve teammate invitations on mobile Web.** Invitations open in a bottom sheet with fixed search and confirmation areas and a separately scrolling candidate list. Opening the sheet no longer automatically focuses search; the layout adapts to landscape and the visible area above the keyboard.
-- [Interaction] **Adjust file-sending guidance for teammates.** Prefer Markdown links for ordinary file references and send attachments when explicitly needed. Lark and DingTalk receive the same channel file-delivery guidance already provided for Feishu.
-- [Fix] **Fix composer initialization when creating a Web conversation.** Resolve the unsupported-operation error that prevented the composer from becoming available for typing and sending.
-- [Fix] **Fix sending after uploading a Web attachment.** Recognize uploaded attachment state correctly, and restore attachment previews and availability checks when recovering a draft.
-- [Fix] **Avoid misleading “conversation does not exist” errors after deletion.** Obsolete refresh results no longer interfere after deleting or switching conversations. Deletion from another client is also handled correctly.
+- [Feature] **Download files directly from the Web app.** File attachment cards in a conversation now show a Download button next to Open, and the file preview pane has a Download button in its header. The browser saves the file under its original name.
+- [Change] **Update source is now liangxyz/rovai-ai.** In Settings → About & Updates, the update check, update download and release-page links now point to Releases of liangxyz/rovai-ai. The Server update channel, install scripts and Desktop updater configuration use the same repository.
 
-Thanks to [@liangxyz](https://github.com/liangxyz) for reporting the Web attachment-sending issue in [#779](https://github.com/murray17/rovai-ai/issues/779).
-
-[Full changelog](https://github.com/murray17/rovai-ai/compare/v0.4.11...v0.4.12)
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.12...v0.4.13)

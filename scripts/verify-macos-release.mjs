@@ -261,11 +261,11 @@ try {
     'utf8'
   ))
   if (updateConfiguration?.provider !== 'github'
-      || updateConfiguration.owner !== 'murray17'
+      || updateConfiguration.owner !== 'liangxyz'
       || updateConfiguration.repo !== 'rovai-ai') {
     throw new Error('packaged app-update.yml does not target the official GitHub release channel')
   }
-  report.push('Packaged updater channel: github/murray17/rovai-ai')
+  report.push('Packaged updater channel: github/liangxyz/rovai-ai')
   report.push(`DMG: ${relative(root, dmgPath)}`)
   report.push(`DMG size: ${dmgSize}`)
   report.push(`Unpacked app: ${relative(root, packagedAppPath)}`)

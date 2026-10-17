@@ -1,7 +1,7 @@
 {
   "name": "rovai-ai",
   "productName": "Rovai AI",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "private": true,
   "type": "module",
   "description": "A desktop workspace for long-lived agent teams, shared Camps, visible execution, and collaborative memory.",
@@ -254,7 +254,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "murray17",
+        "owner": "liangxyz",
         "repo": "rovai-ai",
         "releaseType": "release"
       }

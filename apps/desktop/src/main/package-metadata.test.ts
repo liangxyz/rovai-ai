@@ -9,7 +9,7 @@ const packageMetadata = JSON.parse(readFileSync(
 describe('desktop package metadata', () => {
   it('keeps the visible brand separate from Electron helper bundle identity', () => {
     expect(packageMetadata.productName).toBe('Rovai AI')
-    expect(packageMetadata.version).toBe('0.4.12')
+    expect(packageMetadata.version).toBe('0.4.13')
     expect(packageMetadata.build.productName).toBe('Rovai AI')
     expect(packageMetadata.build.mac.executableName).toBeUndefined()
     expect(packageMetadata.build.win.executableName).toBe('Rovai-ai')
@@ -22,7 +22,7 @@ describe('desktop package metadata', () => {
   it('packages GitHub update metadata and a macOS zip beside the install DMG', () => {
     expect(packageMetadata.build.publish).toEqual([{
       provider: 'github',
-      owner: 'murray17',
+      owner: 'liangxyz',
       repo: 'rovai-ai',
       releaseType: 'release'
     }])
