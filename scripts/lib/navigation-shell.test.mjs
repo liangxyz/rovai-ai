@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -19,7 +19,9 @@ test('production navigation shell preserves drafts and supports complete collaps
   try {
     await build({configFile:false,root:source,base:'./',logLevel:'error',plugins:[react()],resolve:{alias:{'@contracts':join(root,'packages/contracts/src/index.ts')}},build:{outDir:join(fixture,'renderer'),minify:false}})
     const env={...process.env,ELECTRON_DISABLE_SECURITY_WARNINGS:'true'};delete env.ELECTRON_RUN_AS_NODE
-    process.stdout.write(`Isolated navigation userData: ${join(fixture,'user-data')} (no Core/Runtime)\n`)
+    const skillLibraryRoot=join(fixture,'user-data','managed-skill-library')
+    await mkdir(skillLibraryRoot,{recursive:true})
+    process.stdout.write(`Isolated navigation userData: ${join(fixture,'user-data')}; Skill Library: ${skillLibraryRoot} (no Core/Runtime)\n`)
     child=spawn(electron,[join(source,'main.cjs'),join(fixture,'renderer/index.html'),join(fixture,'user-data'),...(process.platform==='linux'?['--no-sandbox']:[])],{env,windowsHide:true,stdio:['ignore','pipe','pipe']})
     closed=once(child,'close');let output=''
     child.stdout.on('data',chunk=>{output+=chunk.toString()});child.stderr.on('data',chunk=>{output+=chunk.toString()})

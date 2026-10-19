@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, MemoryRecord, HearthReviewItem } from '@contracts'
 import { MemoryLibrary } from '../../../apps/desktop/src/renderer/src/MemoryLibrary'
@@ -6,6 +6,8 @@ import { MemoryChangeNotice } from '../../../apps/desktop/src/renderer/src/Memor
 import { collectMemoryChanges, memoryChangeText } from '../../../apps/desktop/src/renderer/src/memory-change-notice'
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { NavigationShell } from '../../../apps/desktop/src/renderer/src/NavigationShell'
+import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/BusinessApp'
+import { WindowsApplicationMenu } from '../../../apps/desktop/src/renderer/src/WindowsApplicationMenu'
 import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { MobileLayoutProvider, useMobileViewport } from '../../../apps/desktop/src/renderer/src/MobileLayout'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
@@ -57,23 +59,27 @@ const noop = () => {}
 const asyncNoop = async () => {}
 
 function Fixture() {
-  const mobile = useMobileViewport(true)
+  const [platform, setPlatform] = useState<'darwin' | 'win32'>('darwin')
+  const mobile = useMobileViewport(platform !== 'win32')
+  const platformClient = useMemo(() => ({ ...client, platform }), [platform])
   const [target, setTarget] = useState<MemoryNavigationTarget>({ kind: 'memory', memoryId: null })
   const [pending, setPending] = useState(1)
   const [notice, setNotice] = useState(true)
   const [refresh, setRefresh] = useState(0)
   const [theme, setTheme] = useState('day')
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
+  useEffect(() => { document.documentElement.dataset.rovaiPlatform = platform; document.documentElement.dataset.platform = platform }, [platform])
   useEffect(() => { (window as any).__memoryFixture = {
-    navigate: setTarget, setTheme, setNotice, setLanguage: changeInterfaceLanguage,
+    navigate: setTarget, setTheme, setNotice, setPlatform, setLanguage: changeInterfaceLanguage,
     failNext: () => { failNext = true },
     conflict: () => { const m = memories.find(m => m.id === target.memoryId)!; m.version++; m.currentRevisionId = `${m.id}-external`; m.currentBody = '来自另一操作的最新正文。' },
     stale: () => { reviews[0].stale = true; setRefresh(n => n + 1) },
     get: () => ({ target, memories, reviews, calls, longBody })
   } }, [target])
   const changes = collectMemoryChanges([], [{ eventType: 'memory.agent_revised', globalSequence: 1, entityType: 'memory', entityId: 'member-1', actorType: 'agent', actorId: 'member-a', payload: { scope: 'companion' } } as any])
-  return <ThreadClientProvider client={client}><MobileLayoutProvider value={mobile}><NavigationShell platform="darwin" browser={mobile} className="app-shell-memory">
+  return <ThreadClientProvider client={platformClient}><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile} className="app-shell-memory">
     {!mobile && <ThreadNavigation view="memory" state="ready" navigation={null} activeThreadId={null} pendingMemoryCount={pending} onNewConversation={noop} onMembers={noop} onMemory={noop} onSettings={noop} onOpenProject={noop} onThread={noop} onRemoveProject={asyncNoop} onRename={asyncNoop} onDelete={asyncNoop} onError={noop} />}
+    {!mobile && <WindowDragStrip page="memory" />}
     <main className="content memory-content"><MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} /></main>
   </NavigationShell></MobileLayoutProvider></ThreadClientProvider>
 }

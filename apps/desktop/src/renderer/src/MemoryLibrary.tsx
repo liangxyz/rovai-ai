@@ -3,7 +3,7 @@ import { MobileBack, useMobileLayout } from './MobileLayout'
 import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import type { MemoryNavigationTarget } from './desktop-navigation'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
@@ -1226,17 +1226,17 @@ function MemoryEditorDialog({
           <form className="app-dialog-form" onSubmit={onSubmit}>
             <AppDialogBody>
               {identityLocked ? <div className="memory-editor-context"><AppDialogGlyph name="brain" /><span>{scopeLabel(draft.scope)}</span><span>·</span><span>{editor?.kind === 'revise' ? memoryPeopleLabel(editor.memory, agents) : uiAttribute('所有队员')}</span><span>{kindLabel(draft.kind)}</span></div> : <div className="memory-editor-grid">
-                <label className="field-label"><UiText zh={"范围"} /><select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind, kind: event.target.value === 'relationship' && draft.kind === 'preference' ? 'agreement' : draft.kind })}><option value="hearth"><UiText zh={"共同记忆"} /></option><option value="companion"><UiText zh={"队员记忆"} /></option><option value="relationship"><UiText zh={"队员间记忆"} /></option></select></label>
-                <label className="field-label"><UiText zh={"类型"} /><select value={draft.kind} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}><UiText zh={"偏好"} /></option><option value="agreement"><UiText zh={"约定"} /></option><option value="lesson"><UiText zh={"经验"} /></option></select></label>
+                <MemoryChoiceField label={uiAttribute('范围')} value={draft.scope} disabled={busy} options={(['hearth', 'companion', 'relationship'] as const).map((value) => ({ value, label: scopeLabel(value) }))} onChange={(scope) => onDraft({ ...draft, scope, kind: scope === 'relationship' && draft.kind === 'preference' ? 'agreement' : draft.kind })} />
+                <MemoryChoiceField label={uiAttribute('类型')} value={draft.kind} disabled={busy} options={(['preference', 'agreement', 'lesson'] as const).filter((value) => draft.scope !== 'relationship' || value !== 'preference').map((value) => ({ value, label: kindLabel(value) }))} onChange={(kind) => onDraft({ ...draft, kind })} />
                 {draft.scope === 'companion' && <AgentSelect label={uiAttribute("队员")} value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
                 {draft.scope === 'relationship' && <>
                   <AgentSelect label={uiAttribute("队员 A")} value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />
                   <AgentSelect label={uiAttribute("队员 B")} value={draft.secondAgentId} agents={agents.filter((agent) => agent.agentId !== draft.firstAgentId)} disabled={identityLocked || busy} onChange={(secondAgentId) => onDraft({ ...draft, secondAgentId })} />
-                  <label className="field-label"><UiText zh={"方向"} /><select value={draft.direction} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, direction: event.target.value as MemoryDirection })}><option value="mutual"><UiText zh={"双方共同"} /></option><option value="directed"><UiText zh={"单向"} /></option></select></label>
+                  <MemoryChoiceField label={uiAttribute('方向')} value={draft.direction} disabled={busy} options={[{ value: 'mutual', label: uiAttribute('双方共同') }, { value: 'directed', label: uiAttribute('单向') }]} onChange={(direction) => onDraft({ ...draft, direction })} />
                   {draft.direction === 'directed' && <AgentSelect label={uiAttribute("责任方")} value={draft.directedActorAgentId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.agentId))} disabled={identityLocked || busy} onChange={(directedActorAgentId) => onDraft({ ...draft, directedActorAgentId })} />}
                 </>}
               </div>}
-              <label className="field-label memory-body-field"><span><UiText zh="正文" />{bodyBytes > 1800 && <small>{bodyBytes}/2048 bytes</small>}</span><textarea aria-label={uiAttribute('记忆正文')} aria-invalid={bodyBytes > 2048 || undefined} autoFocus data-dialog-autofocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} />{bodyBytes > 2048 && <small className="memory-field-error" role="alert"><UiText zh="正文过长，请精简到 2,048 字节以内。" /></small>}</label>
+              <label className="field-label memory-body-field" htmlFor="memory-body-input"><span><UiText zh="正文" />{bodyBytes > 1800 && <small>{bodyBytes}/2048 bytes</small>}</span><textarea id="memory-body-input" aria-label={uiAttribute('记忆正文')} aria-invalid={bodyBytes > 2048 || undefined} autoFocus data-dialog-autofocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} />{bodyBytes > 2048 && <small className="memory-field-error" role="alert"><UiText zh="正文过长，请精简到 2,048 字节以内。" /></small>}</label>
               <div className="field-label memory-body-field"><label htmlFor="memory-key-input"><UiText zh="检索词" /></label><div className="memory-key-editor">
                 {committedKeys.map((key, index) => <span key={index}>{key}<button type="button" disabled={busy} aria-label={uiAttribute('移除检索词 {0}', key)} onClick={() => onDraft({ ...draft, retrievalKeys: committedKeys.filter((_, keyIndex) => keyIndex !== index).join(', ') })}><DialogControlIcon name="close" /></button></span>)}
                 <input id="memory-key-input" value={draft.keyInput} disabled={busy} placeholder={committedKeys.length ? '' : uiAttribute('输入后按回车添加')} aria-invalid={Boolean(keysError) || undefined} aria-describedby={keysError ? 'memory-keys-error' : undefined} onChange={(event) => onDraft({ ...draft, keyInput: event.target.value })} onKeyDown={(event) => { if (!event.nativeEvent.isComposing && ['Enter', ',', '，'].includes(event.key)) { event.preventDefault(); commitKeys() } }} onBlur={() => { if (draft.keyInput.trim()) commitKeys() }} />
@@ -1264,7 +1264,43 @@ function editorKey(editor: NonNullable<Editor>): string {
 }
 
 function AgentSelect({ label, value, agents, disabled, onChange }: { label: string; value: string; agents: AgentProfile[]; disabled: boolean; onChange(value: string): void }): React.JSX.Element {
-  return <label className="field-label">{label}<select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value=""><UiText zh={"请选择"} /></option>{agents.map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.displayName}</option>)}</select></label>
+  return <MemoryChoiceField label={label} value={value} disabled={disabled} onChange={onChange} options={[{ value: '', label: uiAttribute('请选择') }, ...agents.map((agent) => ({ value: agent.agentId, label: agent.displayName }))]} />
+}
+
+function MemoryChoiceField<Value extends string>({ label, value, options, disabled, onChange }: {
+  label: string
+  value: Value
+  options: ReadonlyArray<{ value: Value; label: string }>
+  disabled: boolean
+  onChange(value: Value): void
+}): React.JSX.Element {
+  const id = useId()
+  const labelId = `${id}-label`
+  const valueId = `${id}-value`
+  return (
+    <div className="memory-choice-field">
+      <label id={labelId} htmlFor={id}>{label}</label>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger id={id} className="memory-choice-trigger" type="button" aria-labelledby={`${labelId} ${valueId}`} disabled={disabled}>
+          <span id={valueId}>{options.find((option) => option.value === value)?.label ?? uiAttribute('请选择')}</span>
+          <DialogControlIcon name="chevron" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content className="memory-choice-menu" aria-labelledby={labelId} align="start" sideOffset={6} collisionPadding={12}>
+            <DropdownMenu.RadioGroup value={value} onValueChange={(nextValue) => {
+              const option = options.find((candidate) => candidate.value === nextValue)
+              if (option) onChange(option.value)
+            }}>
+              {options.map((option) => <DropdownMenu.RadioItem className="memory-choice-option" key={option.value} value={option.value}>
+                <span>{option.label}</span>
+                <DropdownMenu.ItemIndicator><DialogControlIcon name="check" /></DropdownMenu.ItemIndicator>
+              </DropdownMenu.RadioItem>)}
+            </DropdownMenu.RadioGroup>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </div>
+  )
 }
 
 function EmptyMemory({ text }: { text: string }): React.JSX.Element {

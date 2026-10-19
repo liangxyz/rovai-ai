@@ -10,7 +10,8 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use rovai_core::{
-    builtin_tool_transport::LocalIpcEndpoint, platform::local_ipc::LocalIpcClientStream,
+    agent_profile::AdapterKind, builtin_tool_transport::LocalIpcEndpoint,
+    platform::local_ipc::LocalIpcClientStream,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -23,23 +24,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const SETTLEMENT_GRACE: Duration = Duration::from_secs(5);
 const CONTEXT_ENV: &str = "ROVAI_APP_AUTOMATION_CONTEXT";
-const ADAPTER_KINDS: [&str; 15] = [
-    "codex-cli",
-    "opencode-cli",
-    "copilot-cli",
-    "claude-code-cli",
-    "kiro-cli",
-    "qoder-cli",
-    "codebuddy-cli",
-    "qwen-code",
-    "trae-cn-cli",
-    "cursor-agent",
-    "kimi-code-cli",
-    "grok-build",
-    "deepseek-harness",
-    "zcode-app",
-    "antigravity-app",
-];
 
 #[derive(Debug)]
 struct CliError {
@@ -1658,7 +1642,12 @@ fn parse_nonnegative_i64(value: &str, label: &str) -> Result<i64> {
 
 fn adapter_kind<'a>(flags: &'a Flags, key: &str) -> Result<&'a str> {
     let value = flags.required(key).map_err(anyhow::Error::new)?;
-    if !ADAPTER_KINDS.contains(&value) {
+    // Reuse Core identities so a newly integrated Runtime cannot be omitted here.
+    // Deferred products remain unavailable through ordinary user automation.
+    if !value
+        .parse::<AdapterKind>()
+        .is_ok_and(|kind| !matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli))
+    {
         return Err(CliError::new(
             "automation_invalid_input",
             format!("--{key} is not a supported Runtime"),
@@ -1943,6 +1932,7 @@ mod tests {
         launch_result_exit_code, member_create_params, member_runtime_set_params,
         parse_duration_seconds, terminal_exit_code, terminal_status, trace_export_params,
     };
+    use rovai_core::agent_profile::AdapterKind;
     use serde_json::json;
 
     #[cfg(windows)]
@@ -2069,9 +2059,13 @@ mod tests {
 
     #[test]
     fn member_runtime_configuration_admits_native_runtime_defaults() {
-        for (adapter, permission_mode) in
-            [("grok-build", "bypassPermissions"), ("zcode-app", "yolo")]
-        {
+        for kind in AdapterKind::ALL {
+            let adapter = kind.as_str();
+            let permission_mode = match kind {
+                AdapterKind::GrokBuild => "bypassPermissions",
+                AdapterKind::ZcodeApp => "yolo",
+                _ => "default",
+            };
             let flags = Flags::parse(&[
                 "--agent-id".into(),
                 "agent_13".into(),
@@ -2086,7 +2080,17 @@ mod tests {
                 json!({ "permission_mode": permission_mode }).to_string(),
             ])
             .unwrap();
-            let params = member_runtime_set_params(&flags).unwrap();
+            let result = member_runtime_set_params(&flags);
+            if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli) {
+                let error = result.unwrap_err();
+                assert_eq!(
+                    error.downcast_ref::<super::CliError>().unwrap().code,
+                    "automation_invalid_input",
+                    "deferred Runtime {adapter} remains unavailable"
+                );
+                continue;
+            }
+            let params = result.unwrap_or_else(|error| panic!("{adapter}: {error}"));
 
             assert_eq!(params["adapterKind"], adapter);
             assert_eq!(params["model"]["mode"], "runtime_default");
@@ -2100,6 +2104,14 @@ mod tests {
 
     #[test]
     fn member_runtime_configuration_rejects_ambiguous_or_non_object_inputs() {
+        for adapter in ["mcode", "unknown-runtime", "CODEX-CLI"] {
+            let flags = Flags::parse(&["--adapter".into(), adapter.into()]).unwrap();
+            let error = super::adapter_kind(&flags, "adapter").unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<super::CliError>().unwrap().code,
+                "automation_invalid_input"
+            );
+        }
         let ambiguous = Flags::parse(&[
             "--agent-id".into(),
             "agent_12".into(),

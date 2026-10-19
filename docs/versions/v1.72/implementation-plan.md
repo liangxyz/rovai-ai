@@ -8,6 +8,27 @@ last_updated: 2026-10-19
 
 # v1.72 实施与验收
 
+## 主动停止后的会话蓝点（2026-10-19）
+
+**已撤回。** 原功能通过 [PR #821](https://github.com/murray17/rovai-ai/pull/821) 合入并安装后，
+User 反馈问题，要求先撤回，并确认将回退 PR 合入 main 后安装到本机 App。
+
+回退分支 `rovai/revert-manual-stop-unread`，基线 `7dbc9ed24170dac6032582285995da7af36702cd`，
+使用现有 checkout。移除 `BusinessApp` 中停止成功写入 `manualUnread` 的逻辑及丢失回执的提醒核对集合；
+恢复停止动作与回复未读的原有边界。现有停止、终态核对、回复未读和显式标记未读不变；
+不批量清理已有本机提醒，继续由显式打开或标记已读清除。
+
+既有生产 App Electron 夹具改为验证成功停止、切换会话、聚焦／自动刷新、丢失回执和迟到终态均不新增蓝点，
+日夜截图覆盖停止后的原会话。保留 #821 中与该功能独立的 Runtime 状态查询、同 tick 合并、schema 9 和 Task 顶栏夹具修正。
+
+保持 v1.72；UI 和 Architecture 已同步撤回后的规则，Navigation Read v1 的本机偏好字段与 Core 水位不变。
+没有新增 Rust 测试、存储迁移、模型上下文、Runtime、Contract 或 Version Decision 变更。
+
+回退验证：`pnpm typecheck`、相关 Vitest 188 项、`pnpm test:startup-presentation` 和 `pnpm docs:test` 10 项通过；
+日夜截图确认停止后的会话没有新增蓝点。生产 `BusinessApp.tsx` 与 #821 合入前的 `f6f359f2c` 完全一致。
+文档在只含受版本管理文件的临时 clone 中直接运行 package scripts 对应的版本检查、决定治理和
+`--require-base` 门禁，均通过；base 为上述回退基线，未扫描本机忽略的旧原型或增加门禁例外。
+
 ## 记忆工作区 R4（2026-10-19）
 
 User 批准独立 worktree 实施、PR 合入 main，并从最新 main 构建安装本机 App。
@@ -40,6 +61,8 @@ User 批准独立 worktree 实施、PR 合入 main，并从最新 main 构建安
 初次打包在前置构建完成后遇到 GitHub DNS 失败；按 packaging 文档校验 Electron 缓存 SHA-256 后，
 继续相同 daily ad-hoc 打包参数并通过 App/Core/CLI/Host 架构与签名门。日常安装使用非终止交接，
 最终 main 提交与安装位置记录在 Thread 交付中。
+最新 main 安装复验还发现页头几何检查偶尔抢在启动画布退出动画之前；验收入口改为等待画布移除及
+Memory 读取就绪，保留原始命中检测和几何断言，不修改生产交互或放宽结果。
 
 ## Antigravity 长任务与工具收尾（2026-10-19）
 

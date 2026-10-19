@@ -1,5 +1,5 @@
 ---
-version: 4
+version: 5
 slug: "memory-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemoryLibrary.tsx"
 related_targets:
@@ -41,6 +41,8 @@ survives a late lookup. View selects the actual changed memory. Pending review r
 header/rail entry; after resolution the header exposes Review history.
 
 Candidate content is not active memory. The dedicated drawer shows content, source, requested action and target/base.
+On Windows, the portal drawer starts below the native WCO title-bar height and fits the remaining viewport; its close
+control must clear native caption buttons as well as the page's drag strip.
 Fresh items support accept, edit then accept, or reject. Stale revise items support reject only and explain the changed
 target. Dismissing changes no domain state. Accepted, rejected and invalidated items are body-free history; never
 reconstruct cleared content or describe invalidation as a user rejection.
@@ -49,6 +51,9 @@ reconstruct cleared content or describe invalidation as a user rejection.
 
 Creation chooses scope/type/participants; revision shows immutable identity as quiet context. Body and key chips are
 editable, with byte limits and validation retained. Show counters near their limit and errors where the edit happens.
+Use aligned, regular-weight 12px labels and a shared platform font across choices, body and keys. Creation choices use
+equal-height neutral menu triggers, a checked selected option and keyboard navigation. Keep participant and direction
+constraints intact, including the responsible member for one-way relationships. Menus remain inside the viewport.
 Cancel/reopen retains an unsubmitted draft for that identity; success clears only that draft. Commands keep expected
 versions and exact base Revision. On conflict, retain draft, refresh authority and require explicit retry; never silently
 merge. Review scheduling retains its authority-unknown and applied-but-refresh-failed recovery. Forget requires explicit

@@ -1231,6 +1231,13 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .memory-review-drawer h2 { margin: 0; font: 680 18px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .memory-review-drawer [data-radix-dialog-description] { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
 .dialog-overlay.memory-drawer-overlay { z-index: 65; }
+/* A modal must also exclude Electron's native drag strip underneath its close control. */
+.memory-review-drawer, .dialog-overlay.memory-drawer-overlay { -webkit-app-region: no-drag; }
+/* Portals sit outside #root's Windows title-bar row; reserve the same native inset. */
+html[data-rovai-platform="win32"] .memory-review-drawer {
+  top: env(titlebar-area-height, 32px);
+  height: calc(100vh - env(titlebar-area-height, 32px));
+}
 .memory-review-drawer-list { min-height: 0; flex: 1 1 auto; overflow-y: auto; }
 .memory-review-section { display: grid; }
 .memory-review-section + .memory-review-section { border-top: 2px solid var(--line-strong); }

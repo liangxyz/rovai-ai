@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-10-15
+last_updated: 2026-10-19
 ---
 
 # App Shell 与统一侧栏
@@ -59,7 +59,8 @@ Camp（包括快速对话）按最近一条已发布用户消息排序，桌面�
 Camp 行显示稳定标题和必要状态。右键、三点按钮、Shift+F10 / ContextMenu 键及触屏长按打开同一份菜单，
 提供置顶/取消置顶、标记未读/已读、重命名、复制会话 ID 和删除；复制只写稳定 Camp ID 原文。
 右键不打开 Camp 或折叠 Project。鼠标菜单靠点击位置，三点和键盘菜单靠行末入口，均限制在窗口内；
-Escape、点击外部、滚动或窗口失焦关闭。Camp 顶栏不得重复这些操作。
+Escape、点击外部、滚动或窗口失焦关闭。Escape 关闭时，在菜单释放焦点约束后恢复原 Project/Camp 行的 DOM focus，
+以便继续键盘操作；点击外部、选择命令、滚动或失焦关闭不执行该恢复。Camp 顶栏不得重复这些操作。
 Project 菜单提供 New Chat、置顶、重命名、Reveal in Finder（Windows 使用文件管理器文案）、复制项目路径、移除项目。
 Finder 定位真实目录，由 Desktop Main 校验存在后调用原生系统；目录失效提示重新选择。远程 Web 不提供原生定位项。
 Desktop 与宽屏 WebUI 的置顶 Camp 在标题左侧显示 17px 对话图标；置顶项目标题、置顶项目内 Camp、
@@ -76,6 +77,9 @@ Desktop 与宽屏 WebUI 的置顶 Camp 在标题左侧显示 17px 对话图标�
 显式成功打开完整会话或选择“标记已读”才清除提醒；打开失败或只显示缓存预览必须保留。
 标记已读只覆盖操作时已知的新回复，之后到达的回复仍产生蓝点；不得倒退或伪造 Core 的真实查看水位。
 提醒随导航偏好持久化，Desktop 同步到其他窗口，Web 限定于当前主机与浏览器展示偏好。
+
+主动停止 Run 本身不新增侧栏蓝点。停止回执、丢失回执后的终态核对和会话切换均不写入未读提醒；
+已有回复未读和手动标记未读继续按上述规则显示与清除。
 
 自动生成的 Camp 标题不把开头连续的真实队员 Mention / 所有队员 Mention 当作标题内容；只保留
 首段正文开始后的文字，正文中后部的 Mention 和手写 `@文字` 继续作为普通标题文字。Camp 行不把
@@ -341,7 +345,7 @@ App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，�
 
 ## Jump search and overlay closure
 
-⌘K / Ctrl+K opens the title/project search or exact lookup by a complete Camp ID, with a small “跳转到对话” title, neutral selected result and “↑ ↓ 选择　↵ 打开　Esc 关闭” footer. Search input has no focus underline or frame; arrows and Enter retain their behavior and respect IME composition. Closing sidebar menus, rename/delete/removal dialogs or settings does not force focus back to the entry button, including after pin mutations. Shared DOM focus for keyboard input and menu navigation remains available.
+⌘K / Ctrl+K opens the title/project search or exact lookup by a complete Camp ID, with a small “跳转到对话” title, neutral selected result and “↑ ↓ 选择　↵ 打开　Esc 关闭” footer. Search input has no focus underline or frame; arrows and Enter retain their behavior and respect IME composition. Closing sidebar menus, rename/delete/removal dialogs or settings does not force focus back to the entry button, including after pin mutations; Escape in Project/Camp menus follows the return-to-row rule above. Shared DOM focus for keyboard input and menu navigation remains available.
 
 ## Web 导航适配
 

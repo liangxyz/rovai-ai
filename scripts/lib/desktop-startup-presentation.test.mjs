@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -30,7 +30,9 @@ test('the production App presents the full-window brand loader without weakening
     })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
-    process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; no Core/SQLite/Skill Library/Runtime\n`)
+    const skillLibraryRoot = join(fixture, 'user-data', 'managed-skill-library')
+    await mkdir(skillLibraryRoot, { recursive: true })
+    process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; Skill Library: ${skillLibraryRoot}; no Core/SQLite/Runtime\n`)
     child = spawn(electron, [
       join(fixtureSource, 'main.cjs'),
       join(fixture, 'renderer/index.html'),
@@ -55,6 +57,7 @@ test('the production App presents the full-window brand loader without weakening
     if (process.env.ROVAI_PROJECT_DIRECTORIES_ONLY === '1') { assert.equal(report.cases.length, 4); return }
     assert.ok(report.cases.length >= 8)
     assert.ok(report.cases.includes('Ordinary Camp switching reads only the target row without unrelated queries'))
+    assert.ok(report.cases.includes('User stops do not create a Thread unread reminder, including lost receipts and navigation races'))
     assert.ok(report.cases.includes('Accepted deletion discards in-flight Web refresh failures and queued reads'))
     assert.ok(report.cases.includes('Web refresh confirms external deletion before removing the current Thread'))
     assert.ok(report.cases.includes('Web refresh retains real errors when the Thread still exists'))
@@ -63,7 +66,7 @@ test('the production App presents the full-window brand loader without weakening
     assert.ok(report.cases.includes('One-click creation success and failure respect newer navigation intent'))
     assert.ok(report.cases.includes('Member history replay selects the requested editor while retaining new-member drafts'))
     assert.ok(report.cases.includes('Runtime availability refreshes health and installations without reloading members'))
-    assert.ok(report.cases.includes('Runtime discovery retains full refresh across mixed debounce events'))
+    assert.ok(report.cases.includes('Runtime discovery coalesces same-tick events without reloading members'))
     assert.ok(report.cases.includes('New Conversation preserves edited drafts across candidate refresh and creation failure'))
     assert.ok(report.cases.includes('New Conversation gates selection, Lead and submit by saved usable runtimes and keeps help independent'))
     assert.ok(report.cases.includes('New Conversation handles an all-unconfigured roster'))

@@ -1220,6 +1220,7 @@ function SidebarActionMenu({
   pressMenu?: ReturnType<typeof useNavigationPressMenu>
   mobile?: boolean
 }): JSX.Element {
+  const restoreRowFocusOnClose = useRef(false)
   const trigger = (
     <button
       className={`sidebar-menu-trigger ${triggerClassName}${mobile ? ' mobile-context-trigger' : ''}`}
@@ -1252,8 +1253,14 @@ function SidebarActionMenu({
           sideOffset={pressMenu?.contextPoint ? 0 : 4}
           collisionPadding={8}
           loop
-          onEscapeKeyDown={() => pressMenu?.restoreRowFocus()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onEscapeKeyDown={() => { restoreRowFocusOnClose.current = true }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const restoreRowFocus = restoreRowFocusOnClose.current
+            restoreRowFocusOnClose.current = false
+            // The modal focus trap must be released before returning to the row.
+            if (restoreRowFocus) pressMenu?.restoreRowFocus()
+          }}
         >
           {items.flatMap((item) => [
             item.separatorBefore

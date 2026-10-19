@@ -13,7 +13,7 @@ app.setPath('sessionData', join(userData, 'session'))
 // Runtime, network content, or daily App is started or accessed by this fixture.
 app.whenReady().then(async () => {
   const window = new BrowserWindow({
-    show: process.platform === 'linux',
+    show: process.platform === 'linux' || process.platform === 'win32',
     width: 1040,
     height: 700,
     useContentSize: true,
@@ -36,6 +36,8 @@ app.whenReady().then(async () => {
       assert.deepEqual(alignment, { control: 20, title: 19, actions: 19 }, 'Preserve the approved 1px offset from the original Camp header')
       writeFileSync(join(dirname(userData), `navigation-camp-${theme}-${collapsed ? 'collapsed' : 'expanded'}.png`), (await window.webContents.capturePage()).toPNG())
     }
+    await window.webContents.executeJavaScript(`window.startupTest.captureStoppedThread(${JSON.stringify(theme)})`, true)
+    writeFileSync(join(dirname(userData), `navigation-stopped-${theme}.png`), (await window.webContents.capturePage()).toPNG())
   }
   for (const theme of ['day', 'night']) {
     for (const state of ['loading', 'blocked', 'local-error']) {
