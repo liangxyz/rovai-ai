@@ -138,6 +138,13 @@ App，以受控本机 API 和时钟验证首帧画布、就绪交接与 authorit
 设置 `ROVAI_PRESENCE_REFERENCE_HTML` 可对照 User 确认的 v10 HTML 停止区分隔几何及排版；停止默认中性色、悬浮红色按后续 v8 修正单独验证。
 非默认 Chrome 路径使用 `ROVAI_TEST_CHROME`。夹具只持久化模拟服务端数据，不启动 Core 或模型；真实 SQLite 受理、重开及未领取窗口由既有 `user_continuation_preserves_source_and_claims_independent_fifo_batches` owner 覆盖。
 
+记忆工作区运行 `pnpm test:memory-workspace-ui`：隔离 Chrome 挂载生产 MemoryLibrary、通知和导航组件，
+验证全部范围、精简布局、版本展开、通知查看/关闭、编辑草稿、失败/冲突重试、变更操作及双主题桌面/手机尺寸。
+`ROVAI_MEMORY_UI_OUTPUT` 可指定截图和报告目录；`ROVAI_TEST_CHROME` 可指定 Chrome。该夹具只替换 transport，
+不启动 Core 或模型。`pnpm test:memory-web-ui` 使用独立 userData、Skill Library、MCP 与生产 Web/Host，
+验证手机记忆新增、修订、返回及重入；需先构建 Web/Host，可用 `ROVAI_HOST_BIN`、`ROVAI_WEB_UI` 指定产物，
+`ROVAI_MEMORY_WEB_OUTPUT` 保留截图。真实持久化、重开及复核设置仍运行隔离打包 App 的 `pnpm accept:memory-ui`。
+
 ## 按任务阅读
 
 | 任务 | 文档 |

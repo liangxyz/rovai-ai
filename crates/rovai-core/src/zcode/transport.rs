@@ -35,7 +35,7 @@ const FRAME_LIMIT: usize = 4 * 1024 * 1024;
 pub async fn probe(
     executable: &std::path::Path,
     include_session: bool,
-) -> Result<(Value, Option<Value>, bool)> {
+) -> Result<(Value, Option<Value>)> {
     use crate::managed_process::{
         ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
         ManagedWindowsArgvDialect,
@@ -74,12 +74,13 @@ pub async fn probe(
     let drain = tokio::spawn(async move {
         tokio::io::copy(&mut BufReader::new(stderr), &mut tokio::io::sink()).await
     });
-    let stream = start(
+    let stream = start_bridge(
         child.take_stdin().context("ZCode probe stdin missing")?,
         child.take_stdout().context("ZCode probe stdout missing")?,
         config,
         root.0.clone(),
         "plan".to_string(),
+        true,
     );
     let (read, write) = tokio::io::split(stream);
     let writer: Mutex<Writer> = Mutex::new(Box::new(write));
@@ -113,7 +114,7 @@ pub async fn probe(
         } else {
             None
         };
-        Ok((initialize["result"].clone(), session, false))
+        Ok((initialize["result"].clone(), session))
     })
     .await
     .context("ZCode capability probe timed out")
@@ -205,6 +206,7 @@ struct Bridge {
     config: NativeConfig,
     cwd: PathBuf,
     mode: String,
+    probe: bool,
     acceptance_compacted: AtomicBool,
 }
 
@@ -216,6 +218,21 @@ pub fn start<R, W>(
     config: NativeConfig,
     cwd: PathBuf,
     mode: String,
+) -> DuplexStream
+where
+    R: AsyncRead + Send + Unpin + 'static,
+    W: AsyncWrite + Send + Unpin + 'static,
+{
+    start_bridge(stdin, stdout, config, cwd, mode, false)
+}
+
+fn start_bridge<R, W>(
+    stdin: W,
+    stdout: R,
+    config: NativeConfig,
+    cwd: PathBuf,
+    mode: String,
+    probe: bool,
 ) -> DuplexStream
 where
     R: AsyncRead + Send + Unpin + 'static,
@@ -235,6 +252,7 @@ where
         config,
         cwd,
         mode,
+        probe,
         finished,
         background_settle,
         context_refresh: Notify::new(),
@@ -664,6 +682,11 @@ impl Bridge {
                     .context("ZCode native Session ID missing")?;
                 if method == "session/resume" && params["sessionId"].as_str() != Some(session_id) {
                     bail!("ZCode exact resume mismatch");
+                }
+                // Only the explicit no-input probe consumes the create snapshot alone.
+                // Formal new/resume sessions still subscribe and apply their mode.
+                if self.probe {
+                    return self.config.session_catalog(session_id, &snapshot);
                 }
                 let subscription = self.call("session/subscribe", json!({"sessionId":session_id,"deliveryKind":"desktop-continuous","includeSnapshot":false})).await?;
                 let model_reasoning_defaults = snapshot
@@ -1764,100 +1787,137 @@ mod tests {
     // separately verifies its model catalog and process startup.
     #[tokio::test]
     async fn provider_registry_protocol_uses_native_model_selection() {
-        let config = NativeConfig {
-            value: json!({}),
-            digest: "modern-fixture".into(),
-            app_config: false,
-            protocol: NativeProtocol::ProviderRegistry,
-            default_selection: Some(json!({"providerId":"fixture","modelId":"model",
+        for probe in [false, true] {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let observed = calls.clone();
+            let config = NativeConfig {
+                value: json!({}),
+                digest: "modern-fixture".into(),
+                app_config: false,
+                protocol: NativeProtocol::ProviderRegistry,
+                default_selection: Some(json!({"providerId":"fixture","modelId":"model",
                 "options":{"reasoningLevel":"disabled"}})),
-        };
-        let (native, adapter) = tokio::io::duplex(64 * 1024);
-        let (native_read, native_write) = tokio::io::split(native);
-        let (adapter_read, adapter_write) = tokio::io::split(adapter);
-        let peer = tokio::spawn(async move {
-            let mut reader = BufReader::new(native_read);
-            let writer: Mutex<Writer> = Mutex::new(Box::new(native_write));
-            let mut frame = Vec::new();
-            let model = json!({"providerId":"fixture","modelId":"model"});
-            let snapshot = json!({"session":{"sessionId":"s1"},"settings":{"model":{
+            };
+            let (native, adapter) = tokio::io::duplex(64 * 1024);
+            let (native_read, native_write) = tokio::io::split(native);
+            let (adapter_read, adapter_write) = tokio::io::split(adapter);
+            let peer = tokio::spawn(async move {
+                let mut reader = BufReader::new(native_read);
+                let writer: Mutex<Writer> = Mutex::new(Box::new(native_write));
+                let mut frame = Vec::new();
+                let model = json!({"providerId":"fixture","modelId":"model"});
+                let snapshot = json!({"session":{"sessionId":"s1"},"settings":{"model":{
                 "current":model,"available":[{"ref":model,"label":"Fixture model",
                     "reasoning":{"defaultLevel":"enabled","levels":[{"value":"enabled","label":"Enabled"}]}}]}}});
-            while let Some(request) = read_frame(&mut reader, &mut frame).await.unwrap() {
-                let params = &request["params"];
-                let result = match request["method"].as_str().unwrap() {
-                    "workspace/readPresentation" => {
-                        json!({"workspace":params["workspace"],"mode":"build","slashCommands":[]})
-                    }
-                    "session/create" => {
-                        assert!(params.get("runtimeModel").is_none());
-                        assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
-                        assert_eq!(params["thoughtLevel"], "disabled");
-                        snapshot.clone()
-                    }
-                    "session/resume" => {
-                        assert!(params.get("runtimeModel").is_none());
-                        assert_eq!(params["sessionId"], "s1");
-                        snapshot.clone()
-                    }
-                    "session/setModel" => {
-                        assert!(params.get("runtimeModel").is_none());
-                        assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
-                        json!({"settings":{"model":{"current":model}}})
-                    }
-                    "session/subscribe" => json!({"eventSeq":0}),
-                    "session/setMode" => json!({}),
-                    method => panic!("unexpected modern native method {method}"),
-                };
-                write_frame(&writer, &json!({"id":request["id"],"result":result}))
+                while let Some(request) = read_frame(&mut reader, &mut frame).await.unwrap() {
+                    observed
+                        .lock()
+                        .await
+                        .push(request["method"].as_str().unwrap().to_string());
+                    let params = &request["params"];
+                    let result = match request["method"].as_str().unwrap() {
+                        "workspace/readPresentation" => {
+                            json!({"workspace":params["workspace"],"mode":"build","slashCommands":[]})
+                        }
+                        "session/create" => {
+                            assert_eq!(params["mode"], "build");
+                            assert!(params.get("runtimeModel").is_none());
+                            assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
+                            assert_eq!(params["thoughtLevel"], "disabled");
+                            snapshot.clone()
+                        }
+                        "session/resume" => {
+                            assert!(params.get("runtimeModel").is_none());
+                            assert_eq!(params["sessionId"], "s1");
+                            snapshot.clone()
+                        }
+                        "session/setModel" => {
+                            assert!(params.get("runtimeModel").is_none());
+                            assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
+                            json!({"settings":{"model":{"current":model}}})
+                        }
+                        "session/subscribe" => json!({"eventSeq":0}),
+                        "session/setMode" => json!({}),
+                        method => panic!("unexpected modern native method {method}"),
+                    };
+                    write_frame(&writer, &json!({"id":request["id"],"result":result}))
+                        .await
+                        .unwrap();
+                }
+            });
+            let stream = start_bridge(
+                adapter_write,
+                adapter_read,
+                config,
+                PathBuf::from("/fixture"),
+                "build".into(),
+                probe,
+            );
+            let (read, write) = tokio::io::split(stream);
+            let mut reader = BufReader::new(read);
+            let writer: Mutex<Writer> = Mutex::new(Box::new(write));
+            let mut frame = Vec::new();
+            for (id, method, params) in [
+                (1, "initialize", json!({})),
+                (2, "session/new", json!({"cwd":"/fixture"})),
+                (
+                    3,
+                    "session/set_model",
+                    json!({"sessionId":"s1","modelId":"fixture/model"}),
+                ),
+                (
+                    4,
+                    "session/resume",
+                    json!({"cwd":"/fixture","sessionId":"s1"}),
+                ),
+            ] {
+                if probe && id > 2 {
+                    continue;
+                }
+                write_frame(&writer, &json!({"id":id,"method":method,"params":params}))
                     .await
                     .unwrap();
-            }
-        });
-        let stream = start(
-            adapter_write,
-            adapter_read,
-            config,
-            PathBuf::from("/fixture"),
-            "build".into(),
-        );
-        let (read, write) = tokio::io::split(stream);
-        let mut reader = BufReader::new(read);
-        let writer: Mutex<Writer> = Mutex::new(Box::new(write));
-        let mut frame = Vec::new();
-        for (id, method, params) in [
-            (1, "initialize", json!({})),
-            (2, "session/new", json!({"cwd":"/fixture"})),
-            (
-                3,
-                "session/set_model",
-                json!({"sessionId":"s1","modelId":"fixture/model"}),
-            ),
-            (
-                4,
-                "session/resume",
-                json!({"cwd":"/fixture","sessionId":"s1"}),
-            ),
-        ] {
-            write_frame(&writer, &json!({"id":id,"method":method,"params":params}))
+                let response = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    read_frame(&mut reader, &mut frame),
+                )
                 .await
+                .unwrap()
+                .unwrap()
                 .unwrap();
-            let response =
-                tokio::time::timeout(Duration::from_secs(5), read_frame(&mut reader, &mut frame))
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap();
-            assert_eq!(response["id"], id);
-            assert!(response.get("error").is_none(), "{response}");
-            if id == 2 || id == 4 {
-                assert_eq!(
-                    response["result"]["models"]["currentModelId"],
-                    "fixture/model"
-                );
+                assert_eq!(response["id"], id);
+                assert!(response.get("error").is_none(), "{response}");
+                if id == 2 || id == 4 {
+                    assert_eq!(
+                        response["result"]["models"]["currentModelId"],
+                        "fixture/model"
+                    );
+                }
             }
+            let calls = calls.lock().await;
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|method| method.as_str() == "session/subscribe")
+                    .count(),
+                if probe { 0 } else { 2 }
+            );
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|method| method.as_str() == "session/setMode")
+                    .count(),
+                if probe { 0 } else { 2 }
+            );
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|method| method.as_str() == "session/create")
+                    .count(),
+                1
+            );
+            peer.abort();
         }
-        peer.abort();
     }
 
     // Owns native-to-ACP error provenance. The model-selection happy path and

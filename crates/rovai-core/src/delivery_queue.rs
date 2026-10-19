@@ -21,6 +21,7 @@ use crate::{
     },
     db::Database,
     runtime::{AgentRunWorkspace, runtime_cleanup_blocked_since_connection},
+    runtime_failure::context_payload_too_large_failure,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1014,6 +1015,12 @@ fn insert_batch_run(
         "queued"
     };
     let ended_at = error_code.map(|_| now);
+    let public_failure = match (error_code, runtime) {
+        (Some("context_payload_too_large"), Some(runtime)) => Some(serde_json::to_string(
+            &context_payload_too_large_failure(runtime.adapter_kind),
+        )?),
+        _ => None,
+    };
     transaction.execute(
         r#"
         INSERT INTO agent_run(
@@ -1039,7 +1046,7 @@ fn insert_batch_run(
             skill_selection_snapshot_json, skill_selection_snapshot_digest,
             camp_id, anchor_message_id, current_public_tail_sequence,
             claim_previous_public_boundary_sequence,
-            claim_has_additional_public_messages
+            claim_has_additional_public_messages, public_runtime_failure_json
         ) VALUES (
             ?1, NULL, ?2, NULL,
             NULL, ?3, ?4, ?5,
@@ -1050,7 +1057,7 @@ fn insert_batch_run(
             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
             ?26, ?27, ?28, ?16, ?17,
             'batch', 'runtime_managed_v2', ?29, ?30,
-            ?31, ?32, ?4, ?33, ?34
+            ?31, ?32, ?4, ?33, ?34, ?35
         )
         "#,
         params![
@@ -1094,6 +1101,7 @@ fn insert_batch_run(
             anchor_message_id,
             previous_public_boundary,
             has_additional_public_messages,
+            public_failure,
         ],
     )?;
     for (ordinal, delivery) in selected.iter().enumerate() {
@@ -5882,7 +5890,8 @@ mod tests {
     #[test]
     fn oversized_first_input_keeps_context_payload_too_large_failure() {
         let mut fixture = Fixture::new();
-        fixture.enqueue("oversized-first", &"large input ".repeat(30_000));
+        let body = "large input 中文😀 ".repeat(30_000);
+        fixture.enqueue("oversized-first", &body);
         let run_id = claim_waiting_delivery_batches(&mut fixture.database, 1)
             .unwrap()
             .pop()
@@ -5914,6 +5923,127 @@ mod tests {
             )
             .unwrap();
         assert_eq!(delivery_status, "failed");
+        let (stored_failure, started_at, retry_allowed): (String, Option<String>, bool) = fixture
+            .database.connection().query_row(
+                "SELECT public_runtime_failure_json, started_at, manual_retry_allowed FROM agent_run WHERE id=?1",
+                [&run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).unwrap();
+        let failure: crate::runtime_failure::RuntimeFailureView =
+            serde_json::from_str(&stored_failure).unwrap();
+        failure.validate().unwrap();
+        assert_eq!(failure.code, "context_payload_too_large");
+        assert_eq!(
+            failure.origin,
+            crate::runtime_failure::RuntimeFailureOrigin::Rovai
+        );
+        assert_eq!(
+            failure.runtime_kind,
+            crate::agent_profile::AdapterKind::CodexCli
+        );
+        assert!(!failure.retryable);
+        assert!(failure.detail.is_some());
+        assert!(started_at.is_none());
+        assert!(!retry_allowed);
+        let original: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT body FROM camp_message WHERE id='oversized-first'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(original, body, "claim must not truncate the public input");
+        let delivery_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM runtime_input_delivery WHERE agent_run_id=?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivery_count, 0, "rejected input must never reach Runtime");
+        assert!(
+            claim_waiting_delivery_batches(&mut fixture.database, 1)
+                .unwrap()
+                .is_empty()
+        );
+        fixture.enqueue("ordinary-next", "继续处理普通消息");
+        let next = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .remove(0);
+        let next_state: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, public_runtime_failure_json FROM agent_run WHERE id=?1",
+                [&next],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(next_state, ("queued".into(), None));
+
+        // A fresh connection must project the durable error even after a later input.
+        let Fixture {
+            database,
+            _directory: directory,
+            camp_id,
+        } = fixture;
+        drop(database);
+        let mut database = Database::open(&directory).unwrap();
+        let snapshot = crate::read_model::ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let projected = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .unwrap();
+        assert_eq!(projected.failure.as_ref(), Some(&failure));
+        assert_eq!(projected.execution_evidence_count, 0);
+        assert_eq!(projected.input_message_ids, ["oversized-first"]);
+
+        // Pre-upgrade failures have only the stable code; unknown codes stay absent.
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET public_runtime_failure_json=NULL WHERE id=?1",
+                [&run_id],
+            )
+            .unwrap();
+        let legacy = crate::read_model::ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        assert_eq!(
+            legacy
+                .agent_runs
+                .iter()
+                .find(|run| run.id == run_id)
+                .unwrap()
+                .failure
+                .as_ref(),
+            Some(&failure)
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET last_error_code='unrecognized_failure' WHERE id=?1",
+                [&run_id],
+            )
+            .unwrap();
+        let unknown = crate::read_model::ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        assert!(
+            unknown
+                .agent_runs
+                .iter()
+                .find(|run| run.id == run_id)
+                .unwrap()
+                .failure
+                .is_none()
+        );
     }
 
     #[test]

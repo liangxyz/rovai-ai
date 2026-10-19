@@ -25,7 +25,7 @@ use crate::{
         LocalAttachmentAvailability, LocalAttachmentSourceView, parse_source_attachments,
     },
     mcp_projection::McpExposureSnapshot,
-    runtime_failure::RuntimeFailureView,
+    runtime_failure::{RuntimeFailureView, context_payload_too_large_failure},
     skill_projection::SkillExposureSnapshot,
 };
 
@@ -3178,7 +3178,8 @@ fn load_agent_runs(
                ),
                continued.source_agent_run_id IS NOT NULL,
                agent_run.current_public_tail_sequence,
-               agent_run.runtime_adapter_kind
+               agent_run.runtime_adapter_kind,
+               agent_run.last_error_code
         FROM agent_run
         LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
@@ -3256,6 +3257,7 @@ fn load_agent_runs(
                 row.get::<_, bool>(41)?,
                 row.get::<_, Option<i64>>(42)?,
                 row.get::<_, Option<String>>(43)?,
+                row.get::<_, Option<String>>(44)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3311,7 +3313,28 @@ fn load_agent_runs(
                 has_accepted_continuation,
                 public_tail_sequence_at_start,
                 runtime_adapter_kind,
+                last_error_code,
             )| {
+                // Older claim failures recorded only the stable code. Recover the
+                // same safe explanation without rewriting history or guessing a Runtime.
+                let failure = public_runtime_failure_json
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()
+                    .context("AgentRun public Runtime failure is invalid")?
+                    .or_else(|| {
+                        (status == "failed"
+                            && invocation_kind == "batch"
+                            && started_at.is_none()
+                            && last_error_code.as_deref() == Some("context_payload_too_large"))
+                        .then(|| {
+                            runtime_adapter_kind
+                                .as_deref()?
+                                .parse()
+                                .ok()
+                                .map(context_payload_too_large_failure)
+                        })
+                        .flatten()
+                    });
                 let steer = if matches!(status.as_str(), "queued" | "running" | "waiting") {
                     crate::steer::active_input_availability(transaction, &id, execution_epoch)?
                 } else {
@@ -3343,10 +3366,7 @@ fn load_agent_runs(
                     cancel_acknowledged_at,
                     terminal_resolution_source,
                     terminal_reason_code,
-                    failure: public_runtime_failure_json
-                        .map(|value| serde_json::from_str(&value))
-                        .transpose()
-                        .context("AgentRun public Runtime failure is invalid")?,
+                    failure,
                     runtime_model: message_model::project_model(
                         runtime_adapter_kind.as_deref(),
                         runtime_model_selection.as_deref(),

@@ -107,14 +107,6 @@ async fn acp_probes_keep_native_homes_without_prompting() {
             assert_eq!(requests[1]["params"]["_meta"]["headless"], true);
         }
         expected_methods.push("session/new");
-        if !rejected && !catalog_only {
-            if kind == AdapterKind::GrokBuild {
-                expected_methods.push("session/resume");
-            }
-            if matches!(kind, AdapterKind::GrokBuild | AdapterKind::KiroCli) {
-                expected_methods.push("session/set_model");
-            }
-        }
         assert_eq!(
             methods, expected_methods,
             "no prompt, compact, title or tool request is allowed"

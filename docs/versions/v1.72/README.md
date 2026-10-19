@@ -6,10 +6,31 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 记忆工作区 R4（2026-10-19）
+
+按 User 确认稿实现无蓝色的记忆工作区、压缩通知和编辑界面。保留副标题、三项摘要、审核入口和新增通知，
+增加“全部”范围，移除容量展示与治理筛选，详情/版本逐级展开；新增与修订使用中性主按钮。
+修复修订通知误报新建/共同范围，边界与验证见[实施记录](implementation-plan.md#记忆工作区-r42026-10-19)，
+布局规范见[Memory surface brief](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)。
+
+## Antigravity 长任务与工具收尾（2026-10-19）
+
+取消早期适配器遗留的五分钟 print 总时限，识别原生“超时但返回部分成功”警告；父 Run 结束后缺少
+回执的工具停止活动展示并保持结果未知。当前规则见 [Runtime Launch v64](../../contracts/runtime-launch-and-verification-v64.md#antigravity-整轮执行时限)
+与[过程展示 v54](../../contracts/run-process-detail-surface-v54.md)，复现与验证见
+[实施记录](implementation-plan.md#antigravity-长任务与工具收尾2026-10-19)。
+
+## Composer 链接高亮稳定性（2026-10-19）
+
+普通输入后立即维护已有链接的显示范围；位置仅存在编辑器内存中，完整 Markdown 识别仍合并到停顿后。
+修改 URL 本身或无法可靠映射时只撤下受影响范围，操作前重新校验目标。
+稳定语义见[会话工作区](../../ui/components/conversation-workspace.md)，
+复现、性能样本和回归见[实施记录](implementation-plan.md#composer-链接高亮稳定性2026-10-19)。
 
 ## 文件预览自动刷新（2026-10-18）
 
@@ -939,3 +960,11 @@ MiniMax Usage 增加本轮消息身份限定的后台尾读，仍保持部分观
 [Usage v10](../../contracts/runtime-usage-monitoring-v10.md)。
 0.6.12 官方 ACP 局部关闭 ask_user 的入口仍缺，未修改原生全局配置，不声称默认隐藏已交付。
 Preview 的平台、CLI 子集、Skills/MCP 和并发资格边界不变。
+
+## Send 输入文件退出文件变化卡片（2026-10-19）
+
+按 User 确认方案，CLI 记录实际 `--input-file` 来源，复用本次 Send 执行记录；Core 在终态文件归约中排除
+成功来源并重算统计，任意目录、多个来源与重启恢复共用现有机制。附件和原始操作保持，无表／列迁移或
+模型上下文变更。当前规范为 [Transport v43](../../contracts/builtin-tool-transport-v43.md)与
+[File Change v9](../../contracts/runtime-file-change-observation-v9.md)，验证见[实施计划](implementation-plan.md#send-输入文件退出文件变化卡片2026-10-19)。
+本项为可逆的局部投影规则，不新增 Version Decision；同步当前合同、架构、UI 与导航，Runtime 原生映射和根 README 无需变化。

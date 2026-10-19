@@ -2,10 +2,27 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentProfile, AgentRunView, MemberCreationView, ThreadMessageView, ThreadSnapshot } from '@contracts'
-import { ThreadWorkspace, campConversationTimeline } from './ThreadWorkspace'
+import { ThreadWorkspace, RunExecutionDisclosure, campConversationTimeline } from './ThreadWorkspace'
 
 const createdAt = '2026-09-06T06:00:00Z'
 const endedAt = '2026-09-06T06:01:00Z'
+
+it('keeps an input rejection inspectable with zero evidence and no inline hint or retry', () => {
+  const rejected = run({ invocationKind: 'batch', startedAt: null, executionEpoch: 0,
+    executionEvidenceCount: 0, inputMessageIds: ['oversized-input'], failure: {
+      runtimeKind: 'codex-cli', origin: 'rovai', phase: 'execution', code: 'context_payload_too_large',
+      summary: '输入内容过大', detail: '输入内容过大，无法开始执行。请改用文件附件，或拆分后发送。', retryable: false
+    } })
+  const timeline = renderTimeline(snapshot([rejected], false, false))
+  expect(timeline).toContain('输入内容过大 · 查看详情')
+  expect(timeline).not.toContain('请改用文件附件')
+  expect(timeline).not.toContain('run-presence-retry')
+  const disclosure = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+    run: rejected, threadId: 'camp-artifacts'
+  }))
+  expect(disclosure).toContain('agent-run-runtime-failure')
+  expect(disclosure).toContain(rejected.failure!.detail)
+})
 
 function run(overrides: Partial<AgentRunView> = {}): AgentRunView {
   return {

@@ -86,6 +86,7 @@ pub async fn run_bounded_command_with_input(
     input: Option<&[u8]>,
     limits: ProbeCommandLimits,
 ) -> Result<BoundedCommandOutput> {
+    let started = Instant::now();
     let stdin_policy = if input.is_some() {
         ManagedStdinPolicy::Piped
     } else {
@@ -146,9 +147,16 @@ pub async fn run_bounded_command_with_input(
 
     // A successful leader can leave descendants holding inherited stdio. Always terminate the
     // probe-owned group before waiting for readers so completion remains bounded.
+    let native_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let cleanup_started = Instant::now();
     terminate_process_tree(&mut child, limits.cleanup_timeout).await;
     let stdout = join_reader(&mut stdout_task, limits.cleanup_timeout, "stdout").await?;
     let stderr = join_reader(&mut stderr_task, limits.cleanup_timeout, "stderr").await?;
+    eprintln!(
+        "[runtime-check-timing] command={} native_ms={native_ms:.3} cleanup_ms={:.3}",
+        PathLabel(command.as_std().get_program()),
+        cleanup_started.elapsed().as_secs_f64() * 1000.0,
+    );
     Ok(BoundedCommandOutput {
         status,
         stdout,
@@ -217,6 +225,7 @@ impl RuntimeProbeProcess {
     }
 
     pub async fn finish(mut self) -> Result<BoundedCapture> {
+        let cleanup_started = Instant::now();
         self.stdin.take();
         self.stdout.take();
         terminate_process_tree(&mut self.child, self.cleanup_timeout).await;
@@ -225,7 +234,12 @@ impl RuntimeProbeProcess {
             .stderr_task
             .take()
             .context("runtime_probe_stderr_reader_unavailable")?;
-        join_reader(&mut stderr_task, self.cleanup_timeout, "stderr").await
+        let result = join_reader(&mut stderr_task, self.cleanup_timeout, "stderr").await;
+        eprintln!(
+            "[runtime-check-timing] phase=protocol_cleanup cleanup_ms={:.3}",
+            cleanup_started.elapsed().as_secs_f64() * 1000.0,
+        );
+        result
     }
 }
 

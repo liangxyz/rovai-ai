@@ -16,7 +16,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 ## 会话 Task 能力（当前）
 
 - [Durable Task v6](durable-task-v6.md)
-- [Built-in Tool Transport v42](builtin-tool-transport-v42.md)
+- [Built-in Tool Transport v43](builtin-tool-transport-v43.md)：成功 Send 输入来源与文件卡片排除；[v42（历史）](builtin-tool-transport-v42.md) 保留原 Task 发现边界。
 - [ContextManifest Evidence v40 / v42](context-manifest-evidence-v42.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
 - [Run Facts v10](run-facts-v10.md)
@@ -154,7 +154,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v64（当前）](runtime-launch-and-verification-v64.md) | 同一程序已知版本保留、按路径与指纹投影、设置与队员展示统一；不增加启动健康检查 |
+| [Runtime Launch and Verification v64（当前）](runtime-launch-and-verification-v64.md) | 同程序版本与静态证据复用、单项检查必要工作、MiniMax 健康与完整目录分离；不增加启动健康检查 |
 | [Runtime Launch and Verification v63（历史）](runtime-launch-and-verification-v63.md) | Pi 入站单帧 64 MiB、独立出站/stderr 预算、有类型连接失败及既有输入保护 |
 | [Runtime Launch and Verification v62（历史）](runtime-launch-and-verification-v62.md) | 移除原生会话重建提示、展示字段及公聊/单聊事件历史查询；恢复行为保持 |
 | [Runtime Launch and Verification v61（历史）](runtime-launch-and-verification-v61.md) | 移除 Desktop / Mobile 会话队员列表中的重置入口及其弹窗；启动与恢复保持 |
@@ -304,7 +304,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Permanent Deletion v3（历史）](camp-permanent-deletion-v3.md) | 原删除权限/journal 不变；先定向业务终态，再有界 Runtime 清理和物理删除 |
 | [Camp Permanent Deletion v2（历史）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
-| [Runtime File Change Observation v8（当前）](runtime-file-change-observation-v8.md) | MiniMax 原生 patch、创建标志与相对路径；排除预览伪完整状态，继承共享文件投影 |
+| [Runtime File Change Observation v9（当前）](runtime-file-change-observation-v9.md) | 成功 Send 输入路径按 Run/epoch 排除；复用现有 Evidence 与投影失效 |
+| [Runtime File Change Observation v8（历史）](runtime-file-change-observation-v8.md) | MiniMax 原生 patch、创建标志与相对路径；排除预览伪完整状态，继承共享文件投影 |
 | [Runtime File Change Observation v7（历史）](runtime-file-change-observation-v7.md) | 已成功的原生补丁片段、来源标签、按序统计与共享 Command/Files Changed 投影 |
 | [Runtime File Change Observation v6（历史）](runtime-file-change-observation-v6.md) | exact-epoch 文件事实水位、stale/no_changes 重算、稳定文件 ID 与原子 projection 发布 |
 | [Runtime File Change Observation v5（历史）](runtime-file-change-observation-v5.md) | 官方 ZCode Runtime 与原生证据边界；继承上一版合同 |

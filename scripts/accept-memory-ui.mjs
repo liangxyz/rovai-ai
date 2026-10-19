@@ -30,7 +30,7 @@ try {
   dayHeaderGeometry = await assertMemoryPageHeaderGeometry(first.cdp, '1440×920 Memory')
 
   await createHearthMemory(first.cdp, initialBody)
-  await chooseMemoryTab(first.cdp, '共同记忆')
+  await chooseMemoryTab(first.cdp, '共同')
   await waitForText(first.cdp, '.memory-catalog-item > strong', initialBody)
   await assertNoHorizontalOverflow(first.cdp, 'day Memory Library')
 
@@ -155,12 +155,11 @@ try {
   'Retired Memory conflict did not block review schedule submission')
   await clickButton(first.cdp, '.memory-review-schedule-dialog button', '取消')
   await waitForExpression(first.cdp, `!document.querySelector('.memory-review-schedule-dialog')`)
-  await chooseMemoryTab(first.cdp, '已停止沿用')
   await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
   await clickMemoryAction(first.cdp, revisedBody, '重新沿用')
-  await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
   await chooseMemoryTab(first.cdp, '全部')
-  await chooseMemoryTab(first.cdp, '共同记忆')
+  await chooseMemoryTab(first.cdp, '共同')
   await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
 
   scheduledMemory = (await request(first.cdp, 'memory.list')).memories
@@ -172,12 +171,11 @@ try {
   await waitForText(first.cdp, '.memory-catalog-item > strong', forgottenBody)
   await clickMemoryAction(first.cdp, forgottenBody, '永久遗忘')
   await waitForSelector(first.cdp, '.memory-confirm-dialog')
-  assert((await hasText(first.cdp, '.memory-confirm-dialog', '不能恢复'))
+  assert((await hasText(first.cdp, '.memory-confirm-dialog', '无法恢复'))
       || (await hasText(first.cdp, '.memory-confirm-dialog', '不可撤销')),
     'Forget confirmation did not communicate irreversibility')
   await clickButton(first.cdp, '.memory-confirm-dialog button', '永久遗忘')
   await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', forgottenBody)
-  await chooseMemoryTab(first.cdp, '已停止沿用')
   const forgottenRecord = (await request(first.cdp, 'memory.list')).memories
     .find((memory) => memory.lifecycle === 'forgotten')
   assert(forgottenRecord?.currentBody === null
@@ -197,11 +195,10 @@ try {
   const restartedMemory = restartedLibrary.memories.find((memory) => memory.currentBody === revisedBody)
   assert(restartedMemory?.lifecycle === 'active' && restartedMemory.reviewDue === true,
     'Packaged Core did not return the active Memory after App restart')
-  await chooseMemoryTab(second.cdp, '待复核')
-  await chooseMemoryTab(second.cdp, '共同记忆')
+  await chooseMemoryTab(second.cdp, '共同')
   await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
   await chooseMemoryTab(second.cdp, '全部')
-  await chooseMemoryTab(second.cdp, '共同记忆')
+  await chooseMemoryTab(second.cdp, '共同')
   await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
   await openReviewSchedule(second.cdp, revisedBody)
   await assertReviewScheduleDialogContract(second.cdp, { hasReminder: true })
@@ -314,7 +311,7 @@ async function assertReviewScheduleDialogContract(cdp, { hasReminder }) {
 
 async function assertReviewScheduleFocusReturn(cdp) {
   try {
-    await waitForExpression(cdp, `document.activeElement?.textContent?.trim() === '设置下次复核'`)
+    await waitForExpression(cdp, `document.activeElement?.matches('.memory-more-button') === true`)
   } catch {
     const state = await evaluate(cdp, `({
       activeTag: document.activeElement?.tagName ?? null,
@@ -419,7 +416,7 @@ async function pressKey(cdp, key, code) {
 }
 
 async function createHearthMemory(cdp, body) {
-  await clickButton(cdp, '.memory-library-header button', '新增记忆')
+  await clickButton(cdp, '.memory-library-header button', '新增')
   await waitForSelector(cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(cdp, body)
   await replaceRetrievalKeys(cdp, '验收记忆')
@@ -493,8 +490,8 @@ async function assertMemoryPageHeaderGeometry(cdp, context) {
       hasKicker: Boolean(document.querySelector('.memory-page-kicker')),
       firstActionClickable: Boolean(firstAction && firstActionHit
         && (firstActionHit === firstAction || firstAction.contains(firstActionHit))),
-      actionBottomDelta: headingBounds && actionBounds
-        ? round(actionBounds.bottom - headingBounds.bottom)
+      actionCenterDelta: headingBounds && actionBounds
+        ? round((actionBounds.top + actionBounds.bottom - headingBounds.top - headingBounds.bottom) / 2)
         : null
     }
   })()`)
@@ -510,19 +507,19 @@ async function assertMemoryPageHeaderGeometry(cdp, context) {
       && Math.abs(state.headerTop - 34) <= 0.75
       && state.headerRegion !== 'drag'
       && state.topBorderWidth === '0px'
-      && state.headerAlignment === 'flex-end'
+      && state.headerAlignment === 'center'
       && !state.hasKicker
       && state.firstActionClickable
-      && Math.abs(state.actionBottomDelta) <= 0.75,
+      && Math.abs(state.actionCenterDelta) <= 0.75,
     `${context} did not match the full-height rule-free header contract: ${JSON.stringify(state)}`
   )
   return state
 }
 
 async function chooseMemoryTab(cdp, label) {
-  await clickButton(cdp, '.memory-scope-tabs button, .memory-governance-tabs button', label)
+  await clickButton(cdp, '.memory-scope-tabs button', label)
   await waitForExpression(cdp, `[
-    ...document.querySelectorAll('.memory-scope-tabs button, .memory-governance-tabs button')
+    ...document.querySelectorAll('.memory-scope-tabs button')
   ].some((button) => (button.textContent?.trim() === ${JSON.stringify(label)}
       || [...button.childNodes].some((node) =>
         node.nodeType === Node.TEXT_NODE && node.textContent?.trim() === ${JSON.stringify(label)}))
@@ -540,10 +537,15 @@ async function clickMemoryAction(cdp, body, label) {
     return true
   })()`)
   assert(selected, `Could not select Memory "${body}"`)
-  await waitForExpression(cdp, `document.querySelector('.memory-detail > header h3')?.textContent
+  await waitForExpression(cdp, `document.querySelector('.memory-detail-body')?.textContent
     === ${JSON.stringify(body)}`)
+  if (['设置下次复核', '停止沿用', '永久遗忘'].includes(label)) {
+    await evaluate(cdp, `document.querySelector('.memory-more-button')?.focus()`)
+    await pressKey(cdp, 'Enter', 'Enter')
+    await waitForSelector(cdp, '.memory-actions-menu')
+  }
   const clicked = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('.memory-detail-actions button')]
+    const button = [...document.querySelectorAll('.memory-detail-actions button, .memory-actions-menu [role=menuitem]')]
       .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
     if (!button) return false
     button.focus()
@@ -579,8 +581,7 @@ async function replaceTextarea(cdp, value) {
 
 async function replaceRetrievalKeys(cdp, value) {
   const changed = await evaluate(cdp, `(() => {
-    const input = [...document.querySelectorAll('.memory-editor-dialog input')]
-      .find((candidate) => candidate.closest('label')?.textContent?.includes('Retrieval Keys'))
+    const input = document.querySelector('#memory-key-input')
     if (!input) return false
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
     setter?.call(input, ${JSON.stringify(value)})
@@ -654,7 +655,7 @@ async function launchApp(port, width, height) {
     `--user-data-dir=${dataDir}`
   ], {
     cwd: root,
-    env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' },
+    env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1', ROVAI_DISABLE_AUTO_UPDATE_CHECKS: '1' },
     stdio: ['ignore', 'ignore', 'pipe']
   })
   child.stderr.on('data', (chunk) => stderr.push(String(chunk)))

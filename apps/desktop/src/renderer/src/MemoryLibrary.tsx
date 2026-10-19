@@ -5,12 +5,12 @@ import { readErrorMessage } from './error-message'
 import type { MemoryNavigationTarget } from './desktop-navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AcceptHearthReviewItemCommand,
   AgentProfile,
   CreateMemoryCommand,
   HearthReviewItem,
-  MemoryCapacity,
   MemoryDirection,
   MemoryKind,
   MemoryLibraryView,
@@ -23,7 +23,8 @@ import {
   AppDialogContent,
   AppDialogFooter,
   AppDialogGlyph,
-  AppDialogHeader
+  AppDialogHeader,
+  DialogControlIcon
 } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import {
@@ -44,9 +45,9 @@ import {
 import { localizeExecutionEngineTerms } from './product-copy'
 import { UiText, uiAttribute } from './interface-language'
 
-type GovernanceFilter = 'all' | 'agent' | 'review' | 'stopped'
+type LibraryScope = MemoryScopeKind | 'all'
 type Editor =
-  | { kind: 'create' }
+  | { kind: 'create'; scope: MemoryScopeKind }
   | { kind: 'revise'; memory: MemoryRecord }
   | { kind: 'reviewItem'; reviewItem: HearthReviewItem }
   | null
@@ -56,6 +57,7 @@ interface Draft {
   kind: MemoryKind
   body: string
   retrievalKeys: string
+  keyInput: string
   firstAgentId: string
   secondAgentId: string
   direction: MemoryDirection
@@ -85,23 +87,18 @@ const initialDraft: Draft = {
   kind: 'preference',
   body: '',
   retrievalKeys: '',
+  keyInput: '',
   firstAgentId: '',
   secondAgentId: '',
   direction: 'mutual',
   directedActorAgentId: ''
 }
 
-const scopeTabs: Array<[MemoryScopeKind, string]> = [
-  ['hearth', '共同记忆'],
-  ['companion', '队员记忆'],
-  ['relationship', '队员间记忆']
-]
-
-const governanceTabs: Array<[GovernanceFilter, string]> = [
+const scopeTabs: Array<[LibraryScope, string]> = [
   ['all', '全部'],
-  ['agent', '队员形成'],
-  ['review', '待复核'],
-  ['stopped', '已停止沿用']
+  ['hearth', '共同'],
+  ['companion', '队员'],
+  ['relationship', '队员间']
 ]
 
 export function MemoryLibrary({
@@ -135,14 +132,12 @@ export function MemoryLibrary({
   useEffect(() => () => { libraryGeneration.current++; reviewGeneration.current++ }, [client])
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const mobile = useMobileLayout()
-  const [mobileOverviewOpen, setMobileOverviewOpen] = useState(false)
   const [reviewItems, setReviewItems] = useState<HearthReviewItem[]>([])
-  const [localScope, setLocalScope] = useState<MemoryScopeKind>('hearth')
-  const [localGovernance, setLocalGovernance] = useState<GovernanceFilter>('all')
+  const [localScope, setLocalScope] = useState<LibraryScope>('all')
   const [localSearch, setLocalSearch] = useState('')
   const [localMemoryId, setLocalMemoryId] = useState<string | null>(null)
   const scope = navigationTarget?.scope ?? localScope
-  const governance = navigationTarget?.governance ?? localGovernance
+  const governance = 'all' as const
   const search = navigationTarget?.search ?? localSearch
   const selectedMemoryId = navigationTarget ? navigationTarget.memoryId : localMemoryId
   const navigateMemory = (patch: Partial<MemoryNavigationTarget>, mode: 'push' | 'replace'): void => {
@@ -150,17 +145,20 @@ export function MemoryLibrary({
     else {
       if ('memoryId' in patch) setLocalMemoryId(patch.memoryId ?? null)
       if (patch.scope !== undefined) setLocalScope(patch.scope)
-      if (patch.governance !== undefined) setLocalGovernance(patch.governance)
       if (patch.search !== undefined) setLocalSearch(patch.search)
     }
   }
-  const setScope = (value: MemoryScopeKind): void => navigateMemory({ scope: value }, 'replace')
-  const setGovernance = (value: GovernanceFilter): void => navigateMemory({ governance: value }, 'replace')
+  const setScope = (value: LibraryScope): void => navigateMemory({ scope: value, memoryId: null }, 'replace')
   const setSearch = (value: string): void => navigateMemory({ search: value }, 'replace')
   const setSelectedMemoryId = (value: string | null): void => navigateMemory({ memoryId: value }, 'push')
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false)
   const [editor, setEditor] = useState<Editor>(null)
   const [draft, setDraft] = useState<Draft>(initialDraft)
+  const editorDrafts = useRef(new Map<string, Draft>())
+  const updateDraft = (value: Draft): void => {
+    setDraft(value)
+    if (editor) editorDrafts.current.set(editorKey(editor), value)
+  }
   const [forgetTarget, setForgetTarget] = useState<MemoryRecord | null>(null)
   const [reviewScheduleEditor, setReviewScheduleEditor] = useState<ReviewScheduleEditor | null>(null)
   const [reviewScheduleBusyAction, setReviewScheduleBusyAction] = useState<ReviewScheduleBusyAction | null>(null)
@@ -226,9 +224,6 @@ export function MemoryLibrary({
     const memory = library.memories.find((candidate) => candidate.id === focusMemoryId)
     if (!memory?.scope) return
     setLocalScope(memory.scope)
-    setLocalGovernance(memory.lifecycle === 'active'
-      ? memory.creationOrigin === 'agent' ? 'agent' : 'all'
-      : 'stopped')
     setLocalMemoryId(memory.id)
   }, [focusMemoryId, library, navigationTarget])
 
@@ -240,13 +235,7 @@ export function MemoryLibrary({
 
   const pending = reviewItems.filter((reviewItem) => reviewItem.status === 'pending')
   const visibleMemories = useMemo(() => (library?.memories ?? [])
-    .filter((memory) => memory.scope === scope && memory.lifecycle !== 'forgotten')
-    .filter((memory) => {
-      if (governance === 'agent') return memory.lifecycle === 'active' && memory.creationOrigin === 'agent'
-      if (governance === 'review') return memory.lifecycle === 'active' && memory.reviewDue
-      if (governance === 'stopped') return memory.lifecycle === 'retired'
-      return true
-    })
+    .filter((memory) => (scope === 'all' || memory.scope === scope) && memory.lifecycle !== 'forgotten')
     .filter((memory) => {
       const query = search.trim().toLocaleLowerCase('zh-CN')
       if (!query) return true
@@ -257,7 +246,7 @@ export function MemoryLibrary({
         memoryPeopleLabel(memory, agents),
         originLabel(memory.creationOrigin)
       ].join(' ').toLocaleLowerCase('zh-CN').includes(query)
-    }), [agents, governance, library, scope, search])
+    }), [agents, library, scope, search])
 
   useEffect(() => {
     if (!library) return
@@ -265,7 +254,7 @@ export function MemoryLibrary({
     if (navigationTarget?.memoryId && navigationTarget.scope === undefined) {
       const memory = library.memories.find((item) => item.id === navigationTarget.memoryId && item.lifecycle !== 'forgotten')
       if (memory?.scope) {
-        onNavigate?.({ ...navigationTarget, scope: memory.scope, governance: memory.lifecycle === 'active' ? 'all' : 'stopped' }, 'replace')
+        onNavigate?.({ ...navigationTarget, scope: memory.scope, governance: 'all' }, 'replace')
         return
       }
     }
@@ -313,47 +302,53 @@ export function MemoryLibrary({
 
   const openCreate = (): void => {
     const firstAgentId = agents[0]?.agentId ?? ''
-    setDraft({
+    const creationScope = scope === 'all' ? 'hearth' : scope
+    const nextEditor: NonNullable<Editor> = { kind: 'create', scope: creationScope }
+    setDraft(editorDrafts.current.get(editorKey(nextEditor)) ?? {
       ...initialDraft,
-      scope,
+      scope: scope === 'all' ? 'hearth' : scope,
       kind: scope === 'relationship' ? 'agreement' : 'preference',
       firstAgentId,
       secondAgentId: agents.find((agent) => agent.agentId !== firstAgentId)?.agentId ?? '',
       directedActorAgentId: firstAgentId
     })
-    setEditor({ kind: 'create' })
+    setError(null)
+    setEditor(nextEditor)
   }
 
   const openRevise = (memory: MemoryRecord): void => {
-    setDraft({
+    const nextEditor: NonNullable<Editor> = { kind: 'revise', memory }
+    setDraft(editorDrafts.current.get(editorKey(nextEditor)) ?? {
       scope: memory.scope ?? 'hearth',
       kind: memory.kind ?? 'agreement',
       body: memory.currentBody ?? '',
       retrievalKeys: memory.currentRetrievalKeys.join(', '),
+      keyInput: '',
       firstAgentId: memory.companionAgentId ?? memory.relationshipAgentIds[0] ?? '',
       secondAgentId: memory.relationshipAgentIds[1] ?? '',
       direction: memory.direction ?? 'mutual',
       directedActorAgentId: memory.directedActorAgentId ?? ''
     })
-    setEditor({ kind: 'revise', memory })
+    setError(null)
+    setEditor(nextEditor)
   }
 
   const openReviewEdit = (reviewItem: HearthReviewItem): void => {
     if (reviewItem.status !== 'pending' || reviewItem.stale) return
-    setDraft({
+    const nextEditor: NonNullable<Editor> = { kind: 'reviewItem', reviewItem }
+    setDraft(editorDrafts.current.get(editorKey(nextEditor)) ?? {
       ...initialDraft,
       scope: 'hearth',
       kind: reviewItem.candidateKind ?? 'agreement',
       body: reviewItem.candidateBody ?? '',
       retrievalKeys: (reviewItem.candidateRetrievalKeys ?? []).join(', ')
     })
-    setEditor({ kind: 'reviewItem', reviewItem })
+    setError(null)
+    setReviewDrawerOpen(false)
+    setEditor(nextEditor)
   }
 
-  const retrievalKeys = (): string[] => draft.retrievalKeys
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean)
+  const retrievalKeys = (): string[] => splitRetrievalKeys([draft.retrievalKeys, draft.keyInput].join(','))
 
   const createCommand = (): CreateMemoryCommand => ({
     scope: draft.scope,
@@ -373,7 +368,8 @@ export function MemoryLibrary({
 
   const submitEditor = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!editor) return
+    if (!editor || busy) return
+    let createdMemoryId: string | null = null
     await run(`editor-${editor.kind}`, async () => {
       let result: StoredCommandResult
       if (editor.kind === 'create') {
@@ -407,11 +403,15 @@ export function MemoryLibrary({
         })
       }
       assertApplied(result)
+      editorDrafts.current.delete(editorKey(editor))
+      if (editor.kind === 'create' && typeof result.payload.memoryId === 'string') createdMemoryId = result.payload.memoryId
       setEditor(null)
       setFeedback(editor.kind === 'reviewItem'
         ? uiAttribute('已按最终内容接受，候选内容现在成为正式共同记忆。')
         : uiAttribute('记忆已保存。'))
     })
+    // Select after the refreshed library contains the new identity.
+    if (createdMemoryId) navigateMemory({ scope: draft.scope, search: '', memoryId: createdMemoryId }, 'replace')
   }
 
   const acceptReview = (reviewItem: HearthReviewItem): Promise<void> =>
@@ -460,7 +460,11 @@ export function MemoryLibrary({
     setForgetTarget(null)
   })
 
+  const reviewScheduleTrigger = useRef<HTMLElement | null>(null)
   const openReviewSchedule = (memory: MemoryRecord): void => {
+    reviewScheduleTrigger.current = document.activeElement?.getAttribute('role') === 'menuitem'
+      ? document.querySelector<HTMLElement>('.memory-more-button')
+      : document.activeElement instanceof HTMLElement ? document.activeElement : null
     setReviewScheduleEditor({
       ...createReviewScheduleDraft(memory),
       phase: 'ready',
@@ -628,9 +632,8 @@ export function MemoryLibrary({
 
   return (
     <section
-      className={`memory-library${startupContentVisible ? '' : ' startup-feedback-suppressed'}`}
+      className={`memory-library memory-workspace${startupContentVisible ? '' : ' startup-feedback-suppressed'}`}
       data-mobile-detail={mobile && selectedMemory !== null || undefined}
-      data-mobile-overview={mobile && mobileOverviewOpen || undefined}
       aria-labelledby="memory-library-title"
       aria-busy={loading}
       aria-hidden={startupContentVisible ? undefined : true}
@@ -644,89 +647,43 @@ export function MemoryLibrary({
           <p><UiText zh={"查看、搜索和管理长期记忆。"} /></p>
         </div>
         <div className="memory-header-actions">
-          {mobile && <button className="quiet-button mobile-memory-overview" type="button" aria-expanded={mobileOverviewOpen} onClick={() => setMobileOverviewOpen((open) => !open)}><UiText zh={"概览 "} /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          </button>}
-          <button className="primary-button" type="button" onClick={openCreate} disabled={!library}><UiText zh={"新增记忆"} /></button>
+          <button className="memory-review-entry" data-pending={pending.length > 0} type="button" onClick={() => setReviewDrawerOpen(true)} disabled={!library}>
+            {pending.length > 0 ? <><UiText zh="待审核" /><span>{pending.length}</span></> : <UiText zh="审核记录" />}
+            <DialogControlIcon name="chevron" />
+          </button>
+          <button className="primary-button" type="button" onClick={openCreate} disabled={!library}><DialogControlIcon name="plus" /><UiText zh="新增" /></button>
         </div>
       </header>
 
-      {topNotices && <div className="memory-page-notices">{topNotices}</div>}
-
-      {error && <div className="memory-error" role="alert"><strong><UiText zh={"操作未完成"} /></strong><span>{error}</span>{!library && <button className="quiet-button compact" type="button" onClick={() => { setError(null); void load().catch((nextError) => setError(errorMessage(nextError))) }}><UiText zh={"重试"} /></button>}</div>}
-      {feedback && <div className="memory-feedback" role="status">{feedback}</div>}
-
       <div className="memory-summary-strip" aria-label={uiAttribute("记忆概览")}>
-        <div><strong>{loading ? '—' : activeCount}</strong><span><UiText zh={"正在沿用"} /></span></div>
-        <div className={pending.length > 0 ? 'attention' : ''}><strong>{loading ? '—' : pending.length}</strong><span><UiText zh={"待审核"} /></span></div>
-        <div><strong>{loading ? '—' : agentCount}</strong><span><UiText zh={"队员形成"} /></span></div>
-        <div><strong>{loading ? '—' : reviewCount}</strong><span><UiText zh={"待复核"} /></span></div>
+        <div><span><UiText zh="正在沿用" /></span><strong>{library ? activeCount : '—'}</strong></div>
+        <div><span><UiText zh="队员形成" /></span><strong>{library ? agentCount : '—'}</strong></div>
+        <div><span><UiText zh="待复核" /></span><strong>{library ? reviewCount : '—'}</strong></div>
       </div>
-
-      {pending.length > 0 && (
-        <button className="memory-pending-banner" type="button" onClick={() => setReviewDrawerOpen(true)}>
-          <span><strong>{pending.length}<UiText zh={" 条共同记忆审核项等待处理"} /></strong><small><UiText zh={"候选内容与正式记忆隔离，只有接受后才会生效。"} /></small></span>
-          <b><UiText zh={"查看审核 →"} /></b>
-        </button>
-      )}
-
-      <div className="memory-library-heading">
-        <h3><UiText zh={"记忆库"} /></h3>
-      </div>
-
-      <nav className="memory-scope-tabs" aria-label={uiAttribute("记忆范围")}>
-        {scopeTabs.map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            className={scope === value ? 'active' : ''}
-            aria-current={scope === value ? 'page' : undefined}
-            disabled={loading}
-            onClick={() => setScope(value)}
-          >
-            {uiAttribute(label)}
-          </button>
-        ))}
-      </nav>
-
-      <div className="memory-filter-row">
-        <div className="memory-governance-tabs">
-          {governanceTabs.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={governance === value ? 'active' : ''}
-              aria-pressed={governance === value}
-              disabled={loading}
-              onClick={() => setGovernance(value)}
-            >
-              {uiAttribute(label)}
-            </button>
-          ))}
-        </div>
+      {topNotices && <div className="memory-page-notices">{topNotices}</div>}
+      {error && <div className="memory-error" role="alert"><strong><UiText zh="操作未完成" /></strong><span>{error}</span>{!library && <button className="quiet-button compact" type="button" onClick={() => { setError(null); void load().catch((nextError) => setError(errorMessage(nextError))) }}><UiText zh="重试" /></button>}</div>}
+      {feedback && <div className="memory-feedback" role="status">{feedback}</div>}
+      <div className="memory-library-tools">
+        <nav className="memory-scope-tabs" aria-label={uiAttribute("记忆范围")}>
+          {scopeTabs.map(([value, label]) => <button key={value} type="button" data-memory-scope={value} className={scope === value ? 'active' : ''} aria-pressed={scope === value} disabled={loading} onClick={() => setScope(value)}>{uiAttribute(label)}</button>)}
+        </nav>
         <label className="memory-search">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.5-3.5" />
-          </svg>
-          <span className="sr-only"><UiText zh={"搜索记忆"} /></span>
-          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={uiAttribute("搜索正文、Retrieval Keys 或队员")} disabled={loading} />
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <span className="sr-only"><UiText zh="搜索记忆" /></span>
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={uiAttribute("搜索记忆")} disabled={loading} />
         </label>
       </div>
 
-      <CapacityStrip library={library} scope={scope} agents={agents} />
-
       <div className="memory-workbench">
         <div className="memory-catalog">
-          <div className="memory-catalog-heading"><strong>{uiAttribute(scopeTabs.find(([value]) => value === scope)?.[1] ?? '')}</strong><span>{visibleMemories.length}<UiText zh={" 条"} /></span></div>
           <div className="memory-catalog-list">
             {loading && <EmptyMemory text={uiAttribute("正在读取记忆…")} />}
             {!library && !loading && <EmptyMemory text={uiAttribute("暂时无法读取记忆。")} />}
-            {library && visibleMemories.length === 0 && <EmptyMemory text={uiAttribute("当前筛选下没有记忆。")} />}
+            {library && visibleMemories.length === 0 && <EmptyMemory text={search ? uiAttribute("没有找到匹配的记忆。") : uiAttribute("还没有记忆，可以新增一条。")} />}
             {visibleMemories.map((memory) => (
-              <button key={memory.id} type="button" className={`memory-catalog-item ${selectedMemoryId === memory.id ? 'selected' : ''}`} onClick={() => setSelectedMemoryId(memory.id)}>
-                <span className="memory-catalog-meta"><KindBadge kind={memory.kind} /><OriginBadge origin={memory.creationOrigin} /></span>
+              <button key={memory.id} type="button" className={`memory-catalog-item ${selectedMemoryId === memory.id ? 'selected' : ''}`} aria-pressed={selectedMemoryId === memory.id} onClick={() => setSelectedMemoryId(memory.id)}>
                 <strong>{memory.currentBody ?? uiAttribute('正文已清除')}</strong>
-                <small>{memory.currentRetrievalKeys.join(' · ') || uiAttribute('无 Retrieval Keys')} · {memoryPeopleLabel(memory, agents)}</small>
+                <span className="memory-catalog-context"><span>{memoryPeopleLabel(memory, agents)} · {kindLabel(memory.kind)}</span>{memory.lifecycle === 'retired' ? <span className="memory-stopped"><UiText zh="已停止" /></span> : memory.reviewDue ? <span className="memory-review-due"><UiText zh="待复核" /></span> : null}</span>
               </button>
             ))}
           </div>
@@ -765,13 +722,14 @@ export function MemoryLibrary({
         }}
         onSubmit={submitReviewSchedule}
         onRetryRefresh={retryReviewScheduleRefresh}
+        onRestoreFocus={() => { if (reviewScheduleTrigger.current?.isConnected) reviewScheduleTrigger.current.focus() }}
       />
 
-      <MemoryEditorDialog editor={editor} draft={draft} agents={agents} busy={busy !== null} onDraft={setDraft} onClose={() => setEditor(null)} onSubmit={submitEditor} />
+      <MemoryEditorDialog editor={editor} draft={draft} agents={agents} error={error} busy={busy !== null} onDraft={updateDraft} onClose={() => setEditor(null)} onSubmit={submitEditor} />
 
       <Dialog.Root open={forgetTarget !== null} onOpenChange={(open) => { if (!open) setForgetTarget(null) }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay memory-dialog-overlay" />
           <AppDialogContent className="memory-confirm-dialog" tone="danger">
             <AppDialogHeader
               title={uiAttribute("永久遗忘这条记忆？")}
@@ -791,62 +749,6 @@ export function MemoryLibrary({
   )
 }
 
-export function CapacityStrip({
-  library,
-  scope,
-  agents
-}: {
-  library: MemoryLibraryView | null
-  scope: MemoryScopeKind
-  agents: AgentProfile[]
-}): React.JSX.Element | null {
-  const capacities = library?.capacities.filter((capacity) => capacity.scope === scope) ?? []
-  if (capacities.length === 0) return null
-  return (
-    <ul className="memory-capacity-strip" aria-label={uiAttribute("当前范围容量，可横向滚动查看全部")} tabIndex={0}>
-      {capacities.map((capacity) => (
-        <li key={capacity.scopeKey} className="memory-capacity-item">
-          <span className="memory-capacity-name">{memoryCapacityLabel(capacity, agents)}</span>
-          <span className="memory-capacity-metrics">
-            <span><strong>{capacity.activeCount}/{capacity.maxCount}</strong><small><UiText zh={"总量"} /></small></span>
-            <span><strong>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount}</strong><small><UiText zh={"队员形成"} /></small></span>
-          </span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-export function memoryCapacityLabel(capacity: MemoryCapacity, agents: AgentProfile[]): string {
-  const companionPrefix = 'companion:'
-  const relationshipPrefix = 'relationship:'
-  const applicablePrefix = 'relationship-applicable:'
-
-  if (capacity.scopeKey === 'hearth') return uiAttribute("共同记忆")
-  if (capacity.scopeKey.startsWith(companionPrefix)) {
-    return agentName(capacity.scopeKey.slice(companionPrefix.length), agents)
-  }
-  if (capacity.scopeKey.startsWith(applicablePrefix)) {
-    return uiAttribute("适用于 {0}", String(agentName(capacity.scopeKey.slice(applicablePrefix.length), agents)))
-  }
-  if (capacity.scopeKey.startsWith(relationshipPrefix)) {
-    for (let first = 0; first < agents.length; first += 1) {
-      for (let second = first + 1; second < agents.length; second += 1) {
-        const left = agents[first]
-        const right = agents[second]
-        if (capacity.scopeKey === `${relationshipPrefix}${left.agentId}:${right.agentId}`
-          || capacity.scopeKey === `${relationshipPrefix}${right.agentId}:${left.agentId}`) {
-          return `${left.displayName} × ${right.displayName}`
-        }
-      }
-    }
-    const agentIds = capacity.scopeKey.slice(relationshipPrefix.length).split(':')
-    if (agentIds.length === 2) return agentIds.map((id) => agentName(id, agents)).join(' × ')
-    return uiAttribute("队员组合")
-  }
-  return scopeLabel(capacity.scope)
-}
-
 function MemoryDetail({
   memory,
   loading,
@@ -863,70 +765,60 @@ function MemoryDetail({
   agents: AgentProfile[]
   busy: string | null
   onRevise(memory: MemoryRecord): void
-  onReview(memory: MemoryRecord, trigger: HTMLButtonElement): void
+  onReview(memory: MemoryRecord): void
   onRetire(memory: MemoryRecord): Promise<void>
   onReactivate(memory: MemoryRecord): Promise<void>
   onForget(memory: MemoryRecord): void
 }): React.JSX.Element {
-  const mobile = useMobileLayout()
-  const RevisionContainer = mobile ? 'details' : 'section'
+  const openingDialog = useRef(false)
   if (!memory) {
-    return <aside className="memory-detail empty"><span aria-hidden="true">⌁</span><strong>{loading ? uiAttribute("正在读取记忆") : uiAttribute("选择一条记忆查看详情")}</strong><p>{loading ? uiAttribute("列表与治理状态会在本地数据就绪后显示。") : uiAttribute("这里会显示正文、来源、Retrieval Keys、版本历史和治理操作。")}</p></aside>
+    return <aside className="memory-detail empty"><AppDialogGlyph name="brain" /><strong>{loading ? uiAttribute("正在读取记忆") : uiAttribute("选择一条记忆查看详情")}</strong></aside>
   }
   const people = memoryPeople(memory, agents)
-  const actions = (
-    <div className="memory-detail-actions">
-      {memory.lifecycle === 'active' && <>
-        <button className="quiet-button" type="button" onClick={() => onRevise(memory)} disabled={busy !== null}><UiText zh={"修订"} /></button>
-        <button className="quiet-button" type="button" onClick={(event) => onReview(memory, event.currentTarget)} disabled={busy !== null}><UiText zh={"设置下次复核"} /></button>
-        <button className="quiet-button" type="button" onClick={() => void onRetire(memory)} disabled={busy !== null}><UiText zh={"停止沿用"} /></button>
-      </>}
-      {memory.lifecycle === 'retired' && memory.outgoingSuccessorIds.length === 0 && <button className="primary-button" type="button" onClick={() => void onReactivate(memory)} disabled={busy !== null}><UiText zh={"重新沿用"} /></button>}
-      {memory.lifecycle !== 'forgotten' && <button className="danger-button" type="button" onClick={() => onForget(memory)} disabled={busy !== null}><UiText zh={"永久遗忘"} /></button>}
-    </div>
-  )
   return (
     <aside className="memory-detail" aria-labelledby={`memory-detail-${memory.id}`}>
-      <header>
-        <div className="memory-detail-badges"><KindBadge kind={memory.kind} /><OriginBadge origin={memory.creationOrigin} /><span className={`status-badge status-${memory.lifecycle === 'active' ? 'completed' : 'pending'}`}><i />{lifecycleLabel(memory.lifecycle)}</span></div>
-        <h3 id={`memory-detail-${memory.id}`}>{memory.currentBody ?? uiAttribute("正文已遗忘")}</h3>
-        <small>{scopeLabel(memory.scope)}<UiText zh={" · 更新于 "} />{formatTime(memory.updatedAt)}</small>
+      <h3 className="sr-only" id={`memory-detail-${memory.id}`}><UiText zh="记忆详情" /></h3>
+      <header className="memory-detail-top">
+        <div className="memory-detail-context">
+          {people.slice(0, 1).map((agent) => <MemberAvatar key={agent.agentId} agentId={agent.agentId} avatarRef={agent.avatarRef} displayName={agent.displayName} size="mention" decorative />)}
+          <span>{memoryPeopleLabel(memory, agents)}</span><span aria-hidden="true">·</span><span>{kindLabel(memory.kind)}</span>
+          {memory.direction === 'mutual' && <span>{directionLabel(memory, agents)}</span>}
+          {memory.lifecycle === 'retired' ? <span className="memory-stopped"><UiText zh="已停止" /></span> : memory.reviewDue ? <span className="memory-review-due"><UiText zh="待复核" /></span> : null}
+        </div>
+        <div className="memory-detail-actions">
+          {memory.lifecycle === 'active' && <button className="primary-button" data-memory-revise type="button" onClick={() => onRevise(memory)} disabled={busy !== null}><AppDialogGlyph name="pencil" /><UiText zh="修订" /></button>}
+          {memory.lifecycle === 'retired' && memory.outgoingSuccessorIds.length === 0 && <button className="primary-button" type="button" onClick={() => void onReactivate(memory)} disabled={busy !== null}><UiText zh="重新沿用" /></button>}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild><button type="button" className="memory-more-button" aria-label={uiAttribute("更多记忆操作")} disabled={busy !== null}><svg viewBox="0 0 20 20" aria-hidden="true" fill="currentColor"><circle cx="4" cy="10" r="1.4" /><circle cx="10" cy="10" r="1.4" /><circle cx="16" cy="10" r="1.4" /></svg></button></DropdownMenu.Trigger>
+            <DropdownMenu.Portal><DropdownMenu.Content className="memory-actions-menu" align="end" sideOffset={5} onCloseAutoFocus={(event) => { if (openingDialog.current) { event.preventDefault(); openingDialog.current = false } }}>
+              {memory.lifecycle === 'active' && <>
+                <DropdownMenu.Item onSelect={() => { openingDialog.current = true; onReview(memory) }}><UiText zh="设置下次复核" /></DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => void onRetire(memory)}><UiText zh="停止沿用" /></DropdownMenu.Item>
+              </>}
+              <DropdownMenu.Item className="memory-danger-action" onSelect={() => { openingDialog.current = true; onForget(memory) }}><UiText zh="永久遗忘" /></DropdownMenu.Item>
+            </DropdownMenu.Content></DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </div>
       </header>
-
-      {mobile && actions}
-      {people.length > 0 && (
-        <section className="memory-detail-section">
-          <h4><UiText zh={"适用队员"} /></h4>
-          <div className="memory-people">
-            {people.map((agent) => <span key={agent.agentId}><MemberAvatar agentId={agent.agentId} avatarRef={agent.avatarRef} displayName={agent.displayName} size="list" decorative /><strong>{agent.displayName}</strong></span>)}
-            {memory.direction && <small>{directionLabel(memory, agents)}</small>}
-          </div>
-        </section>
-      )}
-
-      <section className="memory-detail-section memory-detail-facts">
-        <h4><UiText zh={"治理信息"} /></h4>
-        <dl>
-          <div><dt><UiText zh={"形成来源"} /></dt><dd>{originLabel(memory.creationOrigin)}</dd></div>
-          <div><dt>Retrieval Keys</dt><dd>{memory.currentRetrievalKeys.join('、') || '—'}</dd></div>
-          <div><dt><UiText zh={"下次复核"} /></dt><dd>{memory.reviewAfter ? formatTime(memory.reviewAfter) : uiAttribute("未设置")}</dd></div>
-          <div><dt><UiText zh={"当前版本"} /></dt><dd>v{memory.version} · {shortId(memory.currentRevisionId)}</dd></div>
+      <div className="memory-detail-body" aria-label={uiAttribute("记忆正文")}>{memory.currentBody ?? uiAttribute("正文已遗忘")}</div>
+      <div className="memory-retrieval-keys" role="group" aria-label={uiAttribute("检索词")}>{memory.currentRetrievalKeys.map((key) => <span key={key}>{key}</span>)}</div>
+      <details className="memory-detail-disclosure" key={memory.id}>
+        <summary><UiText zh="详情与版本" /><DialogControlIcon name="chevron" /></summary>
+        <dl className="memory-detail-facts">
+          <div><dt><UiText zh="形成来源" /></dt><dd>{originLabel(memory.creationOrigin)}</dd></div>
+          <div><dt><UiText zh="最近更新" /></dt><dd>{formatTime(memory.updatedAt)}</dd></div>
+          <div><dt><UiText zh="下次复核" /></dt><dd><button type="button" className={memory.reviewDue ? 'memory-review-due' : ''} disabled={memory.lifecycle !== 'active' || busy !== null} onClick={() => onReview(memory)}>{memory.reviewAfter ? formatTime(memory.reviewAfter) : uiAttribute("未设置")}<DialogControlIcon name="chevron" /></button></dd></div>
+          <div><dt><UiText zh="当前版本" /></dt><dd>v{memory.version}</dd></div>
         </dl>
-      </section>
-
-      <RevisionContainer className="memory-detail-section memory-revisions">
-        {mobile ? <summary><UiText zh={"版本记录 · "} />{memory.revisions.length}</summary> : <h4><UiText zh={"版本记录"} /></h4>}
-        {memory.revisions.map((revision) => (
-          <article key={revision.id}>
-            <span className={`memory-authority ${revision.actorKind === 'agent' ? 'agent-origin' : 'user-origin'}`}>{revision.actorKind === 'agent' ? uiAttribute("队员修订") : revision.actorKind === 'user' ? uiAttribute("用户修订") : uiAttribute("已清除")}</span>
-            <strong>{revision.body ?? uiAttribute('正文已清除')}</strong>
+        <details className="memory-revisions">
+          <summary><span><UiText zh="版本记录" /> <span>{memory.revisions.length}</span></span><DialogControlIcon name="chevron" /></summary>
+          {memory.revisions.map((revision) => <details key={revision.id} className="memory-revision">
+            <summary><span>{revision.actorKind === 'agent' ? uiAttribute("队员修订") : revision.actorKind === 'user' ? uiAttribute("用户修订") : uiAttribute("已清除")}{revision.id === memory.currentRevisionId && <small><UiText zh="当前版本" /></small>}</span><time>{formatTime(revision.createdAt)}</time><DialogControlIcon name="chevron" /></summary>
+            <p>{revision.body ?? uiAttribute('正文已清除')}</p>
             {revision.retrievalKeys.length > 0 && <small>{revision.retrievalKeys.join(' · ')}</small>}
-            <small>{formatTime(revision.createdAt)} · {shortId(revision.id)}</small>
-          </article>
-        ))}
-      </RevisionContainer>
-
-      {!mobile && actions}
+          </details>)}
+        </details>
+      </details>
     </aside>
   )
 }
@@ -937,7 +829,8 @@ function ReviewScheduleDialog({
   onChange,
   onClose,
   onSubmit,
-  onRetryRefresh
+  onRetryRefresh,
+  onRestoreFocus
 }: {
   editor: ReviewScheduleEditor | null
   busyAction: ReviewScheduleBusyAction | null
@@ -945,6 +838,7 @@ function ReviewScheduleDialog({
   onClose(): void
   onSubmit(action: ReviewScheduleAction): Promise<void>
   onRetryRefresh(): Promise<void>
+  onRestoreFocus(): void
 }): React.JSX.Element {
   const lastEditor = useRef<ReviewScheduleEditor | null>(null)
   const customInputRef = useRef<HTMLInputElement>(null)
@@ -1015,9 +909,10 @@ function ReviewScheduleDialog({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay memory-dialog-overlay" />
         <AppDialogContent
           className="memory-review-schedule-dialog"
+          onCloseAutoFocus={(event) => { event.preventDefault(); onRestoreFocus() }}
           aria-busy={busy}
           onEscapeKeyDown={(event) => {
             if (busy) event.preventDefault()
@@ -1232,7 +1127,7 @@ function ReviewDrawer({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay memory-drawer-overlay" />
+        <Dialog.Overlay className="dialog-overlay memory-drawer-overlay memory-dialog-overlay" />
         <Dialog.Content onCloseAutoFocus={(event) => event.preventDefault()} className="memory-review-drawer">
           <header>
             <div><Dialog.Title><UiText zh={"共同记忆审核"} /></Dialog.Title><Dialog.Description><UiText zh={"候选在接受后才成为共同记忆。"} /></Dialog.Description></div>
@@ -1287,6 +1182,7 @@ function MemoryEditorDialog({
   draft,
   agents,
   busy,
+  error,
   onDraft,
   onClose,
   onSubmit
@@ -1295,25 +1191,31 @@ function MemoryEditorDialog({
   draft: Draft
   agents: AgentProfile[]
   busy: boolean
+  error: string | null
   onDraft(value: Draft): void
   onClose(): void
   onSubmit(event: React.FormEvent): void
 }): React.JSX.Element {
   const identityLocked = editor?.kind === 'revise' || editor?.kind === 'reviewItem'
-  const keys = draft.retrievalKeys.split(',').map((key) => key.trim()).filter(Boolean)
+  const committedKeys = splitRetrievalKeys(draft.retrievalKeys)
+  const keys = splitRetrievalKeys([draft.retrievalKeys, draft.keyInput].join(','))
   const keyBytes = keys.reduce((total, key) => total + new TextEncoder().encode(key).length, 0)
   const identityValid = draft.scope === 'hearth'
     || (draft.scope === 'companion' && draft.firstAgentId !== '')
     || (draft.scope === 'relationship' && draft.kind !== 'preference' && draft.firstAgentId !== '' && draft.secondAgentId !== '' && draft.firstAgentId !== draft.secondAgentId && (draft.direction === 'mutual' || [draft.firstAgentId, draft.secondAgentId].includes(draft.directedActorAgentId)))
-  const keysValid = keys.length >= 1 && keys.length <= 3 && keys.every((key) => new TextEncoder().encode(key).length >= 2 && new TextEncoder().encode(key).length <= 24) && keyBytes <= 48
+  const keysValid = keys.length >= 1 && keys.length <= 3 && keys.every((key) => new TextEncoder().encode(key).length >= 2 && new TextEncoder().encode(key).length <= 24) && keyBytes <= 48 && new Set(keys).size === keys.length
   const bodyBytes = new TextEncoder().encode(draft.body).length
   const reviewItemEditable = editor?.kind !== 'reviewItem'
     || (editor.reviewItem.status === 'pending' && !editor.reviewItem.stale)
+  const commitKeys = (): void => onDraft({ ...draft, retrievalKeys: keys.join(', '), keyInput: '' })
+  const keysError = !keysValid && keys.length > 0
+    ? uiAttribute('请保留 1–3 个不重复的检索词，每项 2–24 字节，合计不超过 48 字节。')
+    : null
   return (
-    <Dialog.Root open={editor !== null} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog.Root open={editor !== null} onOpenChange={(open) => { if (!open && !busy) onClose() }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-        <AppDialogContent className="memory-editor-dialog" width="wide">
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay memory-dialog-overlay" />
+        <AppDialogContent className="memory-editor-dialog" onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }} onPointerDownOutside={(event) => { if (busy) event.preventDefault() }}>
           <AppDialogHeader
             title={editor?.kind === 'create' ? uiAttribute("新增记忆") : editor?.kind === 'reviewItem' ? uiAttribute("编辑后接受记忆") : uiAttribute("修订记忆")}
             description={uiAttribute("正文应面向未来、可独立理解且不包含秘密。Retrieval Keys 只用于检索，不代替正文。")}
@@ -1323,8 +1225,8 @@ function MemoryEditorDialog({
           />
           <form className="app-dialog-form" onSubmit={onSubmit}>
             <AppDialogBody>
-              <div className="memory-editor-grid">
-                <label className="field-label"><UiText zh={"范围"} /><select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth"><UiText zh={"共同记忆"} /></option><option value="companion"><UiText zh={"队员记忆"} /></option><option value="relationship"><UiText zh={"队员间记忆"} /></option></select></label>
+              {identityLocked ? <div className="memory-editor-context"><AppDialogGlyph name="brain" /><span>{scopeLabel(draft.scope)}</span><span>·</span><span>{editor?.kind === 'revise' ? memoryPeopleLabel(editor.memory, agents) : uiAttribute('所有队员')}</span><span>{kindLabel(draft.kind)}</span></div> : <div className="memory-editor-grid">
+                <label className="field-label"><UiText zh={"范围"} /><select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind, kind: event.target.value === 'relationship' && draft.kind === 'preference' ? 'agreement' : draft.kind })}><option value="hearth"><UiText zh={"共同记忆"} /></option><option value="companion"><UiText zh={"队员记忆"} /></option><option value="relationship"><UiText zh={"队员间记忆"} /></option></select></label>
                 <label className="field-label"><UiText zh={"类型"} /><select value={draft.kind} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}><UiText zh={"偏好"} /></option><option value="agreement"><UiText zh={"约定"} /></option><option value="lesson"><UiText zh={"经验"} /></option></select></label>
                 {draft.scope === 'companion' && <AgentSelect label={uiAttribute("队员")} value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
                 {draft.scope === 'relationship' && <>
@@ -1333,9 +1235,13 @@ function MemoryEditorDialog({
                   <label className="field-label"><UiText zh={"方向"} /><select value={draft.direction} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, direction: event.target.value as MemoryDirection })}><option value="mutual"><UiText zh={"双方共同"} /></option><option value="directed"><UiText zh={"单向"} /></option></select></label>
                   {draft.direction === 'directed' && <AgentSelect label={uiAttribute("责任方")} value={draft.directedActorAgentId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.agentId))} disabled={identityLocked || busy} onChange={(directedActorAgentId) => onDraft({ ...draft, directedActorAgentId })} />}
                 </>}
-              </div>
-              <label className="field-label memory-body-field"><UiText zh={"正文"} /><textarea autoFocus data-dialog-autofocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} /><small>{bodyBytes}/2048 bytes</small></label>
-              <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder={uiAttribute("1–3 个关键词，使用逗号分隔")} onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}<UiText zh={"/3 项 · "} />{keyBytes}/48 bytes</small></label>
+              </div>}
+              <label className="field-label memory-body-field"><span><UiText zh="正文" />{bodyBytes > 1800 && <small>{bodyBytes}/2048 bytes</small>}</span><textarea aria-label={uiAttribute('记忆正文')} aria-invalid={bodyBytes > 2048 || undefined} autoFocus data-dialog-autofocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} />{bodyBytes > 2048 && <small className="memory-field-error" role="alert"><UiText zh="正文过长，请精简到 2,048 字节以内。" /></small>}</label>
+              <div className="field-label memory-body-field"><label htmlFor="memory-key-input"><UiText zh="检索词" /></label><div className="memory-key-editor">
+                {committedKeys.map((key, index) => <span key={index}>{key}<button type="button" disabled={busy} aria-label={uiAttribute('移除检索词 {0}', key)} onClick={() => onDraft({ ...draft, retrievalKeys: committedKeys.filter((_, keyIndex) => keyIndex !== index).join(', ') })}><DialogControlIcon name="close" /></button></span>)}
+                <input id="memory-key-input" value={draft.keyInput} disabled={busy} placeholder={committedKeys.length ? '' : uiAttribute('输入后按回车添加')} aria-invalid={Boolean(keysError) || undefined} aria-describedby={keysError ? 'memory-keys-error' : undefined} onChange={(event) => onDraft({ ...draft, keyInput: event.target.value })} onKeyDown={(event) => { if (!event.nativeEvent.isComposing && ['Enter', ',', '，'].includes(event.key)) { event.preventDefault(); commitKeys() } }} onBlur={() => { if (draft.keyInput.trim()) commitKeys() }} />
+              </div>{keysError && <small id="memory-keys-error" className="memory-field-error" role="alert">{keysError}</small>}</div>
+              {error && <div className="memory-editor-error" role="alert">{error}</div>}
               {!reviewItemEditable && <div className="memory-review-warning" role="status"><UiText zh={"权威审核状态已变化。草稿仍保留，但这条审核不能再接受；请关闭后查看最新记录。"} /></div>}
             </AppDialogBody>
             <AppDialogFooter>
@@ -1349,6 +1255,14 @@ function MemoryEditorDialog({
   )
 }
 
+function splitRetrievalKeys(value: string): string[] {
+  return value.split(/[,，\n]/).map((key) => key.trim()).filter(Boolean)
+}
+
+function editorKey(editor: NonNullable<Editor>): string {
+  return editor.kind === 'create' ? `create:${editor.scope}` : editor.kind === 'revise' ? `revise:${editor.memory.id}` : `review:${editor.reviewItem.reviewItemId}`
+}
+
 function AgentSelect({ label, value, agents, disabled, onChange }: { label: string; value: string; agents: AgentProfile[]; disabled: boolean; onChange(value: string): void }): React.JSX.Element {
   return <label className="field-label">{label}<select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value=""><UiText zh={"请选择"} /></option>{agents.map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.displayName}</option>)}</select></label>
 }
@@ -1360,11 +1274,6 @@ function EmptyMemory({ text }: { text: string }): React.JSX.Element {
 function KindBadge({ kind }: { kind: MemoryKind | null }): React.JSX.Element {
   const shape = kind === 'preference' ? '○' : kind === 'lesson' ? '◇' : '□'
   return <span className={`memory-kind kind-${kind ?? 'agreement'}`}>{kindLabel(kind)} <i aria-hidden="true">{shape}</i></span>
-}
-
-function OriginBadge({ origin }: { origin: MemoryRecord['creationOrigin'] }): React.JSX.Element | null {
-  if (!origin) return null
-  return <span className={`memory-authority ${origin === 'agent' ? 'agent-origin' : 'user-origin'}`}>{originLabel(origin)}</span>
 }
 
 function reviewScheduleConflictNotice(
@@ -1469,10 +1378,6 @@ function reviewTargetLabel(reviewItem: HearthReviewItem, memories: MemoryRecord[
   return memory.currentBody ? `${shortId(memory.id)} · ${memory.currentBody}` : shortId(memory.id)
 }
 
-function lifecycleLabel(lifecycle: MemoryRecord['lifecycle']): string {
-  return lifecycle === 'active' ?uiAttribute("正在沿用") : lifecycle === 'retired' ?uiAttribute("已停止沿用") :uiAttribute("已遗忘")
-}
-
 function memoryPeople(memory: MemoryRecord, agents: AgentProfile[]): AgentProfile[] {
   const ids = memory.scope === 'companion'
     ? [memory.companionAgentId]
@@ -1485,6 +1390,8 @@ function memoryPeople(memory: MemoryRecord, agents: AgentProfile[]): AgentProfil
 
 function memoryPeopleLabel(memory: MemoryRecord, agents: AgentProfile[]): string {
   const people = memoryPeople(memory, agents)
+  if (memory.scope === 'hearth') return uiAttribute('所有队员')
+  if (memory.direction === 'directed') return directionLabel(memory, agents)
   return people.length > 0 ? people.map((agent) => agent.displayName).join(' × ') : scopeLabel(memory.scope)
 }
 

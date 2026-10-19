@@ -1,3 +1,5 @@
+import { MemoryChangeNotice } from './MemoryChangeNotice'
+import { collectMemoryChanges, memoryChangeText, resolveMemoryChangeScope, type MemoryChange } from './memory-change-notice'
 import { useTaskCapability } from './TaskCapabilityProvider'
 import { ShortcutSettings } from './ShortcutSettings'
 import { useShortcutAction } from './ShortcutProvider'
@@ -65,6 +67,7 @@ import type {
   RestorableLocation,
   RovaiApi,
   HearthReviewItem,
+  MemoryRecord,
   SendThreadMessageResult,
   StoredCommandResult,
   SupervisorSnapshot,
@@ -1065,11 +1068,7 @@ export function BusinessApp({
   const [pinnedThreadItems, setPinnedThreadItems] = useState<NavigationThreadItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
-  const [memoryAutoNotice, setMemoryAutoNotice] = useState<{
-    count: number
-    memoryId: string | null
-    scope: 'companion' | 'relationship' | null
-  }>({ count: 0, memoryId: null, scope: null })
+  const [memoryAutoNotice, setMemoryAutoNotice] = useState<MemoryChange[]>([])
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryTarget, setMemoryTarget] = useState<MemoryNavigationTarget>({ kind: 'memory', memoryId: null })
   const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
@@ -2724,18 +2723,15 @@ export function BusinessApp({
         if (reviewItemCreated || autoAppliedEvents.length > 0) {
           if (reviewItemCreated) setMemoryReviewNotice(true)
           if (autoAppliedEvents.length > 0) {
-            const lastPayload = asRecord(autoAppliedEvents.at(-1)?.payload)
-            const lastMemoryId = typeof lastPayload.memoryId === 'string'
-              ? lastPayload.memoryId
-              : null
-            const lastScope = lastPayload.scope === 'companion' || lastPayload.scope === 'relationship'
-              ? lastPayload.scope
-              : null
-            setMemoryAutoNotice((current) => ({
-              count: current.count + autoAppliedEvents.length,
-              memoryId: lastMemoryId ?? current.memoryId,
-              scope: lastScope ?? current.scope
-            }))
+            setMemoryAutoNotice((current) => collectMemoryChanges(current, autoAppliedEvents))
+            const lastChange = collectMemoryChanges([], autoAppliedEvents).at(-1)
+            if (lastChange && lastChange.scope === null) {
+              void client.request<MemoryRecord>('memory.get', { memoryId: lastChange.memoryId })
+                .then((memory) => {
+                  if (!cancelled) setMemoryAutoNotice((current) => resolveMemoryChangeScope(current, lastChange.memoryId, lastChange.sequence, memory.scope))
+                })
+                .catch(() => undefined)
+            }
           }
           setMemoryRefreshKey((current) => current + 1)
           void client.request<HearthReviewItem[]>('memory.hearthReviewItems.list')
@@ -2904,9 +2900,9 @@ export function BusinessApp({
   }
 
   const openAutomaticMemory = (): void => {
-    const clearNotice = (): void => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })
-    if (viewRef.current === 'memory' && memoryTarget.memoryId === memoryAutoNotice.memoryId) clearNotice()
-    else void desktopNavigation.push({ kind: 'memory', memoryId: memoryAutoNotice.memoryId }, { beforeCommit: clearNotice })
+    const clearNotice = (): void => setMemoryAutoNotice([])
+    if (viewRef.current === 'memory' && memoryTarget.memoryId === (memoryAutoNotice.at(-1)?.memoryId ?? null)) clearNotice()
+    else void desktopNavigation.push({ kind: 'memory', memoryId: (memoryAutoNotice.at(-1)?.memoryId ?? null) }, { beforeCommit: clearNotice })
   }
 
   const closeSettings = (): void => { void desktopNavigation.push(lastMainTarget.current) }
@@ -4154,21 +4150,19 @@ export function BusinessApp({
     ? 'location'
     : startupRoutePending?.kind ?? startupRouteTarget?.kind ?? 'location'
   const inlineNotices = memoryReviewNotice
-    || memoryAutoNotice.count > 0
+    || memoryAutoNotice.length > 0
     || (!shuttingDown && (error || locationSaveError))
     ? (
         <>
           {memoryReviewNotice && (
-            <div className="memory-review-notice" role="status">
-              <div><strong><UiText zh={"队员提交了一条共同记忆审核"} /></strong><span><UiText zh={"候选内容尚未成为正式记忆，你可以稍后在“记忆”中逐条处理。"} /></span></div>
-              <div><button className="quiet-button compact" type="button" onClick={openMemoryReviews}><UiText zh={"查看审核"} /></button><button className="icon-button" type="button" aria-label={uiAttribute("暂时忽略共同记忆审核提示")} onClick={() => setMemoryReviewNotice(false)}>×</button></div>
-            </div>
+            <MemoryChangeNotice review onOpen={openMemoryReviews} onClose={() => setMemoryReviewNotice(false)}>
+              {pendingMemoryCount > 0 ? uiAttribute('{0} 条共同记忆待审核', pendingMemoryCount) : uiAttribute('共同记忆审核已更新')}
+            </MemoryChangeNotice>
           )}
-          {memoryAutoNotice.count > 0 && (
-            <div className="memory-review-notice memory-auto-applied-notice" role="status" aria-live="polite">
-              <div><strong><UiText zh={"已自动形成 "} />{memoryAutoNotice.count}<UiText zh={" 条"} />{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? uiAttribute("队员间记忆") : memoryAutoNotice.scope === 'companion' ? uiAttribute("队员记忆") : uiAttribute("共同记忆") : uiAttribute("记忆")}</strong><span><UiText zh={"已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。"} /></span></div>
-              <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}><UiText zh={"查看"} /></button><button className="icon-button" type="button" aria-label={uiAttribute("关闭自动形成提示")} onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
-            </div>
+          {memoryAutoNotice.length > 0 && (
+            <MemoryChangeNotice onOpen={openAutomaticMemory} onClose={() => setMemoryAutoNotice([])}>
+              {memoryChangeText(memoryAutoNotice, agents.find((agent) => agent.agentId === memoryAutoNotice.at(-1)?.actorId)?.displayName)}
+            </MemoryChangeNotice>
           )}
           {!shuttingDown && error && (
             <div className="error-banner" role="alert">
@@ -4333,7 +4327,7 @@ export function BusinessApp({
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
     <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
-    <NavigationShell platform={client.platform} settings={view === 'settings'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
+    <NavigationShell platform={client.platform} settings={view === 'settings'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'memory' ? 'app-shell-memory' : view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!mobile && renderNavigation()}
       {!startupGateVisible && mobile && ['compose', 'members', 'memory', 'automations'].includes(view) && <MobilePageHeader
         title={({ compose:uiAttribute("新对话"), members:uiAttribute("队员"), memory:uiAttribute("记忆"), automations:uiAttribute("定时任务") } as Record<string, string>)[view]}

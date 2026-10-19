@@ -10,12 +10,12 @@ use serde_json::{Map, Value, json};
 
 use crate::team_tool_catalog::builtin_tool_definitions;
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 42;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 43;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 3;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 42;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 43;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 14;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v42";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v43";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -348,7 +348,20 @@ pub enum BuiltinToolIpcRequestBody {
         request_id: String,
         operation: String,
         input: Value,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "sendInputFilePath"
+        )]
+        send_input_file_path: Option<String>,
     },
+}
+
+/// A display-only source identity. Never opens the file or resolves symlinks.
+pub fn normalize_send_input_file_path(path: &Path) -> Option<String> {
+    let path = crate::runtime_diff::normalize_absolute_path(path)?;
+    let path = path.to_str()?;
+    (!path.contains('\0')).then(|| path.replace('\\', "/"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1115,10 +1128,10 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 42);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 42);
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 43);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 43);
         assert_eq!(BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION, 14);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v42");
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v43");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()

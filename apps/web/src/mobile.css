@@ -271,7 +271,7 @@ html[data-mobile-web="true"] :is(.member-identity-grid, .member-runtime-grid, .m
 html[data-mobile-web="true"] .member-editor-runtime { scroll-margin-top: 12px; }
 html[data-mobile-web="true"] .memory-library { padding: 16px; overflow-y: auto; }
 html[data-mobile-web="true"] .memory-library-header h2 { font-size: 24px; }
-html[data-mobile-web="true"] :is(.memory-library-header p, .memory-library-heading) { display: none; }
+
 html[data-mobile-web="true"] .memory-filter-row { flex-wrap: wrap; }
 html[data-mobile-web="true"] .memory-search { width: 100%; }
 html[data-mobile-web="true"] .memory-workbench { display: flex; flex-direction: column; min-width: 0; }
@@ -487,7 +487,7 @@ html[data-mobile-web="true"] .composer-attachment-button,
 html[data-mobile-web="true"] .composer-primary-action { width: 44px; height: 44px; min-width: 44px; min-height: 44px; flex-basis: 44px; }
 
 /* Management pages keep the full controls, with summaries and context compacted. */
-html[data-mobile-web="true"] .memory-library:not([data-mobile-overview]) :is(.memory-summary-strip, .memory-capacity-strip) { display: none; }
+
 html[data-mobile-web="true"] .memory-library-heading { display: none; }
 html[data-mobile-web="true"] .memory-library:not([data-mobile-detail]) { gap: 14px; }
 html[data-mobile-web="true"] .mobile-memory-overview { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
@@ -539,9 +539,7 @@ html[data-mobile-web="true"] .quick-chat-workspace .new-conversation-main { min-
 html[data-mobile-web="true"] .quick-chat-workspace .new-conversation-stage { min-height: 0; width: 100%; max-width: 620px; padding: 12px 0; }
 html[data-mobile-web="true"] .quick-chat-workspace .quick-chat-continue { width: 100%; }
 html[data-mobile-web="true"] .quick-chat-workspace .quick-chat-continue-row { min-height: 52px; }
-html[data-mobile-web="true"] .app-shell[data-mobile-view="memory"] .memory-library-header > div:first-child,
 html[data-mobile-web="true"] .app-shell[data-mobile-view="automations"] .automation-page-header > div:first-child { display: none; }
-html[data-mobile-web="true"] .app-shell[data-mobile-view="memory"] .memory-library-header,
 html[data-mobile-web="true"] .app-shell[data-mobile-view="automations"] .automation-page-header { min-height: 44px; padding-block: 0 12px; justify-content: flex-end; }
 @keyframes mobile-page-enter { from { opacity: .65; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes mobile-menu-enter { from { transform: translateX(-100%); } to { transform: translateX(0); } }

@@ -131,6 +131,15 @@ describe('conversation Run presence', () => {
     expect(slots([{...failed,hasAcceptedContinuation:true},{...next,status:'queued'}])).toEqual([])
     expect(slots([{...failed,hasAcceptedContinuation:true},{...next,status:'failed'}])).toEqual([['next',false]])
     expect(slots([{...failed,invocationKind:'direct'}])).toEqual([])
+    const rejected = { ...failed, startedAt: null, failure: {
+      runtimeKind: 'codex-cli', origin: 'rovai', phase: 'execution', code: 'context_payload_too_large',
+      summary: '输入内容过大', detail: null, retryable: false
+    } } as AgentRunView
+    expect(runPresencePreview(rejected)).toEqual({ kind: 'error', text: '输入内容过大 · 查看详情' })
+    expect(order([rejected, { ...next, status: 'succeeded' }], [message(1, null), message(2, 'next')]))
+      .toEqual(['message-1', 'run-presence:failed', 'message-2'])
+    expect(slots([rejected], [], false)).toEqual([])
+    expect(slots([{ ...rejected, hasAcceptedContinuation: true }])).toEqual([])
   })
 
   it('advances only at source newlines, preserving partial lines and command precedence', () => {

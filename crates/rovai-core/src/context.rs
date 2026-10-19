@@ -9415,6 +9415,7 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    model_catalog_complete: true,
                     executable_file_identity:
                         crate::agent_runtime_adapter::observe_executable_file_identity(
                             std::path::Path::new(&(executable.display().to_string())),

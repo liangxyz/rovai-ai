@@ -232,9 +232,11 @@ export function activityStatusForAgentRun(
   activityStatus: ActivityStatus,
   agentRunStatus: AgentRunView['status']
 ): ActivityStatus {
-  return agentRunStatus === 'cancelled' && activityStatus === 'running'
-    ? 'stopped'
-    : activityStatus
+  if (activityStatus !== 'running' && activityStatus !== 'waiting') return activityStatus
+  if (agentRunStatus === 'cancelled') return 'stopped'
+  // A terminal Run ends live feedback, but cannot supply a missing Tool result.
+  if (agentRunStatus === 'succeeded' || agentRunStatus === 'failed') return 'recorded'
+  return activityStatus
 }
 
 export function agentRunPresentation(

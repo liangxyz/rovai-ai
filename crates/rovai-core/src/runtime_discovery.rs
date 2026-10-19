@@ -2191,6 +2191,16 @@ mod tests {
             );
             assert_eq!(FULL_HASH_READS.get(), 1, "first discovery hashes once");
             let verified = verified.unwrap();
+            verified
+                .entry()
+                .clone()
+                .verify(Some(verified.executable_file_identity()))
+                .unwrap();
+            assert_eq!(
+                FULL_HASH_READS.get(),
+                1,
+                "final verification reuses that hash"
+            );
             let previous = Some((
                 verified.entry().executable_path.as_str(),
                 verified.entry().executable_fingerprint.as_str(),
@@ -2203,16 +2213,35 @@ mod tests {
                 search.candidates(kind, std::iter::empty()),
                 previous,
             );
-            assert!(refreshed.is_some());
+            let refreshed = refreshed.unwrap();
+            refreshed
+                .entry()
+                .clone()
+                .verify(Some(refreshed.executable_file_identity()))
+                .unwrap();
             assert_eq!(
                 FULL_HASH_READS.get(),
                 0,
-                "unchanged discovery reuses the persisted identity"
+                "unchanged discovery and final verification reuse the verified identity"
             );
             let path = directory.join(kind.command_name());
             let mut contents = fs::read_to_string(&path).unwrap();
             contents.push_str("# upgraded installation\n");
             fs::write(&path, contents).unwrap();
+            FULL_HASH_READS.set(0);
+            assert!(
+                refreshed
+                    .entry()
+                    .clone()
+                    .verify(Some(refreshed.executable_file_identity()))
+                    .is_err(),
+                "final verification rejects a program replaced during the check"
+            );
+            assert_eq!(
+                FULL_HASH_READS.get(),
+                1,
+                "changed identity requires a full check"
+            );
             FULL_HASH_READS.set(0);
             let (_, upgraded) = discover_runtime_entry_from_candidates(
                 kind,
@@ -2220,7 +2249,12 @@ mod tests {
                 search.candidates(kind, std::iter::empty()),
                 previous,
             );
-            assert!(upgraded.is_some());
+            let upgraded = upgraded.unwrap();
+            upgraded
+                .entry()
+                .clone()
+                .verify(Some(upgraded.executable_file_identity()))
+                .unwrap();
             assert_eq!(FULL_HASH_READS.get(), 1, "upgraded discovery hashes once");
             assert_eq!(
                 observation.discovery_status,
@@ -2686,7 +2720,7 @@ mod windows_tests {
                     source: candidate.source,
                     entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 }
-                .verify()
+                .verify(None)
                 .unwrap()
             };
             let installation_id = service

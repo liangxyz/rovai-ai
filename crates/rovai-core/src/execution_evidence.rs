@@ -2290,6 +2290,20 @@ fn lifecycle_observed_terminal_statuses(payload: &Value) -> Vec<String> {
         .collect()
 }
 
+pub(crate) fn successful_send_input_file_path(payload: &Value) -> Option<&str> {
+    if payload.get("sourceAuthority").and_then(Value::as_str) != Some("core")
+        || payload.get("kind").and_then(Value::as_str) != Some("builtin_tool_invocation")
+        || payload.get("status").and_then(Value::as_str) != Some("completed")
+        || payload.pointer("/coreEnvelope/ok").and_then(Value::as_bool) != Some(true)
+        || crate::thread_compat::canonical_operation(payload.get("canonicalTool")?.as_str()?)
+            != "thread.message.send"
+    {
+        return None;
+    }
+    let path = payload.get("sendInputFilePath")?.as_str()?;
+    (Path::new(path).is_absolute() && !path.contains('\0')).then_some(path)
+}
+
 fn file_fact_projection(payload: &Value) -> Value {
     let mut projection = serde_json::json!({
         "runtimeDiff": payload.get("runtimeDiff"),
@@ -2297,6 +2311,7 @@ fn file_fact_projection(payload: &Value) -> Value {
         "runtimeRunDiff": payload.get("runtimeRunDiff"),
         "patch": payload.get("patch"),
         "changes": payload.get("changes").or_else(|| payload.pointer("/item/changes")),
+        "sendInputFilePath": successful_send_input_file_path(payload),
     });
     let has_file_facts = projection
         .as_object()
@@ -2772,6 +2787,11 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             }
             if let Some(core_envelope) = payload.get("coreEnvelope") {
                 normalized["coreEnvelope"] = public_core_envelope(core_envelope);
+            }
+            if payload.get("sourceAuthority").and_then(Value::as_str) == Some("core")
+                && let Some(path) = payload.get("sendInputFilePath").and_then(Value::as_str)
+            {
+                normalized["sendInputFilePath"] = Value::String(path.to_string());
             }
             normalized
         }

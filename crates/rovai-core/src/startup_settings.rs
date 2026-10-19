@@ -252,6 +252,7 @@ impl Core {
                         RuntimeLaunchPurpose::AvailabilityCheck,
                         expected_fingerprint.as_deref(),
                         None,
+                        false,
                     ),
                 ),
             )

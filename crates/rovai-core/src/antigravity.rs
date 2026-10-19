@@ -487,7 +487,9 @@ impl AntigravityAppRuntimeAdapter {
             OsString::from("--print"),
             OsString::from(if stream_input { "" } else { &request.prompt }),
             OsString::from("--print-timeout"),
-            OsString::from("5m"),
+            // Print mode must wait for the turn, including long-running tools.
+            // A finite deadline can return partial text with a SUCCESS result.
+            OsString::from("0"),
             OsString::from("--mode"),
             OsString::from(mode),
             OsString::from("--log-file"),
@@ -1030,6 +1032,32 @@ impl AntigravityAppRuntimeAdapter {
                 }
             },
         };
+        // Since agy 1.1.28, an expired print deadline can exit successfully with
+        // partial (or empty) text. Only the native warning proves this outcome;
+        // arbitrary tool output or other stderr warnings do not imply failure.
+        let stderr_detail = String::from_utf8_lossy(&stderr.bytes);
+        if let Some(detail) = stderr_detail.lines().map(str::trim).find(|line| {
+            line.starts_with("[agy] print timeout after ")
+                && line.ends_with(" with turn in progress; returning partial output")
+        }) {
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Terminal,
+                "runtime_execution_timeout",
+                "Antigravity 达到运行时限，本轮任务未完成",
+                Some(detail),
+                true,
+            );
+            return Err(antigravity_failure_error(
+                anyhow::anyhow!("Antigravity print deadline expired before the turn completed"),
+                failure,
+                Some(&native_session_id),
+                &native_turn_id,
+                true,
+            ));
+        }
         let final_output = request.runtime.environment.as_ref().map_or_else(
             || final_output.clone(),
             |environment| environment.redactor().text(&final_output),
@@ -2254,6 +2282,20 @@ mod tests {
         let workspace = root.join("workspace");
         std::fs::create_dir_all(&workspace).expect("workspace should be created");
         let adapter = AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        // Opt-in acceptance of the native deadline boundary; ordinary tests use
+        // deterministic protocol fixtures and never wait five minutes.
+        let long_turn = std::env::var_os("ROVAI_ANTIGRAVITY_LONG_TURN_SMOKE").is_some();
+        let expected = if long_turn {
+            "AGY_LONG_TURN_OK"
+        } else {
+            "压缩路径可用"
+        };
+        let prompt = if long_turn {
+            "Execute eight separate, sequential tool calls. In each call run exactly: python3 -c 'import time; time.sleep(40); print(\"round complete\")'. Wait for each call to finish before starting the next. All eight calls must actually finish; do not combine or skip them. Only after observing all eight results, reply AGY_LONG_TURN_OK."
+        } else {
+            "只输出这六个字：压缩路径可用"
+        };
+        let started = Instant::now();
         let result = adapter
             .run(AntigravityRunRequest {
                 agent_run_id: format!("context-compaction:{}", uuid::Uuid::new_v4()),
@@ -2263,7 +2305,11 @@ mod tests {
                     access: "read_only".to_string(),
                     isolation: "shared".to_string(),
                 },
-                permission_semantics: PermissionSemantics::CoreEnforcedV1,
+                permission_semantics: if long_turn {
+                    PermissionSemantics::RuntimeManagedV2
+                } else {
+                    PermissionSemantics::CoreEnforcedV1
+                },
                 runtime: FrozenAgentRuntimeConfig {
                     environment: None,
                     custom_api: None,
@@ -2278,7 +2324,11 @@ mod tests {
                     executable_fingerprint:
                         rovai_core::agent_runtime_adapter::executable_fingerprint(&executable)
                             .expect("Antigravity companion executable should be readable"),
-                    capabilities: vec!["cli.print".to_string()],
+                    capabilities: vec![
+                        "cli.print".to_string(),
+                        "output.stream_json".to_string(),
+                        "input.stream_json".to_string(),
+                    ],
                     protocol_version: "antigravity-app-cli-v1".to_string(),
                     model: ResolvedModelSelection {
                         dsh_source: None,
@@ -2290,9 +2340,9 @@ mod tests {
                         adapter_kind: AdapterKind::AntigravityApp,
                         schema_version: 1,
                         values: json!({
-                            "mode": "plan",
+                            "mode": if long_turn { "accept-edits" } else { "plan" },
                             "sandbox": "on",
-                            "dangerously_skip_permissions": "off",
+                            "dangerously_skip_permissions": if long_turn { "on" } else { "off" },
                         }),
                     },
                     native_session_compatibility_key: Some("antigravity-app:cli-v1".to_string()),
@@ -2300,7 +2350,7 @@ mod tests {
                     host_config_digest: "smoke-host".to_string(),
                     config_digest: "smoke-config".to_string(),
                 },
-                prompt: "只输出这六个字：压缩路径可用".to_string(),
+                prompt: prompt.to_string(),
                 resumable_native_session_id: None,
                 attachment_access_root: None,
                 builtin_tools: None,
@@ -2311,7 +2361,14 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(result.final_output.contains("压缩路径可用"));
+        assert!(result.final_output.contains(expected));
+        if long_turn {
+            assert!(started.elapsed() >= Duration::from_secs(320));
+        }
+        eprintln!(
+            "Antigravity smoke: elapsed={:?}, long_turn={long_turn}",
+            started.elapsed()
+        );
         std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 
@@ -2759,6 +2816,7 @@ printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":6,"state":"RUNNING","step_type":"tool","tool_name":"terminal","tool_info":{"name":"terminal","parameters":{"CommandLine":"cached command","Cwd":"/private/workspace"}}}}'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":6,"state":"DONE","step_type":"tool","tool_name":"terminal","tool_info":{"name":"terminal","parameters":{"CommandLine":"terminal command","privateToken":"AGY_TERMINAL_MUST_NOT_LEAK"}}}}'
 printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","status":"SUCCESS","response":"structured final"}}'
+printf '%s\n' 'warning: tool timeout recovered; returning partial catalog' >&2
 "#,
         )
         .expect("fake Antigravity companion should be written");
@@ -2857,6 +2915,7 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
         let arguments = std::fs::read_to_string(workspace.join(".agy-args"))
             .expect("structured fixture should record its arguments");
         assert!(arguments.contains("--output-format\nstream-json"));
+        assert!(arguments.contains("--print-timeout\n0\n"));
         for tool_name in ["run_command", "bash", "terminal"] {
             assert_eq!(antigravity_tool_kind(tool_name), "execute");
             assert!(antigravity_command_tool(tool_name));
@@ -2874,9 +2933,32 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
     #[cfg(unix)]
     #[tokio::test]
     async fn structured_runtime_failure_preserves_sanitized_provider_detail() {
+        use serde_json::json;
         use std::os::unix::fs::PermissionsExt;
 
-        for exit_code in [0, 1] {
+        // This process owner covers both structured failures and agy's exit-zero
+        // deadline warning. Text-only parser tests cannot prove exit handling.
+        let timeout_warning =
+            "[agy] print timeout after 5m0s with turn in progress; returning partial output";
+        let quota_error =
+            json!({"status": "ERROR", "error": "quota exceeded; api_key=private-key"});
+        for (exit_code, mut result, stderr, expected_code) in [
+            (0, quota_error.clone(), "", "runtime_quota_exceeded"),
+            (1, quota_error, "", "runtime_quota_exceeded"),
+            (
+                0,
+                json!({"status": "SUCCESS", "response": "unfinished response"}),
+                timeout_warning,
+                "runtime_execution_timeout",
+            ),
+            (
+                0,
+                json!({"status": "SUCCESS", "response": "   "}),
+                timeout_warning,
+                "runtime_execution_timeout",
+            ),
+        ] {
+            result["conversation_id"] = json!("0bdd2166-d420-40c6-94be-70b93eb290c5");
             let root = std::env::temp_dir().join(format!(
                 "rovai-antigravity-structured-failure-test-{}",
                 uuid::Uuid::new_v4()
@@ -2901,8 +2983,15 @@ done
 session_id="0bdd2166-d420-40c6-94be-70b93eb290c5"
 echo "Created conversation $session_id" >> "$log_file"
 printf '%s\n' '{"event":"init","conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","init":{}}'
-printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","status":"ERROR","error":"quota exceeded; api_key=private-key"}}'
+printf '%s\n' '__TERMINAL_EVENT__'
+printf '%s\n' '__STDERR__' >&2
 "#;
+            let script = script
+                .replace(
+                    "__TERMINAL_EVENT__",
+                    &json!({"event": "result", "result": result}).to_string(),
+                )
+                .replace("__STDERR__", stderr);
             std::fs::write(&executable, format!("{script}\nexit {exit_code}\n"))
                 .expect("fake Antigravity companion should be written");
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
@@ -2923,12 +3012,16 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
             let delivered = error
                 .downcast_ref::<AntigravityDeliveredFailure>()
                 .expect("structured final should prove the delivered turn ended");
-            assert_eq!(delivered.error_code, "runtime_quota_exceeded");
+            assert_eq!(delivered.error_code, expected_code);
             assert_eq!(delivered.failure.origin, RuntimeFailureOrigin::Runtime);
             assert_eq!(delivered.failure.phase, RuntimeFailurePhase::Terminal);
             let detail = delivered.failure.detail.as_deref().expect("safe detail");
-            assert!(detail.contains("quota exceeded"));
-            assert!(detail.contains("api_key=[redacted]"));
+            if expected_code == "runtime_execution_timeout" {
+                assert_eq!(detail, timeout_warning);
+            } else {
+                assert!(detail.contains("quota exceeded"));
+                assert!(detail.contains("api_key=[redacted]"));
+            }
             assert!(!detail.contains("private-key"));
             std::fs::remove_dir_all(root).expect("temporary root should be removed");
         }

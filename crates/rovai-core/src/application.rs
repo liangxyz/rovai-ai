@@ -2287,8 +2287,11 @@ impl RuntimeCheckAttempt {
             && self.startup_preview.is_none()
             && self.model_target == request.model_target
             && self.runtime_kind == request.runtime_kind
-            && (self.runtime_kind != AdapterKind::Pi
-                || self.catalog_only == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
+            && (!matches!(
+                self.runtime_kind,
+                AdapterKind::Pi | AdapterKind::MinimaxCodeCli
+            ) || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
             && self.search.generation() == request.search.generation()
     }
 }
@@ -3821,6 +3824,7 @@ impl Core {
     async fn verify_runtime_entry(
         &self,
         observation: &RuntimeDiscoveryObservation,
+        verified_identity: Option<&rovai_core::agent_runtime_adapter::ExecutableFileIdentity>,
     ) -> Result<rovai_core::agent_profile::VerifiedDiscoveredRuntimeEntry> {
         let entry = rovai_core::agent_profile::DiscoveredRuntimeEntry {
             adapter_kind: observation.runtime_kind,
@@ -3837,7 +3841,8 @@ impl Core {
                 .context("light Runtime discovery did not include executableFingerprint")?,
             entrypoint_locator_identity: observation.entrypoint_locator_identity.clone(),
         };
-        tokio::task::spawn_blocking(move || entry.verify())
+        let verified_identity = verified_identity.cloned();
+        tokio::task::spawn_blocking(move || entry.verify(verified_identity.as_ref()))
             .await
             .context("Runtime entry verification worker failed")?
     }
@@ -4197,6 +4202,7 @@ impl Core {
                 RuntimeLaunchPurpose::AvailabilityCheck,
                 tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
                 search.clone(),
+                true,
             )
             .await?;
         if outcome != RuntimeCheckOutcome::Ready {
@@ -4857,7 +4863,7 @@ impl Core {
         if observation.discovery_status != RuntimeDiscoveryStatus::Found {
             return Ok(RuntimeCheckOutcome::StableFailure);
         }
-        let verified = self.verify_runtime_entry(&observation).await?;
+        let verified = self.verify_runtime_entry(&observation, None).await?;
         let path = PathBuf::from(
             observation
                 .executable_path
@@ -5135,7 +5141,7 @@ impl Core {
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
         let search = self.runtime_search_environment.read().await.clone();
-        self.run_product_runtime_resolution_in_environment(kind, purpose, deadline, search)
+        self.run_product_runtime_resolution_in_environment(kind, purpose, deadline, search, false)
             .await
     }
 
@@ -5145,6 +5151,7 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         deadline: tokio::time::Instant,
         search: Arc<RuntimeSearchEnvironment>,
+        catalog_requested: bool,
     ) -> Result<RuntimeCheckOutcome> {
         let (existing, existing_entrypoint_locator, existing_identity) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
@@ -5430,6 +5437,7 @@ impl Core {
                 identity_changed = false;
             }
             let mut probe_execution_count = 0;
+            let probe_started = std::time::Instant::now();
             let deep_probe = loop {
                 probe_execution_count += 1;
                 let checked = run_identity_checked_probe(
@@ -5452,9 +5460,8 @@ impl Core {
                                     snapshot.executable_fingerprint.as_deref()
                                         == Some(&candidate_fingerprint)
                                 })
-                                .and_then(|snapshot| snapshot.reported_version.as_deref())
-                                .map(str::trim)
-                                .filter(|version| !version.is_empty()),
+                                .filter(|_| !locator_identity_changed),
+                            catalog_requested,
                         ),
                     ),
                 )
@@ -5677,18 +5684,29 @@ impl Core {
                 mut snapshot,
                 failure,
             } = deep_probe;
+            let probe_ms = probe_started.elapsed().as_secs_f64() * 1000.0;
+            let verification_started = std::time::Instant::now();
             let final_entry = self
-                .verify_runtime_entry(&runtime_check_environment::candidate_observation(
-                    kind,
-                    &search,
-                    &candidate,
-                    &canonical,
-                    &candidate_fingerprint,
-                ))
+                .verify_runtime_entry(
+                    &runtime_check_environment::candidate_observation(
+                        kind,
+                        &search,
+                        &candidate,
+                        &canonical,
+                        &candidate_fingerprint,
+                    ),
+                    Some(verified_candidate.executable_file_identity()),
+                )
                 .await;
+            eprintln!(
+                "[runtime-check-timing] runtime={} probe_ms={probe_ms:.3} final_verify_ms={:.3}",
+                kind.as_str(),
+                verification_started.elapsed().as_secs_f64() * 1000.0,
+            );
             let Ok(final_entry) = final_entry else {
                 return Ok(RuntimeCheckOutcome::Superseded);
             };
+            let commit_started = std::time::Instant::now();
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
                 return Ok(RuntimeCheckOutcome::Superseded);
             };
@@ -5728,6 +5746,7 @@ impl Core {
                 AgentProfileService::default().commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
+                        model_catalog_complete: catalog_requested,
                         executable_file_identity: Some(
                             final_entry.executable_file_identity().clone(),
                         ),
@@ -5760,6 +5779,11 @@ impl Core {
                 })
                 .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
+                eprintln!(
+                    "[runtime-check-timing] runtime={} commit_publish_ms={:.3}",
+                    kind.as_str(),
+                    commit_started.elapsed().as_secs_f64() * 1000.0,
+                );
                 return Ok(RuntimeCheckOutcome::Ready);
             }
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
@@ -6241,9 +6265,36 @@ impl Core {
                 request_id,
                 operation,
                 input,
+                send_input_file_path,
             } => {
                 let operation =
                     rovai_core::thread_compat::canonical_operation(&operation).to_string();
+                let send_input_file_path = match send_input_file_path {
+                    Some(path) if operation == CAMP_MESSAGE_SEND_TOOL_NAME => {
+                        match rovai_core::builtin_tool_transport::normalize_send_input_file_path(
+                            Path::new(&path),
+                        ) {
+                            Some(path) => Some(path),
+                            None => {
+                                return builtin_tool_rejection(
+                                    &operation,
+                                    &request_id,
+                                    "builtin_tool.invalid_input",
+                                    "Send input source must be an absolute file path.",
+                                );
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        return builtin_tool_rejection(
+                            &operation,
+                            &request_id,
+                            "builtin_tool.invalid_input",
+                            "Input source metadata is only supported for Send.",
+                        );
+                    }
+                    None => None,
+                };
                 let input =
                     match rovai_core::thread_compat::normalize_builtin_input(&operation, input) {
                         Ok(input) => input,
@@ -6345,16 +6396,17 @@ impl Core {
                         return builtin_tool_rejection(&operation, &request_id, &code, &message);
                     }
                 }
-                let digest = match request_digest(&operation, &input) {
-                    Ok(digest) => digest,
-                    Err(error) => {
-                        eprintln!("failed to digest Built-in Tool request: {error:#}");
-                        return BuiltinToolIpcResponse::ipc_error(
-                            "builtin_tool.invalid_input",
-                            "Operation input could not be normalized",
-                        );
-                    }
-                };
+                let digest =
+                    match request_digest(&operation, &input, send_input_file_path.as_deref()) {
+                        Ok(digest) => digest,
+                        Err(error) => {
+                            eprintln!("failed to digest Built-in Tool request: {error:#}");
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.invalid_input",
+                                "Operation input could not be normalized",
+                            );
+                        }
+                    };
                 match self
                     .builtin_tool_leases
                     .replay(&auth, &request_id, &digest)
@@ -6483,6 +6535,7 @@ impl Core {
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
                         Some(request_id.clone()),
                         source_files,
+                        send_input_file_path,
                         &authorized.run_tmp,
                     )
                     .await;
@@ -6790,6 +6843,7 @@ impl Core {
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
         source_files: Vec<rovai_core::local_attachment_source::LocalAttachmentSourceRef>,
+        send_input_file_path: Option<String>,
         run_tmp: &Path,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
@@ -6889,6 +6943,7 @@ impl Core {
                 "idempotentReplay": false,
                 "receiptId": null,
                 "operationProjection": operation_projection,
+                "sendInputFilePath": send_input_file_path,
             });
             ExecutionEvidenceService
                 .record_builtin_tool_started(
@@ -7710,6 +7765,7 @@ impl Core {
                 "receiptId": evidence_receipt_id,
                 "operationProjection": operation_projection,
                 "coreEnvelope": core_envelope,
+                "sendInputFilePath": send_input_file_path,
             });
             let evidence_result = {
                 let mut database = self.database.lock().await;
@@ -12288,7 +12344,8 @@ impl Core {
         executable_path: &Path,
         purpose: RuntimeLaunchPurpose,
         fingerprint: Option<&str>,
-        known_version: Option<&str>,
+        known_snapshot: Option<&AdapterCapabilitySnapshot>,
+        catalog_requested: bool,
     ) -> Result<RuntimeDeepProbeResult> {
         eprintln!(
             "[model-catalog] probe runtime={} mode=full full_probe_count=1",
@@ -12300,13 +12357,32 @@ impl Core {
         if !runtime_launch_allowed(adapter_kind, purpose) {
             anyhow::bail!("runtime_launch_disallowed_for_{purpose:?}");
         }
+        let known_snapshot = known_snapshot.filter(|snapshot| {
+            fingerprint.is_some() && snapshot.executable_fingerprint.as_deref() == fingerprint
+        });
+        let known_version = known_snapshot
+            .and_then(|snapshot| snapshot.reported_version.as_deref())
+            .map(str::trim)
+            .filter(|version| !version.is_empty());
+        let static_capabilities = known_snapshot
+            .filter(|snapshot| {
+                snapshot.probe_status == "ready"
+                    && snapshot.stale_at.is_none()
+                    && snapshot.last_successful_probe_at.is_some()
+            })
+            .map(|snapshot| snapshot.capabilities.as_slice())
+            .unwrap_or_default();
         let attempted_at = chrono::Utc::now().to_rfc3339();
         let registry = AgentRuntimeAdapterRegistry::default();
         let (snapshot, failure) = match adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
-                let checked =
-                    health::codex_capability_probe_at(executable_path, fingerprint, known_version)
-                        .await;
+                let checked = health::codex_capability_probe_at(
+                    executable_path,
+                    fingerprint,
+                    known_version,
+                    static_capabilities,
+                )
+                .await;
                 let probe = checked.result;
                 let authentication_status = probe_authentication_status(probe.status).to_string();
                 let status = probe_status_name(probe.status).to_string();
@@ -12327,7 +12403,9 @@ impl Core {
                 )
             }
             rovai_core::agent_profile::AdapterKind::Pi => {
-                let probe = health::pi_capability_probe_at(executable_path, fingerprint).await;
+                let probe =
+                    health::pi_capability_probe_at(executable_path, fingerprint, known_version)
+                        .await;
                 let last_error = (probe.result.status != health::AgentRuntimeProbeStatus::Ready)
                     .then(|| probe.result.detail.clone())
                     .flatten();
@@ -12366,6 +12444,8 @@ impl Core {
                     kind,
                     purpose,
                     fingerprint,
+                    known_version,
+                    catalog_requested,
                 )
                 .await;
                 (
@@ -12400,8 +12480,13 @@ impl Core {
                 )
             }
             rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => {
-                let probe =
-                    health::claude_code_capability_probe_at(executable_path, fingerprint).await;
+                let probe = health::claude_code_capability_probe_at(
+                    executable_path,
+                    fingerprint,
+                    known_version,
+                    static_capabilities,
+                )
+                .await;
                 let failure = probe.result.failure.clone();
                 let snapshot =
                     registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
@@ -12418,8 +12503,13 @@ impl Core {
                 (snapshot, failure)
             }
             rovai_core::agent_profile::AdapterKind::AntigravityApp => {
-                let probe =
-                    health::antigravity_capability_probe_at(executable_path, fingerprint).await;
+                let probe = health::antigravity_capability_probe_at(
+                    executable_path,
+                    fingerprint,
+                    known_version,
+                    static_capabilities,
+                )
+                .await;
                 let failure = probe.result.failure.clone();
                 let builtin_cli_ready = bundled_cli_executable().is_ok_and(|path| path.is_file());
                 let snapshot =
@@ -12488,6 +12578,7 @@ impl Core {
                 RuntimeLaunchPurpose::InstallationRefresh,
                 None,
                 None,
+                false,
             ),
         )
         .await?;
@@ -15625,7 +15716,7 @@ impl Core {
                 .await
                 .context("Runtime entry resolution worker failed")?;
                 if observation.discovery_status == RuntimeDiscoveryStatus::Found {
-                    let verified = self.verify_runtime_entry(&observation).await?;
+                    let verified = self.verify_runtime_entry(&observation, None).await?;
                     let _update = self.runtime_search_update.lock().await;
                     anyhow::ensure!(
                         self.runtime_search_environment.read().await.generation()
@@ -26276,6 +26367,7 @@ async fn process_runtime_check_manager(
                                 worker_purpose,
                                 worker_deadline,
                                 worker_search,
+                                worker_catalog_only,
                             )
                             .await
                     }
@@ -26477,14 +26569,11 @@ fn agent_run_public_failure(
     raw_detail: &str,
     sensitive_paths: &[(&Path, &str)],
 ) -> RuntimeFailureView {
+    if error_code == "context_payload_too_large" {
+        return rovai_core::runtime_failure::context_payload_too_large_failure(runtime_kind);
+    }
     let runtime_name = runtime_display_name(runtime_kind);
     let (origin, phase, summary, retryable) = match error_code {
-        "context_payload_too_large" => (
-            RuntimeFailureOrigin::Rovai,
-            RuntimeFailurePhase::Execution,
-            "Rovai 无法安全生成本次 Runtime 输入".to_string(),
-            false,
-        ),
         "workspace_unavailable" => (
             RuntimeFailureOrigin::Environment,
             RuntimeFailurePhase::Spawn,
@@ -27694,7 +27783,11 @@ mod tests {
 
     #[test]
     fn runtime_check_activity_has_two_slots_and_one_terminal_owner() {
-        for kind in [AdapterKind::Pi, AdapterKind::CodexCli] {
+        for kind in [
+            AdapterKind::Pi,
+            AdapterKind::MinimaxCodeCli,
+            AdapterKind::CodexCli,
+        ] {
             for catalog_only in [false, true] {
                 for trigger in [
                     RuntimeCheckTrigger::CatalogOpen,
@@ -27716,7 +27809,11 @@ mod tests {
                         attempt_id: "fixture".into(),
                         runtime_kind: kind,
                         purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                        trigger,
+                        trigger: if catalog_only {
+                            RuntimeCheckTrigger::CatalogOpen
+                        } else {
+                            RuntimeCheckTrigger::UserCheck
+                        },
                         catalog_only,
                         started_at: tokio::time::Instant::now(),
                         deadline: tokio::time::Instant::now(),
@@ -27735,7 +27832,7 @@ mod tests {
                     };
                     assert_eq!(
                         attempt.accepts(&request, &target),
-                        kind != AdapterKind::Pi
+                        !matches!(kind, AdapterKind::Pi | AdapterKind::MinimaxCodeCli)
                             || catalog_only == (trigger == RuntimeCheckTrigger::CatalogOpen)
                     );
                     let mut changed = target.clone();
@@ -28558,7 +28655,9 @@ mod tests {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .light_ready_snapshot(
                 AdapterKind::TraeCnCli,
-                Some("trae-cli version obsolete".to_string()),
+                // These fixtures replace the program from --version. A trusted
+                // seeded version would correctly skip that trigger entirely.
+                None,
                 fingerprint.clone(),
                 chrono::Utc::now().to_rfc3339(),
             )
@@ -29046,6 +29145,7 @@ done
                 .commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
+                        model_catalog_complete: true,
                         executable_file_identity:
                             rovai_core::agent_runtime_adapter::observe_executable_file_identity(
                                 std::path::Path::new(&(executable.to_string_lossy().into_owned())),
@@ -29304,7 +29404,7 @@ done
             )
             .unwrap()
             .map(|installation| (installation.id, installation.version));
-        let verified = core.verify_runtime_entry(&observation).await.unwrap();
+        let verified = core.verify_runtime_entry(&observation, None).await.unwrap();
         core.publish_runtime_discovery(observation, Some(verified), current)
             .await;
     }
@@ -29456,7 +29556,7 @@ done
                     )
                     .unwrap()
                     .unwrap();
-                let stale = core.verify_runtime_entry(&observation).await.unwrap();
+                let stale = core.verify_runtime_entry(&observation, None).await.unwrap();
                 write_runtime_resolution_executable(&executable, "#!/bin/sh\n# upgraded\nexit 1\n");
                 let search = core.runtime_search_environment.read().await.clone();
                 let (upgraded, verified) =
@@ -29513,6 +29613,7 @@ done
                             hidden: false, deprecated: false, options: Vec::new(),
                         });
                         service.commit_verified_managed_installation(database, VerifiedManagedInstallation {
+                            model_catalog_complete: true,
                             executable_file_identity: observe_executable_file_identity(&executable).ok(),
                             adapter_kind: kind, executable_path: executable.to_string_lossy().into_owned(),
                             command_name: "codex".into(), source: InstallationSource::Manual,
@@ -29530,7 +29631,7 @@ done
                 restore(&mut *core.database.lock().await, false);
                 for verified in [false, true] {
                     let found_target = core.runtime_check_installation_target(kind).await.unwrap().map(|target| (target.id, target.version));
-                    let found_entry = core.verify_runtime_entry(&upgraded).await.unwrap();
+                    let found_entry = core.verify_runtime_entry(&upgraded, None).await.unwrap();
                     std::fs::rename(&executable, root.join("temporarily-absent")).unwrap();
                     let (missing, _) = rovai_core::runtime_discovery::discover_runtime_entry_from_candidates(
                         kind, &search, search.candidates(kind, std::iter::empty()), None,

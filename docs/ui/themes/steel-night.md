@@ -129,6 +129,17 @@ Rail and selected surfaces stay unchanged; status, identity and evidence keep th
 
 | Token | Value |
 |---|---:|
+| `--memory-rail` | `#151515` |
+| `--memory-overlay` | `rgba(0, 0, 0, .58)` |
+| `--memory-canvas` | `#1b1b1b` |
+| `--memory-surface` | `#202020` |
+| `--memory-raised` | `#242424` |
+| `--memory-selected` | `#303030` |
+| `--memory-hover` | `#262626` |
+| `--memory-line` | `#383838` |
+| `--memory-ink` | `#ededed` |
+| `--memory-muted` | `#b6b6b6` |
+| `--memory-input-line` | `#444444` |
 | `--neutral-selected` | `#292e32` |
 | `--neutral-hover` | `#23292e` |
 | `--conversation-action` | `#e5e5e7` |
@@ -295,4 +306,4 @@ overridden there intentionally inherit shared geometry and aliases from `:root`.
 Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
 first-paint system resolution and switching themes while Draft, focus, selection and overlays are active.
 
-Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. These workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns and sidebar backgrounds retain their existing tokens. Focus tokens do not require an extra outline, halo or focused input border.
+Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. Memory uses the achromatic `--memory-*` surface, input and text family, with the same neutral primary-action hierarchy. Add/revise actions use Memory ink on canvas (inverted at night); other workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns retain their existing tokens; the Memory route applies its neutral rail variant without changing other routes. Focus tokens do not require an extra outline, halo or focused input border.

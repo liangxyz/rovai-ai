@@ -2143,7 +2143,6 @@ pub fn pi_machine_ready_requirements() -> Vec<String> {
         "pi.rpc.get_state",
         "model.dynamic_catalog",
         "session.new",
-        "conversation.exact_resume",
     ]
     .into_iter()
     .map(str::to_string)
@@ -2389,12 +2388,7 @@ pub fn validate_grok_machine_ready_evidence(
     executable_fingerprint: Option<&str>,
     capabilities: &[String],
 ) -> Result<()> {
-    let required = [
-        "acp.initialize",
-        "grok.authenticate",
-        "session.new",
-        "session.resume",
-    ];
+    let required = ["acp.initialize", "grok.authenticate", "session.new"];
     let missing = required
         .into_iter()
         .filter(|required| !capabilities.iter().any(|capability| capability == required))
@@ -2404,7 +2398,7 @@ pub fn validate_grok_machine_ready_evidence(
         || !missing.is_empty()
     {
         anyhow::bail!(
-            "Grok Build machine Ready evidence requires version >= {} and standard ACP resume{}",
+            "Grok Build machine Ready evidence requires version >= {} and authenticated ACP initialization{}",
             GROK_BUILD_MINIMUM_VERSION_LABEL,
             if missing.is_empty() {
                 String::new()
@@ -4719,7 +4713,7 @@ mod tests {
         load_only
             .capabilities
             .retain(|capability| capability != "session.resume");
-        assert!(validate_machine_ready_snapshot(AdapterKind::GrokBuild, &load_only).is_err());
+        validate_machine_ready_snapshot(AdapterKind::GrokBuild, &load_only).unwrap();
     }
 
     #[test]

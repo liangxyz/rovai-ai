@@ -227,6 +227,27 @@ test('execution cards update phase-only feedback and keep their live line anchor
         await browser.wait(`document.querySelector('.tool-group-items .tool-call-disclosure')?.open === true`)
         assert.equal(await browser.evaluate(`document.querySelector('.tool-activity-group').open`), true,
           `${label}: child disclosure must not collapse its group`)
+        // Preserve the unfinished tool evidence while only its parent becomes
+        // terminal, as in agy's partial-success exit. No result may be invented.
+        for (const runStatus of ['succeeded', 'failed', 'cancelled']) {
+          await browser.evaluate(`window.executionTransition.setRunStatus('${runStatus}')`)
+          const status = runStatus === 'cancelled' ? 'stopped' : 'recorded'
+          await browser.wait(`!!document.querySelector('.tool-group-items .tool-call-state.status-${status}')`)
+          await browser.evaluate(`document.querySelector('.execution-history-toggle[aria-expanded="false"]')?.click()`)
+          await browser.wait(`document.querySelector('.tool-group-items .tool-call-state.status-${status}')?.checkVisibility() === true`)
+          assert.equal(await browser.evaluate(`document.querySelectorAll('.tool-group-items .tool-call-state.status-running, .tool-group-items .tool-call-state.status-waiting').length`), 0,
+            `${label}/${runStatus}: terminal tools must not keep spinning or waiting`)
+          assert.equal(await browser.evaluate(`document.querySelector('.tool-group-items .tool-call-state.status-${status}').getAttribute('aria-label')`),
+            runStatus === 'cancelled' ? '已停止' : '结果未知')
+          assert.equal(await browser.evaluate(`!!document.querySelector('.tool-group-items .tool-call-state.status-completed')`), true,
+            `${label}/${runStatus}: completed results must remain successful`)
+          assert.equal(await browser.evaluate(`document.querySelector('.tool-activity-group').open`), true,
+            `${label}/${runStatus}: terminal updates must preserve disclosure state`)
+          if (runStatus === 'succeeded') {
+            await browser.evaluate(`document.querySelector('.tool-group-items .tool-call-state.status-recorded').scrollIntoView({ block: 'center' })`)
+            await browser.capture(join(fixture, `${theme}-${mode}-terminal-tools.png`))
+          }
+        }
         await browser.evaluate(`{ const details = document.querySelector('.tool-activity-group'); if (details) details.open = false }`)
         await browser.wait(`document.querySelector('.tool-activity-group')?.open === false`)
       }

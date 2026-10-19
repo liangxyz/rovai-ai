@@ -1,43 +1,33 @@
-# Rovai AI v0.4.15
+# Rovai AI v0.4.16
 
 <!-- lang:zh-CN -->
 
-本次更新合并上游 v0.4.13 的全部变更，并保留此前修复的定时任务会话删除问题。主要新增 MiniMax Code 接入，支持网页版文件上传与下载、文件预览自动刷新和执行来源定位，并修复网页断线后无法继续发送的问题。
+本次更新合并上游 v0.4.13 之后的 11 项修复与改进，包括记忆页面重做、超长输入失败提示、Antigravity 长回合以及发送文件的差异统计。
 
-- 【功能】**新增 MiniMax Code 接入。** 支持使用本机官方 `mcode`，读取原生模型与思考档位配置，接入 Skills、MCP、图片与文件工具，并支持插话和会话恢复。
-- 【功能】**网页版单文件上传上限提高至 30 MiB。** 增加上传进度和取消操作；上传失败或取消时，保留正文和其他附件。
-- 【功能】**网页版支持直接下载文件。** 可在文件查看区下载到本机，无法在线预览的文件也可下载。采用流式传输，进度与取消由浏览器管理，不再受在线预览大小限制。
-- 【功能】**文件保存后，预览自动更新。** 支持文本、Markdown、代码、图片和 HTML；后台标签在重新打开时更新。大文本刷新后尽量保留原阅读行号，读取失败时保留旧内容。
-- 【功能】**执行记录支持定位原消息。** 可查看触发本次执行的消息，多条输入可展开来源列表；定位后可返回原执行位置，不影响正在编辑的草稿。
-- 【功能】**会话任务改为按需开启。** 默认关闭，可在“通用设置”中开启。关闭后隐藏任务面板、提醒和队员任务工具，已有任务记录保留，不中断当前执行。
-- 【界面】**调整会话中的文件列表。** 队员发送的文件改为紧凑单列，宽度与差异卡片对齐，点击整行即可打开；窄窗口下保持自适应。
-- 【交互】**统一网页链接的显示和操作。** 消息、输入框、单聊和使命描述中的网页链接使用统一图标；编辑使命时可直接打开或复制链接，不打断当前编辑。
-- 【修复】**修复网页断线后一直提示“原提交仍待核对”的问题。** 服务断开时保留页面和草稿，提供“恢复连接并重试”入口；恢复时先核对原提交结果，再重试未完成的操作，避免重复提交。
-- 【修复】**修正部分智能体的执行结束判断。** 本轮已正常发送回复、工具操作也已结束时，不再仅因原生结束文本为空而误报失败；真实错误和取消仍会如实显示。
-- 【优化】**精简单聊中的重复上下文。** 减少每轮重复传入的固定说明，不改写已有会话记录和历史输入。
+- 【新增】**记忆页面改为紧凑的中性色工作区，并提供更准确的变更提示。**
+- 【修复】**超长输入被拒绝后，会话里会明确显示失败原因。** 之前消息被领取后才发现输入过长，界面没有任何反馈。
+- 【修复】**Antigravity 的长回合可以完整结束，工具调用的反馈也会正确收尾。**
+- 【修复】**通过输入文件发送的内容不再计入本次运行的文件差异。**
+- 【修复】**定时任务窗口可以重新拖动。**
+- 【修复】**输入框里的链接高亮在打字时保持稳定。**
+- 【修复】**会话上下文环改为中性色显示。**
+- 【优化】**运行时检查复用最终的身份验证结果，并保留完整的 MiniMax 模型目录，检查更快。**
 
-感谢 [@liangxyz](https://github.com/liangxyz) 在 [#779](https://github.com/murray17/rovai-ai/issues/779) 中持续补充网页版问题的复现信息，也感谢最早反馈 Server 停服后提交卡住问题的用户。
-
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.14...v0.4.15)
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.15...v0.4.16)
 
 ---
 
 <!-- lang:en -->
 
-This release merges all upstream v0.4.13 changes and keeps the earlier fix for deleting Conversations produced by scheduled tasks. Main additions: MiniMax Code, browser file uploads and downloads, automatic file preview refresh, and links from executions to their source messages. It also fixes Web submissions that remained blocked after a service disconnect.
+This release merges 11 fixes and improvements made upstream after v0.4.13, including a redesigned Memory page, clearer failures for oversized input, long Antigravity turns, and run diffs for sent files.
 
-- [Feature] **Add MiniMax Code.** Connect the official local `mcode` CLI, read its native models and thinking levels, and use Skills, MCP, image and file tools, steering, and session recovery.
-- [Feature] **Increase the Web upload limit to 30 MiB per file.** Uploads now show progress and can be cancelled. Failed or cancelled uploads preserve the message text and other attachments.
-- [Feature] **Download files directly from the Web app.** Download from the file viewer even when online preview is unavailable. Files stream to the browser, which manages progress and cancellation, independently of the preview size limit.
-- [Feature] **Refresh file previews after saving.** Text, Markdown, code, images, and HTML update automatically. Background tabs refresh when shown again. Large text previews try to retain the visible line, and failed reads keep the previous content.
-- [Feature] **Navigate from an execution to its source messages.** See the messages that triggered a run, expand the source list for multiple inputs, and return to the execution after navigating without changing the current draft.
-- [Feature] **Make conversation Tasks optional.** Tasks are off by default and can be enabled in General settings. Turning them off hides the task panel, notifications, and teammate task tools while preserving existing records and running executions.
-- [UI] **Adjust conversation file lists.** Teammate files use a compact single-column list aligned with diff cards. The entire row opens the file, and the list adapts to narrow windows.
-- [Interaction] **Use consistent web-link icons and actions.** Messages, composers, Single Chat, and Mission descriptions share the same link icon. Open or copy links while editing a Mission without interrupting the edit.
-- [Fix] **Recover Web submissions blocked by an unresolved earlier request.** Keep the page and drafts during disconnection and provide a “Reconnect and retry” action. Recovery checks the original result before retrying unfinished work to avoid duplicate submissions.
-- [Fix] **Correct completion handling for some runtimes.** A run that has sent its reply successfully and finished its tool operations is no longer reported as failed solely because its native final text is empty. Actual errors and cancellation remain visible.
-- [Optimization] **Remove redundant Single Chat context.** Send fewer repeated fixed instructions on each turn without rewriting existing conversation records or historical inputs.
+- [Feature] **The Memory page is now a compact neutral-color workspace with more accurate change notices.**
+- [Fix] **A message rejected for oversized input now shows the failure in the conversation.** Previously the input was found too large only after the message was claimed, and the interface gave no feedback.
+- [Fix] **Long Antigravity turns can now finish, and tool-call feedback settles correctly.**
+- [Fix] **Content sent through input files is no longer counted in a run's file diff.**
+- [Fix] **The scheduled task window can be dragged again.**
+- [Fix] **Link highlights in the composer stay stable while typing.**
+- [Fix] **The session context ring is now shown in a neutral color.**
+- [Improvement] **Runtime checks reuse the final identity verification and keep complete MiniMax model catalogs, so they run faster.**
 
-Thanks to [@liangxyz](https://github.com/liangxyz) for continuing to provide Web issue reproduction details in [#779](https://github.com/murray17/rovai-ai/issues/779), and to the user who first reported submissions getting stuck after stopping the Server.
-
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.14...v0.4.15)
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.15...v0.4.16)

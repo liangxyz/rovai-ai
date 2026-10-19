@@ -3,10 +3,105 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 ---
 
 # v1.72 实施与验收
+
+## 记忆工作区 R4（2026-10-19）
+
+User 批准独立 worktree 实施、PR 合入 main，并从最新 main 构建安装本机 App。
+分支 `rovai/memory-r4-ui`，worktree 为同级 `rovai-ai-memory-r4`，基线
+`0fc75fda45ad7765c2ee22440464da767e718bd3`。最终 R4 HTML 的 SHA-256 为
+`29cb2e955daa7eae9f5c5bbed533ccff134d89875fa3a21866c8bfe55e54a62f`。
+
+实现采用生产 MemoryLibrary 和共享 Dialog/Menu 组件；统一灰阶 token，保留原 App shell，移除容量和
+治理筛选，增加 All 范围并兼容旧导航状态。列表只压缩预览，正文和版本仍可完整展开。
+编辑保留字节校验、草稿和冲突后显式重试；领域容量、持久化和权限约束不改变。
+自动通知按 Memory ID 合并事件，区分创建/修订；scope 缺失时通过已有 `memory.get` 补足，查询失败显示
+通用“记忆”而不猜测共同范围。迟到读取不能恢复已关闭通知。
+
+保持 v1.72；这是局部可逆的 Renderer 调整，不新增 Version Decision、协议或数据库迁移。
+同步 DESIGN、主题和 Memory surface brief、开发验收命令；Architecture、Contracts、Runtime Activity、
+模型输入、Runtime compatibility 与根 README 无变化。退役已移除容量组件的 TypeScript 展示测试，
+用通知归属/去重测试及生产组件交互验收覆盖新行为；没有新增、合并或退役 Rust 测试。
+
+验证：`pnpm typecheck`、`pnpm test`（246 个 Vitest 文件 / 2,800 项，Node 357 通过、2 项平台跳过）、
+`pnpm test:rust:pr`（474 通过、1 项既有忽略）与真实 base 的 `docs:check:ci` 通过。
+`test:memory-workspace-ui` 覆盖 10 组双主题/尺寸，完整正文、折叠版本、全部范围、通知查看/关闭、草稿、
+校验、失败与冲突显式重试、操作对齐与黄点居中；`test:memory-web-ui` 通过真实 Host 的手机新增、修订、
+返回及重入。`test:navigation-shell` 通过。隔离 `accept:memory-ui` 通过实际 Core IPC、复核设置/并发冲突、
+停止/恢复、永久遗忘、SQLite 重开以及日夜/200% 缩放。
+
+补充边界：`test:startup-presentation` 的 `runtime.availability.updated: refresh health once` 断言在本分支和
+原始基线 `0fc75fda` 均失败，不由本次 Memory 改动引入。既有 `test:host-web-mobile` 在进入 Memory 前的
+导航槽位/旧 CSS 断言失败，另有横屏执行台及缺少 debug Server 产物的问题；本次不修改这些无关行为，
+以独立生产 Web/Host Memory 验收证明本次路径。
+初次打包在前置构建完成后遇到 GitHub DNS 失败；按 packaging 文档校验 Electron 缓存 SHA-256 后，
+继续相同 daily ad-hoc 打包参数并通过 App/Core/CLI/Host 架构与签名门。日常安装使用非终止交接，
+最终 main 提交与安装位置记录在 Thread 交付中。
+
+## Antigravity 长任务与工具收尾（2026-10-19）
+
+User 批准独立 worktree 实施、创建 PR 并合入 main。分支 `rovai/fix-antigravity-turn-timeout`，
+worktree 为同级 `rovai-ai-antigravity-timeout`，基线 `90b4f46b458943170a1f1541cb2928f320db311c`。
+真实 agy 1.4.2 复现中，短请求与多工具请求完成；长请求在第六轮工具未收口时结束，Run 总计 311.7 秒、
+输入准备后 300.7 秒，后端错误地呈现成功。该五分钟复现没有直接出现空正文，不能与原用户反馈混为同一次证据。
+[上游 1.1.28](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md#1128) 明确
+超时返回部分结果并成功退出；[1.2.6](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md#126)
+已默认不限时，但旧适配器的显式 `5m` 覆盖了该值。
+
+生产改动为 `--print-timeout 0`、精确原生 stderr 超时识别及共享终态工具投影。没有数据库迁移、
+模型输入或原生配置更改；没有取消初始化、停止与清理期限。缺失工具结果显示未知，底层 Evidence
+和迟到结果保持。保持 v1.72；局部可逆修复不新增 Version Decision，当前合同、架构和 UI 同步；
+Runtime Activity 映射、准入资格、根 README 和文档路由保持。
+
+Rust 扩展既有 `structured_runtime_failure_preserves_sanitized_provider_detail` 进程 owner，覆盖零退出
+部分文本／空白文本超时及原有配额失败脱敏；现有工具生命周期 owner 同时验证无限时参数与非致命警告。
+没有新增或退役独立 Rust 测试。最小回归为 `cargo test -p rovai-core --lib antigravity::tests::`。
+原有人工 smoke 新增显式 `ROVAI_ANTIGRAVITY_LONG_TURN_SMOKE=1` 入口，以真实适配器顺序执行八次 40 秒只读命令，
+不进入普通测试。UI 在既有分组 owner 和生产 ThreadWorkspace 浏览器 fixture 中验证三种终态与展开状态。
+
+真实适配器长任务使用 agy 1.4.2、原生默认模型，在独立临时 workspace 和日志目录执行，367.81 秒后
+返回 `AGY_LONG_TURN_OK`；跨过旧期限并保留正常最终结果。未启动第二个 Core 或修改日常 App 数据。
+第一次人工验收沿用了旧 CoreEnforcedV1/read_only 配置，会强制 plan 模式，在 63.94 秒返回空正文；
+它不是长任务通过证据，也说明空正文不能一概归因于五分钟时限。本次只对有明确超时证据的结果重新分类，
+其他空正文仍诚实失败；长任务 fixture 已使用当前 RuntimeManagedV2 权限语义。
+
+提交前定向 Antigravity 回归 16 passed、1 项人工 smoke 默认 ignored；默认 Rust workspace、
+`pnpm typecheck`、`pnpm test`（2798 项 Vitest、后续 Node 357 passed／2 个平台 skip）、
+`pnpm build:desktop`、真实 base SHA 的 `docs:check:ci`、Rust 格式与差异空白检查均通过。
+生产 ThreadWorkspace 浏览器验收覆盖日夜主题 × 底部／Inspector／Mobile，三种 Run 终态均无悬挂
+工具转圈，成功结果与展开状态保持；两轮截图检查确认结果未知图标可见。Impeccable 本次目标静态检查无发现。
+
+## Composer 链接高亮稳定性（2026-10-19）
+
+按 User 确认在独立 worktree 的 `rovai/composer-link-stability` 分支实施，基线为 `4ccfd8270`。
+生产改动集中在 `composer-web-links.ts`：每个已识别链接保存内存中的 TextNode key 和逻辑 offset，
+按节点索引接收 DOM 提交后的 mutation，包括节点销毁。仅比较相关节点的前后文本，将链接之外的
+编辑映射到既有 Range；不读取布局，不在输入路径遍历整棵编辑树或全部链接，不产生 editor update、草稿字段、
+保存或撤销记录。单个变化节点采用一个保守替换区间；改到 URL／尾部、跨节点或无法验证原文的范围
+立即撤下，150 ms 合并投影及用户操作前的刷新负责完整语义。卸载和草稿替换释放旧记录。
+
+在生产 Composer 的隔离 Electron fixture 中，先添加回归，再修改生产代码：原版在同 TextNode 尾部
+更新后，高亮 Range 的文本立即变为空串；修复后提交同步时和第一帧均保留原 URL 与同一 Range。
+新增 5 组回归覆盖前方插入／删除、重复 URL 位移碰撞及释放、日夜主题逐帧连续输入与前后方 IME、
+URL 自身／尾部修改及操作前目标刷新、节点拆合、跨行代码围栏与撤销。原有长草稿、原文、Atom、
+复制／发送、保存／恢复和无 Highlight 能力回归继续通过，共 46 个原生场景；Chrome Web 链接用例通过。
+IME 证据来自 CDP 组合输入事件，不替代每种系统输入法的真人验收。
+
+同机、隔离 Electron、没有并行运行本任务编译的前后采样，单位 ms。每个值包含一次 CDP 输入与两帧，
+不是纯范围维护耗时；本组只用于发现明显输入回退，不声称普遍性能提升。
+
+| 草稿 | 修复前六次输入 | 修复后六次输入 |
+| --- | --- | --- |
+| 112034 字符单行 | 34, 33, 34, 33, 33, 34 | 26, 33, 33, 34, 33, 34 |
+| 800 行／26190 字符 | 18, 33, 34, 33, 34, 33 | 18, 33, 34, 34, 33, 33 |
+
+完整识别仍在连续输入结束后合并执行；原有投影次数和保存版本断言继续通过。
+提交前 `pnpm typecheck`、`pnpm test`（2798 项 Vitest；后续 Node 回归 357 passed、2 个平台 skip）、
+`pnpm build:desktop`、`docs:check:ci`（真实 base SHA）及差异空白检查通过；默认 Rust workspace 为
+474 passed、1 ignored。Impeccable 对本次生产目标的静态检测无发现。未运行真实模型或改动日常 App 数据。
 
 ## 文件预览自动刷新（2026-10-18）
 
@@ -3283,3 +3378,209 @@ Codex 为 `0.162.1`；不向模型提交 Prompt。以下为 RPC 发出至回复�
 各次检查 RPC 结束到该行恢复期间只发起 Runtime 状态和安装列表读取，没有等待 Overview、记忆或 Git 探针。全 App 在第三次检查期间另有既有导航、使命与通知轮询，与检查完成回调分开；最初把整个 App 期间都断言为“没有导航请求”过宽，因此按真实完成区间核对，未为此修改生产逻辑。
 
 以上为开发版 App 的实际操作样本，没有旧版桌面点击到渲染对照，不能据此证明单项检查稳定提速，也不替代 Windows 或打包 Release 验收。主要等待仍在约 1.9–2.2 秒的完整检查 RPC；本次不继续扩展后端验证或增加性能平台。
+
+## 单项检查必要工作减重（2026-10-19）
+
+基于主线 `7000026f3ed148233591c00dcc44784525c0835e`，在独立 worktree 的
+`rovai/runtime-check-simplify` 分支实施。没有恢复此前撤回的界面改动；“重新检测”“检查状态”、
+页面布局／文案／状态映射、安装登录引导与平台准入保持。PR #807 的行级等待和 Runtime 刷新不重做。
+当前边界同步到 [Runtime Launch v64](../../contracts/runtime-launch-and-verification-v64.md)。
+
+### 删除与复用的实际工作
+
+- MiniMax 普通检查保留 initialize、认证、一次必要 session/new、当前模型及目录一致性，删除逐模型
+  set_config_option 和最后恢复；仅原 CatalogOpen 请求保留完整参数遍历。同一 Check Manager 的
+  pending/active 用既有 trigger 区分 MiniMax 意图，同意图／同目标继续合并；首次目录回退仍传递目录意图。
+- 健康成功与完整目录成功使用既有字段分别写入。普通检查保留同一有效身份／配置的完整目录和原时间；
+  无完整目录只保存已读信息，不以健康成功时间回填 MiniMax 目录时间。现有 unavailable/invalidated
+  使部分结果不参与已保存参数过滤，没有新增目录状态或持久字段。复用成功写入 helper 删除原重复 SQL。
+- Pi 删除 new_session/get_state/switch_session/get_state 四次演练 RPC 及专用 locator 记录；
+  Grok 删除 resume 与重复 set_model，Kiro 删除重复 set_model；同步收窄普通 Ready 要求，不伪造实测标志。
+  ZCode 由明确 probe 入口跳过 subscribe/setMode；正式 new/resume 保持，未以有无 Prompt 判断。
+- 将既有可信版本传给现有检查函数；成功、同身份、未失效能力快照可复用 Claude/Antigravity help 与
+  Codex 普通 Schema 证据。动态认证、模型读取、最低版本/启动代际门槛仍保留。OpenCode 版本为空时沿
+  既有代际门槛失败，不再运行第二遍版本命令。Codex 仍一个 app-server 完成通知、认证及模型分页，
+  可选 Fast 缺证据时仍可单独导出 experimental Schema，失败不降级普通能力。
+- 安装 ID/version、locator、文件身份与锁外复核沿已合入流程；正式运行、恢复、权限及模型应用未删改。
+  没有新表、迁移、缓存体系、后台服务、检查模式、第二套代次、管理器或性能平台。
+
+### 定向验收与计数
+
+新增一个 MiniMax 集成 owner，使用现有 Core/DB/Check Manager 与临时协议进程；准入原因及旧测试要求
+退役记录见 [Rust 测试准入](../../development/testing.md#单项-runtime-检查减重)。其他情况扩展原测试。
+
+| 验收项 | 结果 |
+| --- | --- |
+| MiniMax 2/8 模型、检查先到/目录先到 | 普通检查模型设置 0、恢复 0；目录请求为 N+1；各 probe 仅一次 session/new、Prompt 0；pending/active 同类合并、异类不冒充完成 |
+| 首次目录及参数保留 | 无健康快照时完整检查回退取得全部参数；部分结果 unavailable；完整目录内容/时间保留；失效后部分结果不复活旧目录；前端保存参数不被过滤 |
+| Pi/Grok/Kiro/ZCode | 既有协议夹具计数分别删除 4/2/1/2 次 RPC，必要初始化成功；Grok/Kiro 当前模型缺失仍失败；Pi/ZCode 正式会话与 ACP 恢复测试保持 |
+| 静态证据与版本 | 可信版本不运行版本命令，未知值仅一次；Claude 4→2、Antigravity 3→1 个直接进程；Codex 可信版本/普通 Schema 证据时 1 个 app-server，可选缺证据分支另加 1 个进程；动态认证/模型失败仍失败 |
+| 安装变更/并发 | 既有环境、版本命令期间替换、Supervisor 旧失败归属、同 generation 安装变更用例通过；原安装 ID/version 与身份保护未绕开 |
+
+进程/RPC 精确计数来自受控协议进程夹具与生产调用路径，不称为对真实 CLI 后代进程的采样计数。
+
+已通过：默认 Rust workspace 474 passed、1 ignored；health 24 passed、3 ignored；OpenCode 空版本
+定向用例；ACP 正式协议 67 passed、2 ignored；Pi Host 15 passed、1 ignored；ZCode transport 5 passed；
+Adapter 25 passed；环境/管理器 8 passed；安装/快照 32 passed；最终 MiniMax 集成 owner；Renderer 参数
+36 passed；类型检查、Debug App 构建、cargo fmt、差异空白检查，以及 docs:test/docs:check/docs:check:ci。
+各集合有交叉，不将重复执行累加成总覆盖数。
+
+### 同机真实 App 前后对比
+
+使用同一 macOS arm64 与原生程序/账号配置，前后各运行隔离 `pnpm dev` Electron + Debug Core，
+等待静态发现完成，再对每款依次执行首次检查和三次重复检查。Core RPC 包围真实 runtime.product.check；
+UI 时间从真实鼠标点击事件到本行按钮恢复后的第二个 animation frame。前后安装列表的路径、指纹、
+版本逐项相同；所有检查 Prompt 为 0。不是夹具耗时，也不是打包 Release 测试。
+
+原生版本：MiniMax 0.6.12、Pi 1.1.0、Grok 1.0.50、Kiro 2.21.1、ZCode 0.16.9、Claude 2.1.287、
+Antigravity 1.4.2、Codex 0.162.1。每格「UI / RPC」，单位 ms；超时样本保留：
+
+| 智能体 | 阶段 | 首轮 | 重复 1 | 重复 2 | 重复 3 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| MiniMax | 改前 | 1666 / 1619 | 1549 / 1510 | 1549 / 1509 | 1516 / 1481 |
+| MiniMax | 改后 | 1649 / 1615 | 1433 / 1392 | 1416 / 1377 | 1400 / 1360 |
+| Pi | 改前 | 766 / 720 | 501 / 482 | 516 / 487 | 616 / 589 |
+| Pi | 改后 | 515 / 481 | 332 / 307 | 315 / 301 | 332 / 308 |
+| Grok | 改前 | 749 / 716 | 766 / 739 | 749 / 715 | 749 / 716 |
+| Grok | 改后 | 815 / 781 | 699 / 661 | 683 / 652 | 682 / 646 |
+| Kiro | 改前 | 4285 / 4252 | 2017 / 1988 | 2050 / 2009 | 2050 / 2017 |
+| Kiro | 改后 | 2334 / 2297 | 2067 / 2037 | 2084 / 2050 | 2117 / 2081 |
+| ZCode | 改前 | 4469 / 4428 | 1400 / 1360 | 1400 / 1358 | 1400 / 1367 |
+| ZCode | 改后 | 1400 / 1367 | 1067 / 1028 | 883 / 853 | 866 / 839 |
+| Claude | 改前 | 1166 / 1134 | 933 / 892 | 932 / 902 | 916 / 890 |
+| Claude | 改后 | 1149 / 1114 | 883 / 847 | 883 / 849 | 850 / 825 |
+| Antigravity | 改前 | 9856 / 9813 | 31658 / 31616（超时） | 9939 / 9885 | 7145 / 7104 |
+| Antigravity | 改后 | 5169 / 5133 | 6687 / 6658 | 6071 / 6041 | 5487 / 5456 |
+| Codex | 改前 | 3301 / 3263 | 1867 / 1829 | 1834 / 1798 | 4853 / 4830 |
+| Codex | 改后 | 2250 / 2219 | 1717 / 1682 | 1728 / 1684 | 2451 / 2416 |
+
+三次重复 UI 中位数：MiniMax 1549→1416、Pi 516→332、Grok 749→683、Kiro 2050→2084、
+ZCode 1400→883、Claude 932→883、Antigravity 9939→6071、Codex 1867→1728 ms。
+MiniMax 确实取消了本机 7 模型原来的 8 次设置，但只减少约 0.13 秒；Kiro 没有观察到提速。
+Antigravity 改前包含一次超时，Codex 也有波动，不能用三次样本宣称稳定网络性能收益。
+
+本机额外验证 MiniMax：四次普通检查后目录仍 unavailable，目录首次请求用约 1410 ms 补全参数并成为
+fresh；随后普通检查保留完整内容和目录成功时间、更新健康成功时间，按钮与启动设置可操作。额外操作的
+animation-frame 监听等待超时，后续直接读取真实 RPC 完成和按钮状态确认功能；这次补验没有
+混入上述计时样本。既有 TTL 后目录自然 stale，没有用健康检查刷新时间。参数保存和请求竞态使用上述
+定向夹具验证，不将帧监听超时误记为 Core 超时。
+
+首次指隔离数据库的首次健康检查，不代表 OS 冷启动或原生首次安装；前后顺序测试仍受原生缓存/网络影响。
+本轮没有单独测程序升级耗时、Windows、打包 Release 或真实用户任务恢复，升级身份由已有定向测试覆盖。
+认证/初始化/当前模型读取、进程回收、完整检查结束前文件复核及最终 Runtime 数据读取仍需等待；MiniMax
+完整目录打开仍执行全参数读取。未压缩超时、提前结束等待或在后台继续原普通检查。验收 App 已受控退出，
+独立 userData/Skill Library/MCP 未触及日常 App。完整计时 JSON、身份清单与截图随本次 Thread 附件交付。
+
+## 单项检查末尾复核与 Codex Fast 导出减重（2026-10-19）
+
+本次以 PR #812 的 `543ac8f63` 为对照，只补两项实际工作删减，保留前述 MiniMax、Pi、Grok、Kiro、
+ZCode 等已完成的调整。没有再改协议范围、目录、Renderer 或界面，没有新增数据表、迁移、缓存、后台服务、
+检查模式或管理层。
+
+- 末尾 `verify_runtime_entry` 接收本轮 `VerifiedDiscoveredRuntimeEntry` 中与指纹成对验证的文件身份，
+  直接使用既有 `verify_executable_integrity` 的 `Unchanged` 分支；保留执行条件、locator、安装 ID/version、
+  搜索代次和替换后的旧结果拒收。I/O 仍在数据库锁外。Windows 命令包装入口沿用原依赖完整校验例外。
+- 删除 Codex 为 Fast 单独执行的 `generate-json-schema --experimental`。普通 Schema 顺带提供的 Fast
+  字段及同程序已有正向证据可以保留，缺字段不启动补证进程。必要普通 Schema、初始化响应校验、
+  `initialized` 通知、原生认证、分页模型读取和清理保持。Fast 保存／冻结／真实参数下发没有改动。
+- 只在原函数加起止时间日志：原生检查（含回收）、有界命令及回收、末尾复核、提交发布；不输出参数、
+  原生认证内容或新增计时服务。异常提前退出不保证产生全部阶段日志，缺日志不能当作耗时为零。
+
+### 工作量与回归
+
+原有发现夹具的线程内计数覆盖：稳定普通入口首次／升级发现加末尾复核共 1 次完整哈希，未变的重复
+发现加末尾复核共 0 次；替换文件时完整复核并拒收旧结果。Core 正常单候选检查在入口与末尾连接该规则，
+深检继续消费同一指纹。此计数不概括 Windows 包装依赖、构造异常或候选替换／重试路径。
+
+Codex 原进程夹具覆盖普通 Schema 有／无 Fast 字段、有效账号、明确无需 OpenAI 认证、缺认证字段、
+错误 RPC、分页及清理：可信版本和普通静态证据有效时仅 1 个 app-server；Fast 专用导出均为 0。
+首次且版本／普通静态证据均未知时仍为版本、app-server、普通 Schema 共 3 个直接进程。
+真实运行的 Fast 偏好不以该标志准入；原 Fast 保存与参数映射用例通过。
+
+沿用既有 owner，通过 Codex 进程、普通发现计数、环境／管理器 8 项、替换身份、进程回收 5 项、Fast 2 项、
+安装持久化与数据库锁可用性、成功／失败 rebind，以及平台证据 5 项定向测试。
+补跑时修正两处原 PR 的验证遗漏：版本命令替换夹具原先预置可信版本，已改为未知版本以真正触发替换；
+兼容登记文档已在前一提交更新但摘要仍旧，按现有规则同步摘要，不更改任何平台准入名单。
+最终 `cargo test --workspace` 为 474 passed、1 ignored；Debug App 构建、`cargo fmt`、差异空白检查、
+`docs:test`（10 passed）和 `docs:check:ci` 通过。测试集合有交叉，不累计成覆盖总数。
+
+### 真实 App 采样与范围
+
+同一 macOS arm64、同一隔离开发版 `pnpm dev`、同一 userData／Skill Library／MCP、同一原生程序和账号
+配置。前后版本、路径及指纹逐项相同：MiniMax 0.6.12、Kiro 2.21.1、Antigravity 1.4.2、Codex 0.162.1。
+改前为 `543ac8f63` 加相同计时日志；测量期间没有并行运行本任务的编译或测试。每组第一轮单列，三次重复取中位数；
+第一轮是已有健康快照的 App 启动后检查，不代表新安装／升级或冷数据库。
+
+下表每格为「UI / RPC」，单位 ms。UI 从 DOM 点击事件到按钮恢复后的第二个 animation frame；RPC 包围
+真实 `runtime.product.check`。改前使用自动鼠标点击，改后窗口可见后使用原生辅助功能点击。后者逐次确认
+状态，调用间隔更长，不能把这组前后差值当作同节奏的 UI 性能因果结论。所有成功样本原样保留：
+
+| 智能体 | 阶段 | 首轮 | 重复 1 | 重复 2 | 重复 3 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| MiniMax Code | 改前自动点击 | 1781 / 1750 | 1556 / 1525 | 1614 / 1583 | 1565 / 1527 |
+| MiniMax Code | 改后原生点击 | 2498 / 2457 | 1981 / 1945 | 2264 / 2218 | 2032 / 1996 |
+| Kiro | 改前自动点击 | 4522 / 4487 | 2139 / 2109 | 2607 / 2573 | 2149 / 2120 |
+| Kiro | 改后原生点击 | 2825 / 2788 | 2559 / 2515 | 2463 / 2409 | 2472 / 2433 |
+| Antigravity | 改前自动点击 | 6639 / 6612 | 5107 / 5079 | 5531 / 5502 | 4206 / 4183 |
+| Antigravity | 改后原生点击 | 6675 / 6626 | 5840 / 5782 | 3990 / 3938 | 6663 / 6624 |
+| Codex CLI | 改前自动点击 | 3930 / 3899 | 1839 / 1811 | 1856 / 1830 | 1797 / 1761 |
+| Codex CLI | 改后原生点击 | 4390 / 4346 | 3359 / 3308 | 3097 / 3058 | 7509 / 7434 |
+
+改前→改后原生点击的 UI 中位数为 MiniMax 1565→2032、Kiro 2149→2472、Antigravity 5107→5840、
+Codex 1839→3359 ms；本组没有证明 UI 总耗时改善，不能隐去这些样本或将后端时间替代它们。
+改后采样最初有一次窗口隐藏：Core 已约 1679 ms 完成、按钮已恢复，但绘制帧计时未结束。保存原始记录，
+不计入有效 UI 样本；可见窗口重新采集首轮加三次重复，没有修改生产加载逻辑或禁用后台限速。
+
+为减少输入驱动和采样间隔对解释的干扰，另用相同 Desktop client 连续提交 Core 请求，每次完成后间隔
+100 ms，首轮加三次重复；与改前自动连续点击的 RPC 时间对照。此组只测 Core RPC，**不作为点击到渲染
+耗时**，不替换上面的 UI 数据；系统负载、原生缓存及动态服务没有被严格控制，三次小样本不证明稳定收益。
+
+| 智能体 | 连续补测首轮 | 重复 1 | 重复 2 | 重复 3 | 改前 RPC 中位数 | 补测 RPC 中位数 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| MiniMax Code | 1519 | 1462 | 1452 | 1952 | 1527 | 1462 |
+| Kiro | 2194 | 2245 | 1950 | 1930 | 2120 | 1950 |
+| Antigravity | 5449 | 5590 | 3960 | 4293 | 5079 | 4293 |
+| Codex CLI | 1685 | 1380 | 1251 | 1468 | 1811 | 1380 |
+
+阶段中位数如下（ms），右侧使用连续 RPC 补测。原生检查包含启动、协议／模型读取和清理，不把它全称为
+网络时间；清理已包含在该列中，不能再次相加：
+
+| 智能体 | 原生检查（含清理）改前→补测 | 末尾复核改前→补测 | 提交发布改前→补测 |
+| --- | ---: | ---: | ---: |
+| MiniMax Code | 1505.346 → 1439.358 | 0.143 → 0.082 | 0.639 → 0.616 |
+| Kiro | 1911.097 → 1929.708 | 184.937 → 0.080 | 0.588 → 0.512 |
+| Antigravity | 4713.899 → 4267.418 | 343.254 → 0.105 | 0.498 → 0.881 |
+| Codex CLI | 1336.462 → 1355.406 | 455.202 → 0.170 | 0.587 → 1.074 |
+
+Codex 与 Kiro 连续 RPC 的差值基本对应移除的末尾完整哈希；MiniMax 的入口仅 274 字节，末尾原已不足
+1 ms，不能把其约 65 ms 差值归因于哈希。Antigravity 的 `agy models` 原生命令仍在秒级波动，移除约
+343 ms 文件校验并不能解释全部差值。各组清理为毫秒级，没有固定等待 2 秒；提交发布也只在毫秒级。
+
+本机改前重复样本未触发 Fast 专用 Schema，不能把这组 Codex 节省归因于删除 experimental 导出，更不能
+声称省去其 5 秒上限。缺 Fast 标志时零额外进程由受控夹具证明。
+
+仍需等待真实初始化、认证、动态模型读取、进程回收和最终 Runtime 读取。未减少超时、提前结束转圈或让
+原检查转入后台；没有继续删除 MiniMax／Kiro 会话步骤或增加预热。Windows 真机、打包 Release、首次安装／
+升级耗时与真实任务未在本次复测；替换归属与 Fast 下发语义使用原定向测试。验收 App 已受控退出，日常 App
+及数据未操作。完整原始计时、分段日志、无效窗口样本与安装身份清单随 Thread 附件交付。
+
+## Send 输入文件退出文件变化卡片（2026-10-19）
+
+User 在本轮确认按实际 Send 输入路径过滤，并授权独立 worktree、PR 与 main 合入。
+来源通过内部 IPC 绑定到已认证 Run/epoch，写入现有 Evidence JSON；无 SQL migration。过滤发生在原有终态
+归约后，覆盖 snapshot/fallback、项目内外路径、多个 Send、统计与空卡片；成功来源推进原有失效水位。
+
+新增纯归约 owner `successful_send_sources_filter_snapshot_and_operation_files_with_exact_paths`：原实现不能
+消费成功 Send 来源；既有 managed-output owner 只处理 ingress unavailable，不能拥有“已准入文件被成功
+业务来源排除”的不同语义。最小命令为 `cargo test -p rovai-core --lib --features extended-tests successful_send_sources`。
+持久化／迟到／重启扩展现有 `terminal_runs_in_a_non_git_directory_project_independent_replayable_cards`，
+复用其 SQLite fixture，因为纯归约不能证明 JSON 保存和水位恢复。CLI 来源扩展既有 `send_file_` 和
+`send-file-input.test.mjs` owner；replay 来源绑定扩展既有 Built-in lease owner。
+
+验证通过：`cargo check --workspace`、`cargo fmt --all --check`、
+`cargo test -p rovai-core --lib --features extended-tests agent_run_file_change::`（22 passed）、
+`cargo test -p rovai-core --bin rovai send_file_`（2 passed）、`pnpm test:send-input-file`（1 passed）、
+`pnpm test:rust:pr`（474 passed，1 项既有手动 Runtime smoke ignored）、`pnpm typecheck`、
+`pnpm test`（Vitest 2,798 passed；组合脚本 357 passed、2 项平台相关 skip）及文档治理门禁。
+新增断言在首次验证时修正了 snapshot／operation 输出顺序假设及 macOS 临时目录 cwd 别名，未改变生产
+路径身份规则。未启动真实 Runtime、模型或 Renderer；本项不宣称真实 Session 或 UI 点击验收。

@@ -2213,86 +2213,12 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
             probe_root,
         )?;
         validate_probe_session_file_directory(&session_file, &session_dir)?;
-        let canonical_session_file = session_file
-            .canonicalize()
-            .context("Pi probe empty Session did not materialize canonically")?;
-        write_session_locator(
-            &locator_root,
-            &session_id,
-            &canonical_session_file,
-            probe_root,
-            true,
-        )?;
         if !models.iter().any(|entry| {
             entry.get("provider").and_then(Value::as_str) == Some(provider.as_str())
                 && entry.get("id").and_then(Value::as_str) == Some(model.as_str())
         }) {
             bail!("Pi current model is absent from the available model catalog");
         }
-
-        *host.managed_session_state.write().await = None;
-        let replacement = host.command("new_session", json!({})).await?;
-        ensure_session_replacement_succeeded(&replacement, "new_session")?;
-        let replacement_state = host.command("get_state", json!({})).await?;
-        let (replacement_id, replacement_file, _, _, _, _) = validate_host_state(
-            &replacement_state,
-            None,
-            &locator_root,
-            probe_root,
-            PI_RUNTIME_DEFAULT_MODEL_ID,
-        )?;
-        validate_probe_session_file_directory(&replacement_file, &session_dir)?;
-        validate_managed_session_state(
-            host.managed_session_state
-                .read()
-                .await
-                .as_ref()
-                .context("Pi probe replacement Session state was not reported")?,
-            &probe_binding,
-            &replacement_id,
-            &replacement_file,
-            probe_root,
-        )?;
-        if replacement_id == session_id
-            || canonical_or_future_session_path(&replacement_file)?
-                == canonical_or_future_session_path(&session_file)?
-        {
-            bail!("Pi probe new_session did not replace the Native Session identity");
-        }
-
-        *host.managed_session_state.write().await = None;
-        let switched = host
-            .command(
-                "switch_session",
-                json!({"sessionPath": canonical_session_file.to_string_lossy().to_string()}),
-            )
-            .await?;
-        ensure_session_replacement_succeeded(&switched, "switch_session")?;
-        let restored_state = host.command("get_state", json!({})).await?;
-        // Pi get_state reports the Session identity and file, but not cwd.
-        // validate_host_state therefore verifies cwd against the restored
-        // Session file header while also matching the private exact locator.
-        let (restored_id, restored_file, _, _, _, _) = validate_host_state(
-            &restored_state,
-            Some(&session_id),
-            &locator_root,
-            probe_root,
-            PI_RUNTIME_DEFAULT_MODEL_ID,
-        )?;
-        if restored_id != session_id || restored_file.canonicalize()? != canonical_session_file {
-            bail!("Pi probe switch_session did not restore the exact Native Session");
-        }
-        validate_managed_session_state(
-            host.managed_session_state
-                .read()
-                .await
-                .as_ref()
-                .context("Pi probe restored Session state was not reported")?,
-            &probe_binding,
-            &restored_id,
-            &restored_file,
-            probe_root,
-        )?;
 
         Ok(PiMachineReadyProbe {
             model_fingerprint: short_digest(format!("{provider}\0{model}\0{thinking}").as_bytes()),
@@ -2304,7 +2230,6 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
                 "pi.rpc.get_state".to_string(),
                 "model.dynamic_catalog".to_string(),
                 "session.new".to_string(),
-                "conversation.exact_resume".to_string(),
             ],
         })
     }
@@ -3138,15 +3063,12 @@ done
             .collect::<Vec<_>>();
         assert_eq!(
             command_types,
-            [
-                "get_state",
-                "get_available_models",
-                "get_state",
-                "new_session",
-                "get_state",
-                "switch_session",
-                "get_state",
-            ]
+            ["get_state", "get_available_models", "get_state",]
+        );
+        assert!(
+            !observation
+                .capabilities
+                .contains(&"conversation.exact_resume".to_string())
         );
         assert!(!requests.contains("\"type\":\"prompt\""));
 
@@ -3166,7 +3088,7 @@ done
         assert!(
             observation
                 .capabilities
-                .contains(&"conversation.exact_resume".to_string())
+                .contains(&"pi.rpc.get_state".to_string())
         );
         assert!(root.join("shutdown").is_file());
         let probe_root = PathBuf::from(
@@ -4008,7 +3930,7 @@ done
             observation
                 .capabilities
                 .iter()
-                .any(|capability| capability == "conversation.exact_resume")
+                .any(|capability| capability == "pi.rpc.get_state")
         );
         assert!(
             !observation

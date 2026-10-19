@@ -696,12 +696,22 @@ pub(crate) fn builtin_tool_endpoint() -> LocalIpcEndpoint {
         .clone()
 }
 
-pub(crate) fn request_digest(operation: &str, input: &serde_json::Value) -> Result<String> {
-    canonical_json_digest(&json!({
+pub(crate) fn request_digest(
+    operation: &str,
+    input: &serde_json::Value,
+    send_input_file_path: Option<&str>,
+) -> Result<String> {
+    let mut request = json!({
         "domain": "rovai.builtin-tool-request.v1",
         "operation": crate::thread_compat::stored_operation(operation),
         "input": crate::thread_compat::stored_builtin_input(operation, input)?,
-    }))
+    });
+    // Preserve existing digests when metadata is absent; a replay cannot switch
+    // the file whose changes will be excluded while retaining the same request.
+    if let Some(path) = send_input_file_path {
+        request["sendInputFilePath"] = json!(path);
+    }
+    canonical_json_digest(&request)
 }
 
 fn run_not_bound() -> BuiltinToolLeaseError {
@@ -858,9 +868,17 @@ mod tests {
         let legacy = json!({"campId":"same-id", "thread":"same-message", "limit":20});
         let current = json!({"threadId":"same-id", "replyChain":"same-message", "limit":20});
         let expected = canonical_json_digest(&json!({"domain":"rovai.builtin-tool-request.v1", "operation":"camp.read", "input":legacy})).unwrap();
-        assert_eq!(request_digest("camp.read", &legacy).unwrap(), expected);
-        assert_eq!(request_digest("thread.read", &current).unwrap(), expected);
-        assert!(request_digest("thread.read", &json!({"campId":"a","threadId":"a"})).is_err());
+        assert_eq!(
+            request_digest("camp.read", &legacy, None).unwrap(),
+            expected
+        );
+        assert_eq!(
+            request_digest("thread.read", &current, None).unwrap(),
+            expected
+        );
+        assert!(
+            request_digest("thread.read", &json!({"campId":"a","threadId":"a"}), None).is_err()
+        );
         let root =
             std::env::temp_dir().join(format!("rovai-builtin-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
@@ -968,7 +986,14 @@ mod tests {
         // It never changes business routing, but cannot reuse a different request's receipt.
         let send_id = "7b5db24c-4a43-4cab-9217-d982b08f7692";
         let send_input = json!({"body": "Same message", "taskId": "retained-task"});
-        let send_digest = request_digest("camp.message.send", &send_input).unwrap();
+        let send_digest = request_digest("camp.message.send", &send_input, None).unwrap();
+        let source_digest =
+            request_digest("camp.message.send", &send_input, Some("/tmp/reply.md")).unwrap();
+        assert_ne!(send_digest, source_digest);
+        assert_ne!(
+            source_digest,
+            request_digest("camp.message.send", &send_input, Some("/tmp/other.md")).unwrap()
+        );
         let send_receipt = BuiltinToolInvocationEnvelope::success(
             "camp.message.send",
             send_id,
@@ -991,7 +1016,7 @@ mod tests {
             json!({"body": "Same message", "taskId": null}),
             json!({"body": "Same message"}),
         ] {
-            let changed_digest = request_digest("camp.message.send", &changed).unwrap();
+            let changed_digest = request_digest("camp.message.send", &changed, None).unwrap();
             assert_eq!(
                 registry
                     .replay(&rotated, send_id, &changed_digest)

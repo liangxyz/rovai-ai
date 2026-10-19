@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -14,6 +14,8 @@ const cli = join(repository, 'target/debug', process.platform === 'win32' ? 'rov
 // this fixture neither starts Core nor claims actual message publication.
 test('CLI discovery stays local and Send files preserve requests without waiting on inherited stdin', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rovai-send-cli-'))
+  // The child obtains cwd from the OS, which resolves macOS's /var alias.
+  const cliCwd = await realpath(root)
   const socket = process.platform === 'win32'
     ? `\\\\.\\pipe\\rovai-ai-${process.pid}-4b812837-7ffc-4ca2-ab62-d5dc89bcd411`
     : join(root, 'cli.sock')
@@ -73,6 +75,10 @@ test('CLI discovery stays local and Send files preserve requests without waiting
     assert.deepEqual(result.output, { error: rejection })
     assert.equal(requests.length, before + 1, 'business rejection must not trigger fallback or a second request')
     assert.deepEqual(requests.at(-1).input, expected)
+    const fileIndex = args.indexOf('--input-file')
+    assert.equal(requests.at(-1).sendInputFilePath,
+      args[0] === 'send' && fileIndex >= 0
+        ? resolve(cliCwd, args[fileIndex + 1]).replaceAll('\\', '/') : undefined)
   }
   async function rejected(args, message, stdin) {
     const before = requests.length
@@ -118,6 +124,7 @@ test('CLI discovery stays local and Send files preserve requests without waiting
     await reachesCore(['send', '--input-file', 'reply.md', '--to', 'agent_5', '--file', 'report.pdf'], {
       body: raw, to: ['agent_5'], files: ['report.pdf']
     })
+    await reachesCore(['send', '--input-file', '././reply.md'], { body: raw })
     assert.equal(await readFile(join(root, 'reply.md'), 'utf8'), raw)
     const legacy = { body: 'legacy\nreply', publicOnly: true, mentionUser: true, files: ['report.pdf'] }
     await writeFile(join(root, 'request.json'), JSON.stringify(legacy))

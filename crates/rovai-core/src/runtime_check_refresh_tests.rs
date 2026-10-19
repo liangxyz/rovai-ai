@@ -191,6 +191,7 @@ impl Fixture {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    model_catalog_complete: true,
                     executable_file_identity: Some(identity),
                     adapter_kind: KIND,
                     executable_path: installation.executable_path,
@@ -1290,4 +1291,297 @@ async fn failed_environment_reader_cannot_prevent_a_local_save() {
     );
     drop(core);
     std::fs::remove_dir_all(fixture.root).unwrap();
+}
+
+// Owns the MiniMax health/catalog boundary through the production manager and DB.
+// A pure merge test cannot prove first-use fallback or preserve catalog timestamps.
+#[cfg(unix)]
+#[tokio::test]
+async fn minimax_check_and_catalog_keep_their_intent_and_complete_options() {
+    use rovai_core::agent_profile::{AgentProfileService, RuntimeModelCatalogCacheStatus};
+    use std::os::unix::fs::PermissionsExt;
+    let python = std::process::Command::new("python3")
+        .args(["-c", "import sys; print(sys.executable)"])
+        .output()
+        .unwrap();
+    assert!(python.status.success());
+    let python = String::from_utf8(python.stdout).unwrap();
+    let kind = AdapterKind::MinimaxCodeCli;
+    for (count, first_trigger) in [
+        (2, RuntimeCheckTrigger::UserCheck),
+        (8, RuntimeCheckTrigger::CatalogOpen),
+    ] {
+        let fixture = Fixture::new();
+        let program = fixture.root.join("mcode");
+        std::fs::write(&program, format!("#!{}\n{}", python.trim(), r#"
+import json, os, pathlib, sys, time
+root = pathlib.Path(__file__).parent
+with (root / 'launches').open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\n')
+if '--version' in sys.argv:
+    print('0.6.12'); sys.exit(0)
+count = int((root / 'count').read_text())
+current = 'model-0'
+def session():
+    return {'sessionId':'fixture-session', 'configOptions':[
+        {'id':'model','name':'Model','category':'model','type':'select','currentValue':current,
+         'options':[{'value':f'model-{i}','name':f'Model {i}'} for i in range(count)]},
+        {'id':'thinkingEffort','name':'Thinking','type':'select','currentValue':'high',
+         'options':[{'value':'low','name':'Low'},{'value':'high','name':'High'}]}]}
+for line in sys.stdin:
+    request=json.loads(line); method=request['method']
+    with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method})+'\n')
+    if method == 'initialize':
+        if (root / 'gate').exists():
+            (root / 'started').touch()
+            while (root / 'gate').exists(): time.sleep(.01)
+        result={'protocolVersion':1,'agentCapabilities':{'loadSession':True}}
+    elif method == 'session/new': result=session()
+    elif method == 'session/set_config_option':
+        assert request['params']['configId']=='model'
+        current=request['params']['value']; result=session()
+    else: raise AssertionError(method)
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+"#)).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(fixture.root.join("count"), count.to_string()).unwrap();
+        fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+            "runtimeKind":kind,"expectedRevision":0,"configuration":configuration(Some(&program)),
+        })).await.unwrap();
+        fixture.core.run_runtime_discovery().await;
+        if first_trigger == RuntimeCheckTrigger::UserCheck {
+            assert_eq!(
+                fixture
+                    .core
+                    .await_runtime_check(
+                        kind,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        first_trigger
+                    )
+                    .await
+                    .unwrap(),
+                RuntimeCheckOutcome::Ready
+            );
+            let installation = AgentProfileService::default()
+                .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                installation.model_catalog.status,
+                RuntimeModelCatalogCacheStatus::Unavailable
+            );
+            assert!(installation.model_catalog.observed_at.is_none());
+            let snapshot = installation.snapshot.unwrap();
+            assert_eq!(snapshot.probe_status, "ready");
+            assert_eq!(
+                snapshot
+                    .models
+                    .iter()
+                    .filter(|model| !model.options.is_empty())
+                    .count(),
+                1
+            );
+            assert!(
+                !std::fs::read_to_string(fixture.root.join("methods"))
+                    .unwrap()
+                    .contains("session/set_config_option")
+            );
+        }
+        std::fs::write(fixture.root.join("methods"), "").unwrap();
+        std::fs::write(fixture.root.join("launches"), "").unwrap();
+        std::fs::write(fixture.root.join("gate"), "").unwrap();
+        let target = fixture
+            .core
+            .runtime_check_installation_target(kind)
+            .await
+            .unwrap();
+        let first = tokio::spawn({
+            let core = fixture.core.clone();
+            async move {
+                core.await_runtime_check(
+                    kind,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    first_trigger,
+                )
+                .await
+                .unwrap()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !fixture.root.join("started").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let other = if first_trigger == RuntimeCheckTrigger::UserCheck {
+            RuntimeCheckTrigger::CatalogOpen
+        } else {
+            RuntimeCheckTrigger::UserCheck
+        };
+        let mut waiters = Vec::new();
+        for (trigger, queued) in [(first_trigger, false), (other, true), (other, false)] {
+            let (acknowledged, ack) = oneshot::channel();
+            let (completion, done) = oneshot::channel();
+            fixture
+                .core
+                .runtime_check_requests
+                .send(crate::application::RuntimeCheckRequest {
+                    search: fixture.core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: kind,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger,
+                    acknowledged,
+                    completion: Some(completion),
+                })
+                .unwrap();
+            assert_eq!(
+                ack.await.unwrap(),
+                queued,
+                "active and pending must merge only equal MiniMax intents"
+            );
+            waiters.push(done);
+        }
+        std::fs::remove_file(fixture.root.join("gate")).unwrap();
+        assert_eq!(first.await.unwrap(), RuntimeCheckOutcome::Ready);
+        for waiter in waiters {
+            assert_eq!(waiter.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
+        }
+        assert_eq!(
+            fixture
+                .core
+                .runtime_check_installation_target(kind)
+                .await
+                .unwrap(),
+            target
+        );
+        let methods = std::fs::read_to_string(fixture.root.join("methods"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            methods
+                .iter()
+                .filter(|m| m["method"] == "session/new")
+                .count(),
+            2
+        );
+        assert_eq!(
+            methods
+                .iter()
+                .filter(|m| m["method"] == "session/set_config_option")
+                .count(),
+            count + 1
+        );
+        let mut settings_by_process = std::collections::BTreeMap::new();
+        for method in &methods {
+            let count = settings_by_process
+                .entry(method["pid"].as_u64().unwrap())
+                .or_insert(0);
+            if method["method"] == "session/set_config_option" {
+                *count += 1;
+            }
+        }
+        let mut settings = settings_by_process.into_values().collect::<Vec<_>>();
+        settings.sort();
+        assert_eq!(
+            settings,
+            vec![0, count + 1],
+            "only the full catalog traverses models"
+        );
+        assert!(!methods.iter().any(|m| m["method"] == "session/prompt"));
+        let complete = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            complete.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Fresh
+        );
+        assert!(
+            complete
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .models
+                .iter()
+                .all(|model| !model.options.is_empty())
+        );
+        // A later health result cannot erase options or advance the complete catalog's clock.
+        assert_eq!(
+            fixture
+                .core
+                .await_runtime_check(
+                    kind,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck
+                )
+                .await
+                .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let latest = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            latest.model_catalog.observed_at,
+            complete.model_catalog.observed_at
+        );
+        assert_eq!(
+            serde_json::to_value(&latest.snapshot.as_ref().unwrap().models).unwrap(),
+            serde_json::to_value(&complete.snapshot.as_ref().unwrap().models).unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("launches"))
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("--version"))
+                .count(),
+            usize::from(first_trigger == RuntimeCheckTrigger::CatalogOpen)
+        );
+        // Existing invalidation must not be undone by a partial health observation.
+        fixture
+            .core
+            .database
+            .lock()
+            .await
+            .connection()
+            .execute(
+                "UPDATE adapter_capability_snapshot SET stale_at = ?2 WHERE installation_id = ?1",
+                rusqlite::params![latest.id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        assert_eq!(
+            fixture
+                .core
+                .await_runtime_check(
+                    kind,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck
+                )
+                .await
+                .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let invalidated = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            invalidated.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Unavailable
+        );
+        assert!(invalidated.model_catalog.observed_at.is_none());
+        let catalog = fixture
+            .core
+            .open_runtime_model_catalog(kind, true)
+            .await
+            .unwrap();
+        assert_eq!(catalog["refreshStatus"], "completed");
+        assert_eq!(catalog["cache"]["status"], "fresh");
+        fixture.close().await;
+    }
 }

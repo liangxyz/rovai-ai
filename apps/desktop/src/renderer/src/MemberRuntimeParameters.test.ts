@@ -253,7 +253,7 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('推理强度，High')
   })
 
-  it.each(['copilot-cli', 'claude-code-cli'] as const)('marks a saved unknown model as unverified when no serviceable catalog exists (%s)', (adapterKind) => {
+  it.each(['copilot-cli', 'claude-code-cli', 'minimax-code-cli'] as const)('marks a saved unknown model as unverified when no serviceable catalog exists (%s)', (adapterKind) => {
     const installation = runtimeInstallation(adapterKind)
     installation.modelCatalog = {
       status: 'unavailable',
@@ -270,6 +270,10 @@ describe('member runtime parameters', () => {
       ...installation.memberRuntimeDefaults!, model: saved
     })
     expect(draft.model).toEqual(saved)
+    const canFilter = modelCatalogCanValidateOptions(installation.modelCatalog, null)
+    expect(canFilter).toBe(false)
+    expect(explicitSelection({ ...installation.snapshot!.models[0], id: saved.modelId, options: [] },
+      saved, canFilter)).toMatchObject({ mode: 'explicit', options: saved.options })
     expect(runtimeModelSelectionAvailable(installation, draft.model)).toBe(true)
     expect(runtimeModelSelectionAvailable(installation, { mode: 'runtime_default' })).toBe(true)
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {

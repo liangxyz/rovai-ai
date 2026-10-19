@@ -4,7 +4,7 @@ name: Runtime Launch and Verification
 version: v64
 status: accepted
 source_version: v1.72
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 ---
 
 # Runtime Launch and Verification v64
@@ -12,6 +12,15 @@ last_updated: 2026-10-18
 继承 [v63](runtime-launch-and-verification-v63.md) 的启动、恢复、输入保护和进程边界。
 本版替换继承自 [v41](runtime-launch-and-verification-v41.md#返回值与诚实展示) 的正式页面版本取值规则；
 草稿检查、失败反馈、检查结果的代次围栏与执行准入保持。
+
+## Antigravity 整轮执行时限
+
+正式 Antigravity print 启动显式传入 `--print-timeout 0`，等待本轮完成，不附加固定五分钟总时限。
+初始化、停止与子进程清理仍使用各自有界等待；取消授权和适用的显式执行预算不变。
+原生 CLI 在 stderr 明确报告 `[agy] print timeout after … with turn in progress; returning partial output`
+时，即使退出码为零且 final result 为 `SUCCESS`，仍报告 `runtime_execution_timeout`，说明本轮未完成。
+此识别只消费原生 stderr 的精确警告形状，沿用 Session 身份校验与公开错误脱敏；普通 stderr 警告、
+工具输出及模型正文不构成整轮超时证据。缺少该证据的空结果继续保持原有缺失结果失败。
 
 ## 已知版本的保存与展示
 
@@ -58,3 +67,43 @@ Installation 快照补齐版本，避免两个页面对同一程序显示不同�
 Codex 完整检查保留必要版本及 schema 能力验证；同一临时 app-server 顺序完成 `initialize` 响应校验、
 `initialized` 通知、`account/read` 和分页 `model/list`。认证复用正式 Host 的判定，不再另起 `login status`
 或第二个 app-server；缺少有效认证证据、RPC 失败和清理失败仍如实报告。
+
+## 单项检查的必要工作
+
+本节替换继承自 [v27](runtime-launch-and-verification-v27.md) 的 Grok 普通检查恢复演练与
+[v30](runtime-launch-and-verification-v30.md) 的 Pi 普通检查生命周期演练要求；正式恢复合同继续保持。
+
+“检查状态”在同一连接完成必要初始化、认证和当前模型信息校验；接口需要时创建一次空会话。
+不发送 Prompt，不演练第二次新建或恢复，不为证明设置可执行而重复设置当前模型／模式。
+Pi 保留初始 Session ID/file/cwd、managed extension 和模型一致性校验；不再执行
+`new_session → get_state → switch_session → get_state`。Grok 不执行 `session/resume` 或重复
+`session/set_model`，Kiro 不重复 `session/set_model`，两者仍确认当前模型在原生目录中。
+普通 Ready 不要求这些已删除动作的实测证据；协议声明和适配器实现支持不表示本次实测。
+正式新建、恢复、权限和参数应用继续使用既有完整验证。
+
+ZCode 只有明确的 probe 入口从 `session/create` snapshot 形成结果，跳过事件订阅与重复 `setMode`。
+正式新建和恢复即使尚无输入，也仍执行订阅与对应状态处理；不以是否存在 Prompt 判断。
+
+所有检查函数可复用绑定当前 Installation／路径／文件身份的可信版本。成功且未失效的同程序能力快照
+已含当前适配器所需静态证据时，Claude／Antigravity 跳过 help，Codex 跳过普通 Schema 导出；
+缺证据仍走现有有界探测。Codex 只顺带记录普通 Schema 中的 Fast 字段，或保留同程序已有的正向证据；
+不为补 Fast 证据执行 experimental Schema 导出。Fast 保存与实际参数下发遵循
+[Fast v3](camp-member-fast-v3.md)，不依赖该能力标志。
+认证、动态模型信息和结束前文件身份复核不被静态证据替代，不新增缓存或补证任务。
+
+检查末尾把本轮已成对验证的文件身份和指纹交给现有完整性校验，普通原生入口身份未变时不再完整哈希。
+身份变化或无法确认时仍沿用完整复核与旧结果拒收；locator、安装 ID/version 和配置代次保护不变。
+Windows 命令包装入口继续执行既有依赖校验，不套用普通单文件的免哈希规则；文件 I/O 保持在数据库锁外。
+
+## MiniMax 健康结果与完整参数目录
+
+MiniMax 普通检查读取 `session/new` 的模型列表和当前模型参数，不执行模型切换／恢复循环。
+完整参数仍由现有 `CatalogOpen` 请求在同一临时 Session 逐模型读取。Check Manager 的 pending、active
+合并均区分 MiniMax 的普通检查与目录意图；同意图／同目标仍合并，其他 Runtime 的现有复用边界保持。
+首次或健康证据失效的目录请求走完整检查回退时，保留目录意图并读完参数后才完成等待者。
+
+普通检查成功只更新健康成功时间。同一有效身份与配置下已有完整目录时保留其内容和原目录成功时间；
+只有当前模型信息时保存实际结果，`model_catalog_succeeded_at` 仍无完整成功证据。程序、locator 或配置
+失效的旧目录不能由部分结果重新生效。MiniMax 不以健康成功时间回填目录成功时间；无完整证据使用现有
+`unavailable`／`invalidated`，不能用 `stale` 冒充完整目录而参与已保存参数的过滤。完整目录成功才更新
+既有目录时间；没有新增持久字段或目录状态。其他 Runtime 的目录时间回退与 Fresh/Stale 语义保持。

@@ -11,6 +11,12 @@ async fn claude_catalog_prefers_list_models_and_falls_back_only_when_unsupported
     let executable = root.join("claude-fixture");
     fs::write(&executable, r#"#!/bin/sh
 root=$(/usr/bin/dirname "$0")
+printf '%s\n' "$*" >> "$root/launches"
+case "$1" in
+  --version) printf '%s\n' '2.1.0'; exit 0 ;;
+  --help) printf '%s\n' '--print --output-format --input-format --no-session-persistence --resume --session-id --append-system-prompt --mcp-config --allowedTools --add-dir --permission-mode --model'; exit 0 ;;
+  auth) if [ -f "$root/logged-out" ]; then printf '%s\n' '{"loggedIn":false}'; else printf '%s\n' '{"loggedIn":true}'; fi; exit 0 ;;
+esac
 printf '%s\n' "$@" > "$root/argv"
 printf '%s\n' "$PWD" > "$root/cwd"
 printf '%s\n' "${HOME-__UNSET__}" "${CLAUDE_CONFIG_DIR-__UNSET__}" "${ANTHROPIC_MODEL-__UNSET__}" > "$root/environment"
@@ -161,6 +167,42 @@ while IFS= read -r request; do printf '%s\n' "$request" >> "$root/requests"; don
         .await
         .expect("every outcome must kill descendants holding stdio");
     }
+    // A trusted static snapshot skips only version/help. Auth and model control remain live.
+    fs::write(root.join("case"), "success").unwrap();
+    fs::write(root.join("launches"), "").unwrap();
+    let first = claude_code_capability_probe_at(&executable, None, None, &[]).await;
+    assert_eq!(first.result.status, AgentRuntimeProbeStatus::Ready);
+    assert_eq!(
+        fs::read_to_string(root.join("launches"))
+            .unwrap()
+            .lines()
+            .count(),
+        4
+    );
+    fs::write(root.join("launches"), "").unwrap();
+    let repeated = claude_code_capability_probe_at(
+        &executable,
+        None,
+        first.result.reported_version.as_deref(),
+        &first.result.capabilities,
+    )
+    .await;
+    assert_eq!(repeated.result.status, AgentRuntimeProbeStatus::Ready);
+    let launches = fs::read_to_string(root.join("launches")).unwrap();
+    assert_eq!(launches.lines().count(), 2);
+    assert!(!launches.contains("--help") && !launches.contains("--version"));
+    fs::write(root.join("logged-out"), "").unwrap();
+    let logged_out = claude_code_capability_probe_at(
+        &executable,
+        None,
+        first.result.reported_version.as_deref(),
+        &first.result.capabilities,
+    )
+    .await;
+    assert_eq!(
+        logged_out.result.status,
+        AgentRuntimeProbeStatus::AuthenticationRequired
+    );
 }
 
 #[tokio::test]
@@ -168,7 +210,7 @@ while IFS= read -r request; do printf '%s\n' "$request" >> "$root/requests"; don
 async fn claude_catalog_real_runtime_smoke() {
     let executable =
         find_adapter(AdapterKind::ClaudeCodeCli).expect("Claude Code must be installed");
-    let probe = claude_code_capability_probe_at(&executable, None).await;
+    let probe = claude_code_capability_probe_at(&executable, None, None, &[]).await;
     assert_eq!(
         probe.result.status,
         AgentRuntimeProbeStatus::Ready,

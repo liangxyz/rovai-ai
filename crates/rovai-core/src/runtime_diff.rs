@@ -816,7 +816,7 @@ fn unified_diff_section_paths(section: &str) -> Option<(String, String)> {
     ))
 }
 
-fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
+pub(crate) fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
     let path = {
         let value = path.to_string_lossy();

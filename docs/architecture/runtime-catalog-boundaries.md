@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 ---
 
 # Runtime Catalog Boundaries
@@ -16,6 +16,12 @@ last_updated: 2026-10-18
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
 [Runtime Launch and Verification v64](../contracts/runtime-launch-and-verification-v64.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
+
+## Antigravity 执行边界
+
+Antigravity 适配器通过 `--print-timeout 0` 等待原生整轮结束，保留独立的初始化与清理期限。
+原生超时返回的部分文本不能凭零退出码成为完整成功；精确失败证据与错误合同见
+[Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md#antigravity-整轮执行时限)。
 
 ## 四层权威
 
@@ -450,7 +456,8 @@ Grok/MiniMax `<think>` 若由 Runtime 作为普通 `agent_message_chunk` 发出�
 进入执行台 Evidence、Camp final 与 Missing-Send，不做 provider-specific 清洗或重分类。`_x.ai/*`
 notification 只作为已知 Session metadata/lifecycle 安全路由。Runtime Fleet LRU 保留 compatible warm
 Host/Session。三个宿主平台共享 `grok >= 1.0.0` 最低版本门；light discovery 低于门槛时为 `light_failed`，
-Deep Probe 与 Ready 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象。cold continuation
+普通检查验证必要认证、初始化与当前模型，不演练恢复或重复设置模型；协议声明恢复支持不等于本次实测，
+见 [Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md#单项检查的必要工作)。cold continuation
 只调用 exact `session/resume`；Grok 不声明或选择 `session.load` 产品能力，失败后只允许一次 fresh fallback。
 其他 Runtime 的通用 load/HistoryRestore 路径不变。
 
@@ -494,8 +501,9 @@ drop 不影响启动，不同 Run/Runtime 可以并发。Stop 使用短锁 Mark�
 和配置完全不参与 Pi compatibility 或复用。恢复只使用
 Core 私有完整 canonical session file，实际调用 `switch_session` 后核对 full ID/file/cwd；公开 read/event/diagnostic
 只允许不可逆 digest。失败 Host 不进 LRU；只有 locator/文件/identity/cwd 或明确 switch target 不可用等
-`ResumeContinuityLost` 才最多创建一个 replacement，Host/RPC/model/binding 等失败不降级。Deep Probe 同样执行 exact
-switch，但用 `--session-dir <probe-root>/sessions` 隔离并清理测试 Session。
+`ResumeContinuityLost` 才最多创建一个 replacement，Host/RPC/model/binding 等失败不降级。普通检查只验证初始
+Session 身份、目录归属、扩展和当前模型，不演练新建/切回；仍用 `--session-dir <probe-root>/sessions`
+隔离并清理测试 Session。
 
 Windows Pi Host 在自己的启动边界使用 `dunce::simplified` 将可安全表示的 canonical 本地 cwd 转为普通盘符路径，
 避免 Pi 默认 Session 目录编码保留 `\\?\` 中的 `?`。Camp、Fleet 与 Session 校验仍使用原 canonical identity；
@@ -765,6 +773,8 @@ verbatim 前缀，冻结 sourcePath 和 canonical 身份不变。Usage cwd 比�
 
 模型 ID 原样保留 Provider、模型和 variant 的不透明组合，通过 `session/set_config_option` 选择并
 校验 ACK。`thinkingEffort` 只属于原生实际广告的模型；探测某候选失败不抹去可用的目录或原生默认。
+普通检查只读取初始 Session 的当前模型参数，全模型参数由现有完整目录请求读取；健康成功不替代目录
+成功，也不覆盖同一有效身份下的完整参数，见 [Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md#minimax-健康结果与完整参数目录)。
 权限采用原生 process scope `permissionMode`，会话模式采用 `default/plan`；前者参与既有 Host
 兼容判断。`plan` 是原生流程模式，不等于只读沙箱；显式 `bypassPermissions` 下仍可写文件，
 不由 Core Workspace access 静默替换权限。MiniMax 明确拒绝 ACP `additionalDirectories`，new/resume/load 均不发送该扩展；

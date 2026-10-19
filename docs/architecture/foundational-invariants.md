@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 ---
 
 # 当前基础架构不变量
@@ -273,8 +273,8 @@ last_updated: 2026-10-18
   `.exe → .cmd → .bat` 封闭解析。参数始终保持结构化且不经过 Shell，解析结果不回写 Runtime 配置或跨恢复缓存；不能按
   Host 模板提前解析后再改变执行上下文。
 - 历史 capability snapshot、Probe attempt 和目录缓存仅供诊断/展示，不授权或否决新的真实启动，不新增 LKG、健康快照、轮询或重试调度。入口已检测到只代表可以尝试，版本未知不阻断任务；失败进入本次 Run 并展示具体原因。
-- Runtime Check Manager 仅拥有主动诊断及目录检查的有界 attempt：同 Runtime 单飞、全局并发二、deadline、前后身份围栏与进程树清理保持。Superseded 不提交错误身份结果；普通执行不进入此诊断队列，也不因历史失败等待其成功。
-- 所有 Runtime 的启动/rescan 只做静态安装发现，不运行批量 version 或深检。真实 Host 在输入前验证必要协议、显式模型/选项与权限，默认模型不等待完整目录。TRAE 模式须由本次 Session 明确确认；无历史 Ready 仍可尝试启动。
+- Runtime Check Manager 仅拥有主动诊断及目录检查的有界 attempt：同 Runtime 单飞、全局并发二、deadline、前后身份围栏与进程树清理保持。Superseded 不提交错误身份结果；普通执行不进入此诊断队列，也不因历史失败等待其成功。 单项检查只验证初始化、认证和当前模型；MiniMax 全模型参数遍历属于完整目录请求，健康成功与目录成功时间分离。Pi/Grok/Kiro 不演练恢复或重复设置，ZCode 只在明确 probe 入口省略订阅和重复模式。细则由 [Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md#单项检查的必要工作) 拥有。
+- 所有 Runtime 的启动只做静态安装发现；手动 rescan 在缺少同身份可信版本时允许既有有界版本补读，不运行认证或协议深检。真实 Host 在输入前验证必要协议、显式模型/选项与权限，默认模型不等待完整目录。TRAE 模式须由本次 Session 明确确认；无历史 Ready 仍可尝试启动。
 - `MemberRuntimeConfiguration` 原子保存产品 Runtime、精确模型意图及 Adapter 静态权限配置；背景发现不创建、扩权或改写。历史 Probe/目录不成为配置保存和运行门禁，动态模型与权限应用在真实 Host 验证。既有 Adapter 权限默认保持，用户仍可选择较窄模式。
 - 成员保存的 model policy 与单次 AgentRun 的实际模型观测是不同事实。`runtime_default` 只在 Runtime-native、结构化且可归因到当前 Thread/Session 的字段出现时记录首个模型；目录默认值、请求参数、冻结配置、Usage 或文本输出不得补推。观测按 Run execution epoch、default-only、write-once 持久化，缺失或拒绝不改变 Run 终态，也不回写成员配置。
 - `ResolvedRuntimeBinding` 只是调度、诊断和 Run 冻结使用的内部执行状态，不进入普通 AgentProfile 读取或成员编辑。用户发送先按消息、目标和冻结配置完成业务接受，Runtime resolution、workspace launchability 和完整执行 Preflight 由 Scheduler 在真实执行边界重查；失败形成诚实 Run 结果，不回滚已接受消息或静默改派目标。
@@ -432,7 +432,7 @@ last_updated: 2026-10-18
 - Core IPC 先返回并校验完整 Envelope，然后按 operation 投影一份 closed Agent result JSON。普通 Agent 输出不包含 envelope wrapper、request identity 或 receipt，也不通过递归删字段得到；每个 operation 有明确 `agentOutputSchema` 与 golden fixture。完整 Envelope 只用于 Core、Evidence、Qualification 和 host-controlled debug 边界。
 - `rovai` CLI 是 Runtime 调用 Rovai-owned built-ins 的唯一运输。内置 MCP/`rovai_team` Bridge、注入、alias map、Runtime 临时配置和 native permission bundle 已 clean break 删除；不存在 fallback 或同 Run 双运输。用户外部 MCP 继续走独立 Library/Runtime-native projection，不经 Built-in Router。
 - CLI 使用领域分组命令，但 请求记录、审计、Activity 与 Envelope 保留 canonical dotted operation identity。Native Session Bootstrap 只教稳定 CLI 入口和通用失败纪律；Agent 侧没有 `tool list`、`tool describe`、generic invoke 或全量 schema discovery。精确输入源和本命令约束由简短 `--help` 给出，复杂选择/恢复由 `cli-operations` Skill 说明。
-- CLI 将输入规范化为一个请求对象；只有 Send 正文文件可与除 `--body` 外的直接参数组合。Send 文件严格命中现有封闭请求 Schema 时保留整个请求，且禁止混入直接参数；其他合法 UTF-8 文本成为原文正文。识别后的业务失败不能降级重发。其他命令仍一次只选 direct arguments、JSON stdin/heredoc 或 JSON `--input-file`，不合并或覆盖；显式文件/参数不读取继承 stdin。文件与兼容边界见 [Built-in Tool Transport v42](../contracts/builtin-tool-transport-v42.md)。`camp.read` 只在所选来源成为 JSON 对象之后、canonical Schema 校验之前补全安全 Timeline 默认；默认 Timeline 发送给 Core 的 canonical JSON 始终包含 mode/direction/limit，其他显式 mode 继续发送各自完整 branch。其他命令不引入业务默认；输入文件路径、Shell quoting 与临时文件不是 Core 信任边界或保密保证。
+- CLI 将输入规范化为一个请求对象；只有 Send 正文文件可与除 `--body` 外的直接参数组合。Send 文件严格命中现有封闭请求 Schema 时保留整个请求，且禁止混入直接参数；其他合法 UTF-8 文本成为原文正文。识别后的业务失败不能降级重发。其他命令仍一次只选 direct arguments、JSON stdin/heredoc 或 JSON `--input-file`，不合并或覆盖；显式文件/参数不读取继承 stdin。文件与兼容边界见 [Built-in Tool Transport v43](../contracts/builtin-tool-transport-v43.md)。`camp.read` 只在所选来源成为 JSON 对象之后、canonical Schema 校验之前补全安全 Timeline 默认；默认 Timeline 发送给 Core 的 canonical JSON 始终包含 mode/direction/limit，其他显式 mode 继续发送各自完整 branch。其他命令不引入业务默认；输入文件路径、Shell quoting 与临时文件不是 Core 信任边界或保密保证。
 - 目标 Runtime 必须在接收 Run 输入前证明 CLI、当前 IPC、Run binding 和当前 contract 可用；否则以结构化理由 fail closed，不启动降级 Agent。发布资格按 Runtime 及宿主平台独立验收，不因一个平台未准入而否定其他已验收组合。
 - Business rejection 投影稳定 code、safe message、closed recovery 和合同允许的 details；不泄露 stack、SQL、内部路径、IPC 地址、secret 或未筛底层错误。乐观冲突要求重读后重新判断；只有 Core 明确允许时才以同一 request identity 有界重试。幂等重试返回原结果而不重复效果；无法证明时返回 outcome indeterminate 并要求核对当前状态。
 - CLI 子进程通过当前 Run 的受保护本地 IPC endpoint 与新 lease 继承调用身份，不从可复用 Runtime 进程身份继承权力。Runtime 及它启动的子进程共享当前 Run/Member 归属和同一 scope/version/quota/fence，不根据父进程名、命令文本或层级猜测模型意图。Run release 先 fence lease，迟到子进程调用不得归属于后续 Run。

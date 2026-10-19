@@ -11,10 +11,12 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/mobile.css'
 
 type Phase = 'connecting' | 'thinking' | 'body' | 'tools' | 'body-thinking' | 'tools-thinking'
+type RunStatus = ThreadSnapshot['agentRuns'][number]['status']
 declare global {
   interface Window {
     executionTransition: {
       setPhase(phase: Phase): void; resolveWindow(latestOnly?: boolean): void; windowReady(): boolean
+      setRunStatus(status: RunStatus): void
       setRuntimeSnapshot(title?: string | null): void
       emitRuntimePhase(title: string | null, epoch?: number): void
       invalidateRuntimePhase(): void
@@ -98,14 +100,16 @@ const openCoverage = {
 function Fixture() {
   const mobile = useMobileViewport(mode === 'mobile')
   const [phase, setPhase] = useState<Phase>('connecting')
+  const [runStatus, setRunStatus] = useState<RunStatus>('running')
   const [placement, setPlacement] = useState<ExecutionConsolePlacement>(mode === 'bottom' ? 'bottom' : 'inspector')
   const [inspector, setInspector] = useState<ThreadInspectorTab | null>(null)
   const [entry, setEntry] = useState<HTMLElement | null>(null)
   const snapshot = useMemo<ThreadSnapshot>(() => ({
     ...initial,
     agentRuns: [{
-      ...run, status: 'running',
+      ...run, status: runStatus,
       startedAt: now,
+      endedAt: ['succeeded', 'failed', 'cancelled'].includes(runStatus) ? now : null,
       executionEvidenceChangeSequence: 0,
       executionEvidenceCount: phase.startsWith('body') ? 1 : phase.startsWith('tools') ? 3 : 0
     }],
@@ -113,10 +117,11 @@ function Fixture() {
       ...model.get().snapshot.executionEvidence[0],
       payload: { itemId: 'first-narration', delta: '开始检查。' }
     }] : phase.startsWith('tools') ? model.get().snapshot.executionEvidence : []
-  }), [phase])
+  }), [phase, runStatus])
   useEffect(() => {
     window.executionTransition = {
       setPhase,
+      setRunStatus,
       resolveWindow: latestOnly => latestOnly ? resolveExecutionWindows.pop()?.()
         : resolveExecutionWindows.splice(0).forEach(resolve => resolve()),
       windowReady: () => executionWindowReady,

@@ -129,6 +129,29 @@ Core 的正文、寻址与发布合同继续由 `team_tool::tests` 拥有，真�
 固定配额。评审门槛是每项测试是否拥有清晰、唯一且值得长期维护的合同；相同覆盖应优先扩展既有
 owner，而不是继续增加平行 fixture 和断言。
 
+### 单项 Runtime 检查减重
+
+`runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
+拥有 MiniMax 的新健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
+目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
+写入，不能覆盖此回归，因此复用它的私有 Core/DB/Check Manager fixture 增加一个有真实协议进程的 owner；
+单纯测合并谓词无法证明第一次目录回退或持久化成功时间。表中 2／8 个模型分别执行检查先到／目录先到，
+不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
+`cargo test -p rovai-core --features slow-tests --lib minimax_check_and_catalog`。
+
+其余扩展既有 health、Pi Host、ZCode transport、Adapter 和 Renderer 参数 owner。Grok 旧的“恢复必须执行
+成功”要求随普通检查的恢复演练一同退役，原协议进程测试改验 Grok/Kiro 当前模型与零重复设置；正式恢复
+错误归属、准确 Session ID、权限及模型设置的原 Host/transport 用例继续保留。Pi probe 的四次演练 RPC
+断言改为只验证初始 Session；ZCode 同一个内存协议夹具同时验证 probe 省略、正式 new/resume 保留两步。
+静态证据复用扩展原 Codex、Claude、Antigravity 进程 fixture，仍验证动态认证失败和模型失败，不能用缓存
+伪造成功。真实安装、账号和点击耗时另记在当前版本实施记录，不混入确定性测试。
+
+末尾文件复核继续扩展 `installed_catalog_discovery_runs_only_bounded_identity_commands` 的既有哈希计数：
+首次／升级的发现加末尾复核共一次，未变的重复发现加末尾复核零次，检查期间替换则拒收旧结果。
+Codex 原认证 fixture 同时拥有普通 Schema 有／无 Fast 字段时的进程计数：可信版本与普通静态证据有效时
+仅一个 app-server，Fast 专用 experimental 导出为零；普通导出顺带取得或同程序已有的正向证据保留。
+安装变化、超时归属、进程清理与 Fast 保存／实际参数映射继续运行原 owner，不另建计数或性能测试框架。
+
 ### 新增独立测试
 
 新增一个 Rust `#[test]` 前必须同时满足以下条件：

@@ -8,7 +8,7 @@ export interface ConversationRunPresenceSlot {
   continuation: boolean
 }
 
-/** Keep only authoritative, public activity and the latest unacknowledged failure. */
+/** Keep public activity, the latest failure, and input rejections at their source. */
 function eligibleConversationRuns(runs: readonly AgentRunView[]): AgentRunView[] {
   const publicRuns = runs.filter(run => run.invocationKind !== 'single_chat')
   const latestByAgent = new Map<string, AgentRunView>()
@@ -21,7 +21,8 @@ function eligibleConversationRuns(runs: readonly AgentRunView[]): AgentRunView[]
   return publicRuns.filter(run => run.status === 'running'
     || run.status === 'waiting' && run.startedAt !== null
     || run.status === 'failed' && run.invocationKind === 'batch'
-      && latestByAgent.get(run.agentId)?.id === run.id && !run.hasAcceptedContinuation)
+      && (run.failure?.code === 'context_payload_too_large' || latestByAgent.get(run.agentId)?.id === run.id)
+      && !run.hasAcceptedContinuation)
 }
 
 export interface RunPresencePreview {
@@ -114,6 +115,9 @@ function currentNarrationLine(text: string): string {
 
 export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = []): RunPresencePreview {
   if (run.status === 'failed') {
+    if (run.failure?.code === 'context_payload_too_large') {
+      return { kind: 'error', text: uiAttribute('输入内容过大 · 查看详情') }
+    }
     const disconnected = run.failure?.code === 'runtime_network_interrupted'
       || run.failure?.code === 'runtime_disconnected'
     return { kind: 'error', text: disconnected ? uiAttribute('连接中断 · 查看原因') : uiAttribute('执行中断 · 查看原因') }

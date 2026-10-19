@@ -15,6 +15,7 @@ fn exact_field(key: &str) -> bool {
                 | "outcome"
                 | "path"
                 | "sourcePath"
+                | "sendInputFilePath"
                 | "cwd"
                 | "command"
                 | "commandLine"

@@ -6099,7 +6099,7 @@ describe('task event projections', () => {
     })
     expect(activityStatusForAgentRun('running', 'cancelled')).toBe('stopped')
     expect(activityStatusForAgentRun('completed', 'cancelled')).toBe('completed')
-    expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
+    expect(activityStatusForAgentRun('running', 'failed')).toBe('recorded')
   })
 
   it('projects an interrupted terminal as stopped without claiming cancellation', () => {
@@ -7879,7 +7879,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('修复全部')
   })
 
-  it('renders long-term memory as a first-class scope and governance workbench', () => {
+  it('renders a compact memory workbench with scopes and visible summary', () => {
     const markup = renderToStaticMarkup(createElement(MemoryLibrary, {
       agents: [],
       topNotices: createElement('div', { className: 'test-page-notice' }, '页面提示')
@@ -7889,23 +7889,24 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Memory / Library')
     expect(markup).not.toContain('导出…')
     expect(markup).toContain('查看、搜索和管理长期记忆。')
-    expect(markup).toContain('记忆库')
-    expect(markup).toContain('共同记忆')
-    expect(markup).toContain('队员记忆')
-    expect(markup).toContain('队员间记忆')
+    expect(markup).toContain('data-memory-scope="all"')
+    expect(markup).toContain('data-memory-scope="hearth"')
+    expect(markup).toContain('data-memory-scope="companion"')
+    expect(markup).toContain('data-memory-scope="relationship"')
     expect(markup).toContain('队员形成')
-    expect(markup).toContain('待审核')
+    expect(markup).toContain('审核记录')
     expect(markup).toContain('待复核')
     expect(markup).not.toContain('建议复核')
-    expect(markup).toContain('已停止沿用')
+    expect(markup).not.toContain('memory-governance-tabs')
+    expect(markup).not.toContain('memory-capacity-strip')
     expect(markup).toContain('class="memory-search"')
     expect(markup).toContain('type="search"')
     expect(markup).not.toContain('范围、治理筛选和搜索只会缩小同一份权威列表')
     expect(markup).not.toContain('可回看 · 可修订 · 可遗忘')
     expect(markup.indexOf('memory-library-header'))
       .toBeLessThan(markup.indexOf('test-page-notice'))
-    expect(markup.indexOf('test-page-notice'))
-      .toBeLessThan(markup.indexOf('memory-summary-strip'))
+    expect(markup.indexOf('memory-summary-strip'))
+      .toBeLessThan(markup.indexOf('test-page-notice'))
     expect(markup).not.toContain('未确认')
     expect(markup).not.toContain('provisional')
     expect(markup).not.toContain('user_confirmed')

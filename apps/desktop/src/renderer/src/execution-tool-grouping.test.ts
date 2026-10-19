@@ -8,6 +8,7 @@ import {
   toolActivityGroupPresentation,
   type ToolProgressItem
 } from './execution-tool-grouping'
+import { activityStatusForAgentRun } from './ui-model'
 
 function tool(
   id: string,
@@ -318,15 +319,27 @@ describe('execution Tool grouping', () => {
     })
   })
 
-  it('does not keep an unfinished Tool active after its parent Run is cancelled', () => {
-    const items = [tool('one', 'running')]
-    expect(toolActivityGroupHasActiveTool(items, 'running')).toBe(true)
-    expect(toolActivityGroupHasActiveTool(items, 'cancelled')).toBe(false)
-    expect(toolActivityGroupPresentation(items, 'cancelled', true)).toMatchObject({
-      status: 'stopped',
-      statusLabel: '已停止',
-      countLabel: null
-    })
+  it('settles unfinished Tools after every terminal Run without inventing their results', () => {
+    for (const activityStatus of ['running', 'waiting'] as const) {
+      const items = [tool('one', activityStatus)]
+      for (const runStatus of ['queued', 'running', 'waiting'] as const) {
+        expect(toolActivityGroupHasActiveTool(items, runStatus)).toBe(true)
+        expect(activityStatusForAgentRun(activityStatus, runStatus)).toBe(activityStatus)
+      }
+      for (const runStatus of ['succeeded', 'failed', 'cancelled'] as const) {
+        const expected = runStatus === 'cancelled' ? 'stopped' : 'recorded'
+        expect(toolActivityGroupHasActiveTool(items, runStatus)).toBe(false)
+        expect(activityStatusForAgentRun(activityStatus, runStatus)).toBe(expected)
+        expect(toolActivityGroupPresentation(items, runStatus, true)).toMatchObject({
+          status: expected,
+          statusLabel: runStatus === 'cancelled' ? '已停止' : '已记录',
+          countLabel: null
+        })
+        for (const settled of ['completed', 'failed', 'stopped', 'skipped', 'recorded'] as const) {
+          expect(activityStatusForAgentRun(settled, runStatus)).toBe(settled)
+        }
+      }
+    }
   })
 
   it('counts skipped and unknown results as settled steps', () => {

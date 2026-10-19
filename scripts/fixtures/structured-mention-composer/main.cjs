@@ -314,6 +314,126 @@ app.whenReady().then(async () => {
     })
 
 
+    await run('same-node edits keep existing links through the first frame before settled projection', async () => {
+      const url = 'https://example.com/a'
+      await reset('prefix ' + url + ' trailing')
+      await settleLinks()
+      for (const [before, after] of [['trailing', 'trailing edited'], ['prefix', 'longer prefix'],
+        ['longer prefix ', ''], ['trailing edited', '中文说明']]) {
+        const observed = await evaluate(`(async () => {
+          const range = CSS.highlights.get('rovai-composer-web-link').values().next().value;
+          window.composerTest.replaceText(${JSON.stringify(before)}, ${JSON.stringify(after)});
+          const immediate = range.toString();
+          await new Promise(requestAnimationFrame);
+          return { immediate, firstFrame: range.toString(), retained: CSS.highlights.get('rovai-composer-web-link').has(range),
+            offset: range.startOffset, expectedOffset: range.startContainer.textContent.indexOf(${JSON.stringify(url)}) };
+        })()`)
+        assert.equal(observed.immediate, url)
+        assert.equal(observed.firstFrame, url)
+        assert.equal(observed.retained, true)
+        assert.equal(observed.offset, observed.expectedOffset)
+      }
+      const edited = await state(true)
+      await settleLinks()
+      assert.equal((await state(false)).localVersion, edited.localVersion)
+      assert.equal((await state(false)).saveCount, edited.saveCount)
+    })
+
+    await run('repeated URLs retain both ranges when shifted onto previous offsets', async () => {
+      const url = 'https://example.com/a'
+      await reset(url + ' ' + url + ' tail')
+      await settleLinks()
+      const observed = await evaluate(`(async () => {
+        const original = [...CSS.highlights.get('rovai-composer-web-link')];
+        window.composerTest.replaceText(${JSON.stringify(url)}, ${JSON.stringify('x'.repeat(url.length) + ' ' + url)});
+        const immediate = original.map(range => range.toString());
+        await new Promise(resolve => setTimeout(resolve, 180));
+        const current = [...CSS.highlights.get('rovai-composer-web-link')];
+        return { immediate, retained: original.every(range => current.includes(range)), count: current.length };
+      })()`)
+      assert.deepEqual(observed.immediate, [url, url])
+      assert.equal(observed.retained, true)
+      assert.equal(observed.count, 2)
+      await reset('')
+      assert.deepEqual((await webState()).highlights, [], 'Removed nodes release all owned ranges')
+    })
+
+    await run('native typing and IME preserve unaffected links on every sampled frame in both themes', async () => {
+      const url = 'https://example.com/a'
+      for (const theme of ['day', 'night']) {
+        await evaluate('document.documentElement.dataset.theme=' + JSON.stringify(theme))
+        await reset('prefix ' + url + ' tail ')
+        await settleLinks()
+        await evaluate(`window.linkFrames = []; window.recordLinkFrames = true;
+          requestAnimationFrame(function record() {
+            window.linkFrames.push(window.composerTest.webState().highlights);
+            if (window.recordLinkFrames) requestAnimationFrame(record);
+          }); true`)
+        try {
+          for (const character of 'abcdef') await insert(character)
+          for (const composition of ['zh', '中文', '中文输入']) {
+            await command('Input.imeSetComposition', { text:composition, selectionStart:composition.length, selectionEnd:composition.length })
+            await frames()
+          }
+          await insert('中文输入')
+          await evaluate('window.composerTest.selectText("prefix",0)')
+          for (const composition of ['qian', '前面']) {
+            await command('Input.imeSetComposition', { text:composition, selectionStart:composition.length, selectionEnd:composition.length })
+            await frames()
+          }
+          await insert('前面')
+        } finally { await evaluate('window.recordLinkFrames = false; true') }
+        const sampled = await evaluate('window.linkFrames')
+        assert.ok(sampled.length >= 10)
+        for (const highlights of sampled) assert.deepEqual(highlights, [url], theme + ': existing link survives each input frame')
+        assert.equal((await state()).submitCount, 0)
+      }
+    })
+
+    await run('URL edits invalidate only affected links and gestures revalidate targets immediately', async () => {
+      const first = 'https://example.com/a', edited = 'https://example.com/b', second = 'https://other.example/path'
+      await reset(first + ' gap ' + second + ' tail')
+      await settleLinks()
+      const immediate = await evaluate('window.composerTest.replaceText(' + JSON.stringify(first) + ',' + JSON.stringify(edited) + '); window.composerTest.webState().highlights')
+      assert.deepEqual(immediate, [second])
+      await clickText(edited)
+      assert.equal((await webState()).popup, edited)
+      await button('复制链接')
+      assert.equal((await webState()).copied.at(-1), edited)
+      await evaluate('window.composerTest.selectText(' + JSON.stringify(edited) + ',' + edited.length + ')')
+      await insert('x')
+      assert.deepEqual((await webState()).highlights, [second], 'URL-tail insertion waits for semantic recognition')
+      await settleLinks()
+      assert.deepEqual((await webState()).highlights.sort(), [edited + 'x', second].sort())
+      await evaluate('window.composerTest.switchDraft("fresh draft")')
+      await frames()
+      assert.deepEqual((await webState()).highlights, [], 'Switching drafts releases old display caches')
+    })
+
+    await run('node splits, merges and cross-line Markdown fall back to settled recognition', async () => {
+      const url = 'https://example.com/a'
+      await reset('prefix ' + url + ' tail')
+      await settleLinks()
+      await evaluate('window.composerTest.selectText(' + JSON.stringify(url) + ',0)')
+      await key('Enter', 13, 8)
+      await settleLinks()
+      assert.deepEqual((await webState()).highlights, [url])
+      await key('Backspace', 8)
+      await settleLinks()
+      assert.deepEqual((await webState()).highlights, [url])
+      await reset('before\n' + url + '\nafter')
+      await settleLinks()
+      await evaluate('window.composerTest.selectText("before",0)')
+      await evaluate('window.composerTest.paste(' + JSON.stringify('```\n') + ')')
+      await frames()
+      assert.equal((await state()).text, '```\nbefore\n' + url + '\nafter')
+      await settleLinks()
+      assert.deepEqual((await webState()).highlights, [])
+      await key('z', 90, primary, 'KeyZ')
+      await settleLinks()
+      assert.deepEqual((await webState()).highlights, [url])
+    })
+
     await run('ordinary long-draft edits retain unrelated ranges and multiline Markdown targets', async () => {
       const lines = Array.from({length:800},(_,index)=>'line ' + index + ' https://example.com/' + index)
       await reset(lines.join('\n'))

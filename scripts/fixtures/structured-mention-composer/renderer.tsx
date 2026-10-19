@@ -5,7 +5,7 @@ import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/s
 import type { ComposerDocument } from '@contracts'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { $getSelection, $isNodeSelection, $isRangeSelection, getNearestEditorFromDOMNode } from 'lexical'
+import { $getRoot, $getSelection, $isNodeSelection, $isRangeSelection, getNearestEditorFromDOMNode } from 'lexical'
 import {
   StructuredMentionComposer,
   type StructuredMentionComposerHandle,
@@ -219,6 +219,13 @@ function Harness() {
         focusEnd() { composerRef.current?.focus('end') },
         focusStart() { composerRef.current?.focus('start') },
         selectText,
+        replaceText(needle: string, replacement: string) {
+          getNearestEditorFromDOMNode(editor()).update(() => {
+            const node = $getRoot().getAllTextNodes().find(node => node.getTextContent().includes(needle))
+            if (!node) throw new Error('Missing text to replace: ' + needle)
+            node.setTextContent(node.getTextContent().replace(needle, replacement))
+          }, { discrete: true })
+        },
         captureEditor() { capturedEditor = editor() },
         paste(text: string, structured = '', html = '') {
           const clipboardData = new DataTransfer()

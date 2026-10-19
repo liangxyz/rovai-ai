@@ -7593,7 +7593,8 @@ function ExecutionDrawer({
                   aria-controls={contentId} onClick={() => toggleRun(run.id)}>
                   <ExecutionCardChevron expanded={expanded} />
                 </button>
-                {run.invocationKind === 'batch' && (run.status === 'failed' || run.status === 'cancelled') && inputMessageIds.length > 0 && (
+                {run.invocationKind === 'batch' && run.failure?.code !== 'context_payload_too_large'
+                  && (run.status === 'failed' || run.status === 'cancelled') && inputMessageIds.length > 0 && (
                   <ContinueAgentRunButton threadId={threadId} agentRunId={run.id} onError={onFileOpenError} />
                 )}
                 {(stopState === 'available' || stopState === 'stopping' || stopState === 'confirming') && (

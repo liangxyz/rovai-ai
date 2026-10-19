@@ -141,13 +141,17 @@ async fn run() -> Result<u8> {
         return Ok(2);
     }
 
+    let mut send_input_file_path = None;
     let (operation, input) = match args.as_slice() {
         [command, rest @ ..] if command == "send" => {
             let identity = builtin_tool_identity_by_command(command, "")
                 .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
             let description = builtin_tool_description(identity.operation, tasks_enabled)?;
-            let input = match parse_and_validate_operation_input(&description, rest) {
-                Ok(input) => input,
+            let input = match parse_and_validate_operation_input_with_source(&description, rest) {
+                Ok((input, path)) => {
+                    send_input_file_path = path;
+                    input
+                }
                 Err(failure) => {
                     print_invalid_input(Some(&failure));
                     return Ok(2);
@@ -187,6 +191,7 @@ async fn run() -> Result<u8> {
             request_id,
             operation,
             input,
+            send_input_file_path,
         },
     };
 
@@ -601,12 +606,21 @@ fn parse_and_validate_operation_input(
     description: &BuiltinToolDescription,
     args: &[String],
 ) -> std::result::Result<Value, CliInputFailure> {
-    let input = parse_operation_input(description, args).map_err(|error| {
-        // Only deliberately constructed safe diagnostics may reach the Agent.
-        error
-            .downcast::<CliInputFailure>()
-            .unwrap_or_else(|_| CliInputFailure::generic())
-    })?;
+    parse_and_validate_operation_input_with_source(description, args).map(|(input, _)| input)
+}
+
+fn parse_and_validate_operation_input_with_source(
+    description: &BuiltinToolDescription,
+    args: &[String],
+) -> std::result::Result<(Value, Option<String>), CliInputFailure> {
+    let mut send_input_file_path = None;
+    let input = parse_operation_input_with_source(description, args, &mut send_input_file_path)
+        .map_err(|error| {
+            // Only deliberately constructed safe diagnostics may reach the Agent.
+            error
+                .downcast::<CliInputFailure>()
+                .unwrap_or_else(|_| CliInputFailure::generic())
+        })?;
     let input = rovai_core::thread_compat::normalize_builtin_input(&description.name, input)
         .map_err(|_| CliInputFailure::generic())?;
     let input = rovai_core::member_studio::normalize_identity_tool_input(&description.name, input)
@@ -617,7 +631,7 @@ fn parse_and_validate_operation_input(
     if validate_cli_input_schema(description, &input).is_err() {
         return Err(explain_input_validation_failure(description, &input));
     }
-    Ok(input)
+    Ok((input, send_input_file_path))
 }
 
 fn validate_cli_input_schema(description: &BuiltinToolDescription, input: &Value) -> Result<()> {
@@ -1185,7 +1199,16 @@ fn compact_cli_value(value: &Value) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
+#[cfg(test)]
 fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) -> Result<Value> {
+    parse_operation_input_with_source(description, args, &mut None)
+}
+
+fn parse_operation_input_with_source(
+    description: &BuiltinToolDescription,
+    args: &[String],
+    send_input_file_path: &mut Option<String>,
+) -> Result<Value> {
     let argument_by_flag = description
         .arguments
         .iter()
@@ -1268,7 +1291,14 @@ fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) 
             if direct.contains_key("body") {
                 bail!("--body and --input-file cannot be supplied together");
             }
-            return parse_send_file_input(description, Path::new(&path), direct);
+            let input = parse_send_file_input(description, Path::new(&path), direct)?;
+            *send_input_file_path = Some(
+                rovai_core::builtin_tool_transport::normalize_send_input_file_path(
+                    &std::path::absolute(&path)?,
+                )
+                .context("Send input path cannot be normalized")?,
+            );
+            return Ok(input);
         }
         if !direct.is_empty() {
             bail!("--input-file cannot be combined with direct arguments");
@@ -2155,6 +2185,7 @@ mod tests {
                 request_id: Uuid::new_v4().to_string(),
                 operation: "thread.list".to_string(),
                 input: json!({}),
+                send_input_file_path: None,
             },
         }
     }
@@ -2697,6 +2728,7 @@ mod tests {
         let description = builtin_tool_description("thread.message.send", true).unwrap();
         let path = env::temp_dir().join(format!("rovai-send-{}", Uuid::new_v4()));
         let file_args = vec!["--input-file".into(), path.to_string_lossy().into_owned()];
+        let expected_source = path.to_string_lossy().replace('\\', "/");
         let texts = [
             "  中文 🌸\r\n# Title\n\n`code` \\\"quotes\\\" $() \\n\t\n".to_string(),
             "".to_string(),
@@ -2718,10 +2750,10 @@ mod tests {
         ];
         for text in texts {
             fs::write(&path, &text).unwrap();
-            assert_eq!(
-                parse_and_validate_operation_input(&description, &file_args).unwrap(),
-                json!({"body": text})
-            );
+            let (input, source) =
+                parse_and_validate_operation_input_with_source(&description, &file_args).unwrap();
+            assert_eq!(input, json!({"body": text}));
+            assert_eq!(source.as_deref(), Some(expected_source.as_str()));
             for args in [
                 [file_args.clone(), vec!["--public-only".into()]].concat(),
                 [vec!["--public-only".into()], file_args.clone()].concat(),

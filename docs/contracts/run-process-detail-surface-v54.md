@@ -5,7 +5,7 @@ authority: conversation-run-presence-surface
 status: accepted
 version: 54
 source_version: v1.72
-last_updated: 2026-10-13
+last_updated: 2026-10-19
 ---
 
 # Run Process Detail Surface v54
@@ -25,6 +25,11 @@ last_updated: 2026-10-13
 停止确认沿用当前[会话工作区规范](../ui/components/conversation-workspace.md#会话中的队员占位)的
 非模态文字气泡，取代继承链中的旧确认 Dialog；取消、Esc 和点外部不提交，关闭不抢回焦点。
 队员资料与模型浮层的焦点规则独立于停止确认。
+
+父 Run 终态收口尚未结算工具的活动展示：cancelled 下的 running/waiting 投影为 stopped；
+succeeded/failed 下投影为 recorded（结果未知）。已收到的工具终态原样保留，缺失回执不从 Run 的
+成功／失败推断。此处仅是共享展示投影，不改写原始或 Canonical Evidence，不声明后台进程已经退出；
+迟到的明确工具结果继续覆盖未知展示，展开状态保持。
 
 生产组件浏览器 owner 验证头像 / 姓名、键盘与焦点、冻结模型与当前资料差异、跨适配器强度、
 默认 / 缺失 / 旧 Host 记录、离开与删除后的静态回退、回复后的身份衔接，以及日夜主题和窄宽度布局。

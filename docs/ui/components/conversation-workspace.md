@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 ---
 
 # Camp 会话工作区
@@ -286,8 +286,12 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 可访问性树，不增加文本、独立焦点或远端图标请求。正文中的链接继续自然换行，图标不进入复制、引用或发送内容。
 
 Composer 保留 Text＋Atom，原生 DOM Range 高亮只作为编辑状态外的派生展示。文字编辑立即使旧浮层失效，
-停顿后合并投影当前正文，Markdown 上下文交由已有解析器处理；保留未变化的 DOM Range，不按行维护语法缓存，
-不在每次按键时同步全文解析。链接操作会先刷新待计算的范围。单击 URL 正常定位光标并出现
+停顿 150 ms 后合并投影当前正文，Markdown 上下文交由已有解析器处理。已识别链接的节点 key 和起止 offset
+只保存在当前编辑器的内存缓存中；DOM 提交后按变化 TextNode 维护未受影响链接的 Range，普通文字在 URL 前后
+增删及组合输入期间不等待完整识别。改到 URL 本身、尾部或无法可靠映射的节点变化只撤下受影响范围，
+待完整投影重新确认；跨行 Markdown 的最终语义仍由完整解析决定。节点销毁、草稿切换和编辑器卸载释放旧记录。
+保留未变化的 DOM Range，不按行维护语法缓存，不在每次按键时同步全文解析或遍历所有链接。
+链接操作会先刷新待计算的范围。单击 URL 正常定位光标并出现
 只含带左侧网页图标的地址、打开和复制的非模态浮层；编辑正文继续保留纯文本高亮。
 macOS Cmd＋单击、其他桌面平台 Ctrl＋单击直接打开。浮层不抢焦点，
 输入、组合输入、拖选、Esc 或切换草稿会关闭；操作前重验当前目标。无 CSS Highlight 支持时保留操作能力。
@@ -648,6 +652,8 @@ Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、
 `thinking | executing` phase 与独立准入的短标题来切换上述反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Camp 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
 运行中 Run 卡片保留原有耗时；终态卡片有用量字段时仅显示 `xxk` 入口，点击的气泡显示 Input Token、Output Token、Cache Read、Cache Write 四项及分隔后的执行耗时。缺失字段显示未知，不加用量合计行、Run 编号或摘要。仅成功且 Input/Output 完整结算时计算入口值 `Input + Output`，Cache 不再叠加。完全没有用量字段的终态卡片使用时钟入口单独查看耗时；迟到用量到达后切换成 token 入口。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Camp Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
+上下文圆环填充与百分比共用中性前景色：默认使用 `--muted`，悬浮或气泡展开时使用 `--ink`；
+Run 状态与占用比例不触发圆环状态色。两套主题使用同一规则。
 需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出且没有思考反馈时显示“执行中”。成功后才显示“工作了 {时长}”
 并自动折叠过程；失败保留明确失败摘要及可操作错误，取消保持停止语义。正文或工具首次到达、单条工具返回、步骤组
 收口都不能触发整轮耗时总结。关闭 Run 后卸载详情；再次打开读取最新窗口。组跨页按稳定操作身份保留展开意图。
@@ -781,7 +787,7 @@ standalone raw Evidence、Envelope JSON 或独立
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v7](../../contracts/runtime-file-change-observation-v7.md)准入的可靠
+只有 [Runtime File Change Observation v9](../../contracts/runtime-file-change-observation-v9.md)准入的可靠
 Evidence 才进入文件操作呈现。成功 read 的可靠单路径显示为不可展开的 `阅读 <basename>`；成功 write 的可靠
 单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot、exact mutation 或已准入 reported mutation 时，每个文件作为同一
 Canonical Activity 的 presentation row，明确 add 显示“新增”，其他显示“编辑”；没有可靠内容时不显示
@@ -790,6 +796,10 @@ Canonical Activity 的 presentation row，明确 add 显示“新增”，其他
 当前 Runtime Host 的精确 `ROVAI_RUN_TMP` 是 Rovai 可重置的临时交付区，不是用户文件面。其目录内的 HTML、
 图片或其他中间产物不显示为 `修改 <basename>`，也不进入 `Files Changed`；mixed 事件只展示其余普通文件。
 已经持久化的历史卡片不重算。临时文件经 `rovai send --file` 发布后，附件由独立的 Camp Attachment UI 呈现。
+
+同 Run/epoch 成功 Send 的 `--input-file` 来源由 Core 在生成 Files Changed 时精确排除，卡片与详情统计保持
+一致；全部过滤后不显示卡片。来源可位于任意目录，`--file` 附件不因交付被过滤；原始执行文件行和 Command Diff
+保持。界面直接消费已过滤的投影，旧无来源记录不回填。字段与恢复规则见上述 v9 合同。
 
 文件操作使用阅读文件或笔形 16px 图标。动作词和文件名始终横向单行排列，之间固定保留 5px 间距；空间不足时仅文件名显示省略号，动作词与状态保持完整，完整路径保留在 title 与可访问名称中。执行抽屉与其他执行面使用同一布局。文件名以虚线底线按钮展示。canonical diff 修改文件行优先用 exact Run Activity Evidence 授权，并以来源 AgentRun
 的 `executionRoot` 解析；无 Diff 的终态 Read/Write 行使用同一 Run Activity 来源，以该 Evidence 已准入的
@@ -1028,13 +1038,20 @@ public Composer 不提供 CampTurn 或整轮停止。执行台保留既有 Agent
 既有 cancel_requested_at 或 Runtime 清理未完成不产生停止 spinner；取消 Run 显示已取消并清除旧外部效果提示，
 底层发送与 Action 证据不因此删除。
 Run 卡片与步骤组均以权威终态优先：即使取消标记尚存，终态也不得被“正在停止 · 等待执行结束”覆盖；
-已完成步骤保持完成，取消 Run 中未结束的工具按既有终态投影显示已停止。
+已完成步骤保持完成；取消 Run 中仍为 running/waiting 的工具显示已停止，成功或失败 Run 中这些未收齐
+结果的工具显示中性的“结果未知”，不再转圈或等待审批。该规则只收口本轮展示，不修改底层 Evidence、
+伪造工具成功／失败或断言原生后台进程已退出；迟到的明确结果仍在原行更新，保留展开状态。
 消息区占位按下节提供确认停止，Header、Task 卡和 Composer 不增加 Run-local 入口。accepted/unknown 只显示普通红色失败，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；新 public Camp 不再生成 Turn-level 停止消息，
 历史停止占位只按已有记录只读展示。精确资格、required/optional 后果与不确定态见
 [Run Process Detail Surface v34](../../contracts/run-process-detail-surface-v34.md)。
 
 ## 会话中的队员占位
+
+Core 领取完整输入后确认 `context_payload_too_large` 时，对应执行行显示“输入内容过大 · 查看详情”，
+不加行下提示。点击打开原执行详情，即使没有 execution evidence 也显示持久化的安全失败原因；
+文件附件或拆分发送的恢复建议只放在详情内。原消息完整保留，该错误行不因后续普通执行消失。
+此类失败不提供原样重试／继续按钮；Composer 不估算最终输入预算、不提前拒绝发送。
 
 公开会话沿用 User 确认的 v12 单行推进和 RunCard 高亮，以及既有停止区分隔与默认色。
 每个 Run 尚未发送自己的公开消息时，固定在 Core 领取本次输入时的公开消息末尾；自己的消息成功进入公开时间线后，

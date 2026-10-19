@@ -1,5 +1,6 @@
 @import '../../../../../packages/ui/src/theme.css';
 @import './settings-workspace.css';
+@import './memory-workspace.css';
 
 /* Each split owner receives this value directly. Keep drag updates out of the
    inherited styles of every message, tab and editor below those owners. */
@@ -288,7 +289,7 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .rail-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-muted); }
 .rail-button.active { color: var(--conversation-action); background: var(--surface-selected); }
 .rail-button.active .rail-label { font-weight: 500; }
-.rail-badge-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ember); }
+.rail-badge-dot { position: static; flex: 0 0 7px; align-self: center; margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--ember); }
 .unified-sidebar-footer { container-type: inline-size; display: grid; flex: 0 0 auto; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
 .sidebar-settings-entry { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; }
 .sidebar-settings-main { min-width: 0; }
@@ -1124,7 +1125,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .memory-confirm-dialog { width: min(540px, calc(100vw - 48px)); }
 .memory-confirm-preview { max-height: 180px; overflow: auto; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; white-space: pre-wrap; color: var(--muted); background: var(--surface-subtle); font-size: 11px; line-height: 1.5; }
 /* Long-term memory workbench */
-.content.memory-content { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 0; border-top: 0; background: var(--home-surface); }
+.content.memory-content { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 0; border-top: 0; background: var(--memory-canvas); }
 .content.memory-content > * { max-width: none; }
 .content.memory-content > .memory-library { width: min(1136px, 100%); margin: 0 auto; }
 .memory-library { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 10px; overflow: hidden; padding: 34px 28px 24px; }
@@ -2403,7 +2404,7 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 .execution-context-trigger svg { width: 22px; height: 22px; flex: 0 0 auto; fill: none; transform: rotate(-90deg); }
 .execution-context-value { font: 400 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .execution-context-track { stroke: var(--line-strong); stroke-width: 2.5; }
-.execution-context-fill { stroke: var(--info); stroke-width: 2.5; stroke-linecap: round; }
+.execution-context-fill { stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
 .execution-metric-popover { z-index: 401; min-width: 172px; max-width: calc(100vw - 24px); padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); font-size: 11px; }
 .execution-metric-popover dl { display: grid; gap: 7px; margin: 0; }
 .execution-metric-popover dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
@@ -8508,7 +8509,8 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 .automation-workspace.editor-closed .automation-split { grid-template-columns: minmax(0, 1fr) 7px 0; }
 .automation-editor { container-type: inline-size; container-name: scheduled-editor; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--home-surface); }
 .automation-editor[hidden] { display: none; }
-.window-drag-strip-automations { display: none; }
+/* Preserve native dragging without intercepting clicks on the controls below. */
+.window-drag-strip-automations { pointer-events: none; }
 .automation-editor-toolbar { -webkit-app-region: drag; display: flex; min-height: 38px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 7px 14px 2px 16px; color: var(--muted); font-size: 11px; }
 .automation-editor-toolbar small { flex: 1; color: var(--muted); font-size: 10.5px; text-align: right; }
 .automation-editor-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 0 16px 32px; }
@@ -8812,7 +8814,7 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 :root .dialog-content.app-dialog { width:min(480px,calc(100vw - 48px)); padding:0; max-height:calc(100vh - 48px); border-radius:12px; border:1px solid var(--line-strong); }
 :root .dialog-content.app-dialog::before { content:none; }
 :root .dialog-content.app-dialog.camp-member-dialog { width:min(520px,calc(100vw - 32px)); }
-:root .app-dialog:is(.task-editor-dialog,.memory-editor-dialog,.mcp-editor-dialog,.member-avatar-dialog) { width:min(600px,calc(100vw - 48px)); }
+:root .app-dialog:is(.task-editor-dialog,.mcp-editor-dialog,.member-avatar-dialog) { width:min(600px,calc(100vw - 48px)); }
 :root .app-dialog:is(.mcp-import-dialog,.skill-import-dialog) { width:min(640px,calc(100vw - 48px)); }
 .app-dialog-header { flex:none; padding:22px 24px 16px; }
 .app-dialog-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
@@ -8876,10 +8878,6 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 :root .member-preset-copy small { display:none; }
 :root .member-avatar-editor .field-help { font-size:11px; color:var(--muted); }
 :root .app-dialog-body .memory-body-field { margin-top:14px; }
-:root .memory-editor-grid:has(select:disabled) select { min-height:23px; padding:0; border:0; border-radius:0; background:transparent; appearance:none; opacity:1; }
-:root .memory-body-field > small { visibility:hidden; }
-:root .memory-body-field:focus-within > small { visibility:visible; }
-:root .memory-body-field textarea { min-height:112px; height:112px; }
 :root .memory-review-schedule-heading,:root .memory-review-schedule-note,:root .memory-review-schedule-footer-leading > span { display:none; }
 :root .memory-review-schedule-option { padding:12px 8px; border:1px solid var(--dialog-field-line); background:transparent; box-shadow:none; }
 :root .memory-review-schedule-option strong { font-size:13px; font-weight:400; }

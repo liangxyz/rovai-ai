@@ -3,7 +3,8 @@ import type { MemoryScopeKind, RestorableLocation, SettingsSection } from '@cont
 export type MemoryNavigationTarget = {
   kind: 'memory'
   memoryId: string | null
-  scope?: MemoryScopeKind
+  scope?: MemoryScopeKind | 'all'
+  /** Older browser-history entries may carry this field; the library no longer filters by it. */
   governance?: 'all' | 'agent' | 'review' | 'stopped'
   search?: string
 }

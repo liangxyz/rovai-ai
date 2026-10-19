@@ -12,7 +12,9 @@ use uuid::Uuid;
 
 use crate::{
     db::Database,
-    execution_evidence::{ExecutionEvidenceService, payload_affects_file_facts},
+    execution_evidence::{
+        ExecutionEvidenceService, payload_affects_file_facts, successful_send_input_file_path,
+    },
     managed_blob::{
         GC_OWNER_FILE_CHANGE_PROJECTION, ManagedBlobStore, attach_gc_candidate, detach_gc_candidate,
     },
@@ -928,7 +930,14 @@ fn aggregate_evidence_with_existing_ids(
     let mut changes = Vec::new();
     let mut latest_run_snapshot: Option<(i64, String)> = None;
     let mut source_evidence_ids = Vec::new();
+    let mut send_input_paths = BTreeSet::new();
     for item in evidence {
+        if let Some(path) = successful_send_input_file_path(&item.payload)
+            .and_then(|path| normalize_reported_path_for_display(execution_root, path))
+        {
+            send_input_paths.insert(path);
+            source_evidence_ids.push(item.id.clone());
+        }
         if let Some(diff) = item
             .payload
             .pointer("/runtimeRunDiff/diff")
@@ -964,6 +973,9 @@ fn aggregate_evidence_with_existing_ids(
         ),
         None => file_details_from_operations(changes),
     };
+    // Apply to the final file list so both authoritative snapshots and operation
+    // fallbacks share the exclusion, detail and statistics. Never read the file.
+    files.retain(|file| !send_input_paths.contains(&file.path));
     if files.is_empty() {
         return None;
     }
@@ -1990,6 +2002,109 @@ mod tests {
     }
 
     #[test]
+    fn successful_send_sources_filter_snapshot_and_operation_files_with_exact_paths() {
+        let root = std::env::temp_dir().join("send-source-projection");
+        let reply = root.join("reply.md").to_string_lossy().replace('\\', "/");
+        let outside = root
+            .parent()
+            .unwrap()
+            .join("outside-reply.md")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let send = |path: &str| {
+            serde_json::json!({
+                "kind": "builtin_tool_invocation", "canonicalTool": "thread.message.send",
+                "sourceAuthority": "core", "status": "completed", "coreEnvelope": {"ok": true},
+                "sendInputFilePath": path,
+            })
+        };
+        let mut original = vec![
+            full_at(1, "src/code.rs", Some("old\n"), Some("new\n")),
+            full_at(2, "reply.md", None, Some("reply\n")),
+            full_at(3, "reply.md.copy", None, Some("keep\n")),
+            full_at(4, &outside, None, Some("outside\n")),
+        ];
+        for snapshot in [false, true] {
+            let mut items = original.clone();
+            if snapshot {
+                items.push(evidence(5, json!({"runtimeRunDiff": {
+                    "status": "available",
+                    "diff": "diff --git a/src/code.rs b/src/code.rs\n--- a/src/code.rs\n+++ b/src/code.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/reply.md b/reply.md\nnew file mode 100644\n--- /dev/null\n+++ b/reply.md\n@@ -0,0 +1 @@\n+reply\ndiff --git a/reply.md.copy b/reply.md.copy\nnew file mode 100644\n--- /dev/null\n+++ b/reply.md.copy\n@@ -0,0 +1 @@\n+keep\n"
+                }})));
+            }
+            items.extend([
+                evidence(6, send(&reply)),
+                evidence(7, send(&outside)),
+                evidence(8, send(&reply)),
+            ]);
+            let result = aggregate_evidence("run", 1, "now", &root, &items).unwrap();
+            assert_eq!(
+                result
+                    .details
+                    .files
+                    .iter()
+                    .map(|file| file.path.as_str())
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from(["reply.md.copy", "src/code.rs"])
+            );
+            assert_eq!(result.details.card.file_count, 2);
+            assert_eq!(result.details.card.additions, Some(2));
+            assert_eq!(result.details.card.deletions, Some(1));
+            assert_eq!(result.details.card.operation_count, 2);
+        }
+        for (field, value) in [
+            ("status", json!("failed")),
+            ("status", json!("started")),
+            ("sourceAuthority", json!("runtime")),
+            ("canonicalTool", json!("member.get")),
+            ("coreEnvelope", json!({"ok": false})),
+            ("sendInputFilePath", Value::Null),
+            ("sendInputFilePath", json!("reply.md")),
+        ] {
+            let mut invalid = send(&reply);
+            invalid[field] = value;
+            assert!(!payload_affects_file_facts(&invalid));
+            let mut items = original.clone();
+            items.push(evidence(5, invalid));
+            assert_eq!(
+                aggregate_evidence("run", 1, "now", &root, &items)
+                    .unwrap()
+                    .details
+                    .card
+                    .file_count,
+                4
+            );
+        }
+        // Attachment-only metadata cannot exclude a modified deliverable.
+        original.push(evidence(
+            5,
+            json!({"status": "completed", "files": [reply]}),
+        ));
+        assert_eq!(
+            aggregate_evidence("run", 1, "now", &root, &original)
+                .unwrap()
+                .details
+                .card
+                .file_count,
+            4
+        );
+        // No file or directory is created: filtering still works after source deletion.
+        assert!(
+            aggregate_evidence(
+                "run",
+                1,
+                "now",
+                &root,
+                &[
+                    full_at(1, "reply.md", None, Some("reply\n")),
+                    evidence(2, send(&reply)),
+                ]
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn one_operation_only_file_keeps_the_whole_card_on_operation_counts() {
         let projection = aggregate_evidence(
             "run-1",
@@ -2623,6 +2738,76 @@ mod tests {
                 .expect("no_changes must not suppress a later valid file fact");
         assert_eq!(formerly_empty.files[0].path, "src/late.ts");
         assert!(!formerly_empty.is_stale);
+
+        // The existing persistence owner also covers late Send provenance, epoch
+        // isolation and restart: a newly excluded last file must publish no_changes.
+        let send_source = json!({
+            "toolCallId": "late-send-source", "kind": "builtin_tool_invocation",
+            "canonicalTool": "thread.message.send", "sourceAuthority": "core",
+            "status": "completed", "coreEnvelope": {"ok": true},
+            "sendInputFilePath": execution_root.join("src/late.ts").to_string_lossy(),
+        });
+        assert!(
+            ExecutionEvidenceService
+                .record_builtin_tool_result(
+                    &mut database,
+                    &blob_store,
+                    "file-change-run-2",
+                    2,
+                    &send_source,
+                )
+                .unwrap()
+                .is_none(),
+            "another epoch must not contribute an exclusion"
+        );
+        let recorded = ExecutionEvidenceService
+            .record_builtin_tool_result(
+                &mut database,
+                &blob_store,
+                "file-change-run-2",
+                1,
+                &send_source,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(recorded.file_facts_changed);
+        assert!(
+            !ExecutionEvidenceService
+                .record_builtin_tool_result(
+                    &mut database,
+                    &blob_store,
+                    "file-change-run-2",
+                    1,
+                    &send_source,
+                )
+                .unwrap()
+                .unwrap()
+                .file_facts_changed,
+            "replayed provenance must not invalidate again"
+        );
+        drop(database);
+        let mut database = Database::open(&data_dir).unwrap();
+        assert_eq!(
+            AgentRunFileChangeProjector
+                .recover_terminal_runs(&mut database, &blob_store)
+                .unwrap(),
+            1
+        );
+        let cards =
+            list_completed_run_file_changes(database.connection(), "file-change-camp").unwrap();
+        assert_eq!(cards.len(), 2, "only the source Run loses its card");
+        assert!(
+            cards
+                .iter()
+                .all(|card| card.agent_run_id != "file-change-run-2")
+        );
+        assert_eq!(
+            load_projection_state(&database, "file-change-run-2", 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "no_changes"
+        );
 
         drop(database);
         std::fs::remove_dir_all(data_dir).unwrap();

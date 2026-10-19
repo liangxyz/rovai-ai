@@ -104,8 +104,9 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
         }
         const state = submittingId === run.id ? 'stopping' : stopState(run)
         const canStop = state === 'available' || state === 'stopping' || state === 'confirming'
-        const canRetry = run.status === 'failed' && run.invocationKind === 'batch' && (run.inputMessageIds?.length ?? 0) > 0
-        const description = run.status === 'failed' ? uiAttribute('执行中断，查看原因')
+        const inputTooLarge = run.failure?.code === 'context_payload_too_large'
+        const canRetry = !inputTooLarge && run.status === 'failed' && run.invocationKind === 'batch' && (run.inputMessageIds?.length ?? 0) > 0
+        const description = inputTooLarge ? uiAttribute('输入内容过大，查看详情') : run.status === 'failed' ? uiAttribute('执行中断，查看原因')
           : uiAttribute('查看执行过程')
         return <article key={run.id} className="conversation-bubble agent conversation-run-presence"
           data-presence-run={run.id} data-presence-state={run.status} data-continuation={continuation}
