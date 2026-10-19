@@ -14,21 +14,19 @@ const examples = [
 
 const renderers = [{
   name: 'user message text',
-  rendersWebLinks: false,
   render: (source: string) => renderToStaticMarkup(createElement(FileReferenceText, {
     text: source,
     onActivate: () => undefined
   }))
 }, {
   name: 'safe Markdown',
-  rendersWebLinks: true,
   render: (source: string) => renderToStaticMarkup(createElement(SafeMarkdown, {
     children: source,
     onFileReference: () => undefined
   }))
 }]
 
-describe.each(renderers)('file-link presentation in $name', ({ render, rendersWebLinks }) => {
+describe.each(renderers)('file-link presentation in $name', ({ render }) => {
   it('shows explicit labels once, keeps relative targets in tooltips, and uses true file-type icons', () => {
     const markup = render(examples)
     const visibleText = markup.replace(/<[^>]*>/gu, '')
@@ -77,7 +75,7 @@ describe.each(renderers)('file-link presentation in $name', ({ render, rendersWe
     expect(markup).not.toContain('title="https:')
     expect(markup).toContain('<code>src/inline.ts:4</code>')
     expect(markup.match(/class="(?:message|markdown)-file-reference"/gu)).toHaveLength(1)
-    expect(markup.match(/data-resource-type="web"/gu) ?? []).toHaveLength(rendersWebLinks ? 2 : 0)
+    expect(markup.match(/data-resource-type="web"/gu) ?? []).toHaveLength(2)
   })
 
   it('keeps labels separate from targets with spaces, escapes and line fragments', () => {

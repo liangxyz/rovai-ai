@@ -297,6 +297,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     super::unified_activity::migrate(database).unwrap();
     super::compact_execution::migrate(database).unwrap();
     super::steer::assert_upgrade(database);
+    database.migrate(false).unwrap();
     assert_eq!(
         before,
         public_history_claim_preserved_evidence_digest(database.connection()).unwrap()
@@ -308,10 +309,10 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     let guard = schema(
         database.connection(),
         "trigger",
-        "context_manifest_v39_only_insert",
+        "context_manifest_v40_only_insert",
     )
     .unwrap();
-    for version in [33, 34, 36, 38, 39] {
+    for version in [33, 34, 36, 38, 39, 40] {
         assert!(guard.contains(&format!("input.context_manifest_version IS NOT {version}")));
     }
     assert!(guard.contains("NEW.context_manifest_version = 37"));

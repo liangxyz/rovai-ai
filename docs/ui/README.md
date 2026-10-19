@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-10-15
+last_updated: 2026-10-17
 ---
 
 # Rovai AI UI 规范
@@ -34,18 +34,18 @@ Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主�
 
 ## 复杂组件
 
-[复杂组件索引](components/README.md)路由以下稳定呈现合同：Bootstrap Shell、App Shell/统一侧栏、Camp 会话工作区、
+[复杂组件索引](components/README.md)路由以下稳定呈现合同：Bootstrap Shell、App Shell/统一侧栏、Thread 会话工作区、
 首次训练、结构化 Mention 与 Composer Atom、队员身份与图像、渠道设置，以及会话区附件拖放。Task、AgentRun、A2A、Recovery、权限、
 持久化和事务语义仍须读取相关 ADR/Contract，不能从 UI 文档反向推导。
 
-Camp 内显式 Markdown 文件链接、共享资源图标、独立文件阅读、共享顶栏、文件 Tabs、路径行、Viewer、更新反馈与响应式替换由
-[Camp 文件预览区](components/file-preview.md)拥有稳定呈现边界。
+Thread 内显式 Markdown 文件链接、共享资源图标、独立文件阅读、共享顶栏、文件 Tabs、路径行、Viewer、更新反馈与响应式替换由
+[Thread 文件预览区](components/file-preview.md)拥有稳定呈现边界。
 
 定时任务的一级入口、模板、自动保存、状态和结果会话入口由
 [Automation 工作区](components/automation-workspace.md)拥有稳定呈现边界。
 
 Runtime 终态文件行与会话中的每 Run 文件变化卡片由
-[Camp 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
+[Thread 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
 
 当前 Skills 原生只读页、工具箱逐队员配置和会话 `/` 候选见 [Skills、工具箱与会话选择](components/skills-settings.md)。MCP 的列表/详情、导入和编辑见 [Capability settings](components/capability-settings.md)；其中旧 Skills Library 描述仅作历史解释。
 
@@ -54,6 +54,7 @@ Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 
 ## Web 与 Mobile
 
+- [Web 连接恢复](host-web-connection-recovery.md)：统一全屏断线遮罩、原提交恢复入口和键盘边界。
 - [设置 · 远程连接交互稿](host-remote-connection.md)：正式设置菜单及同组件交互稿，含本机管理、地址发现、令牌重复读取与浏览器连接状态。
 - [Desktop/Web 宽屏对照稿](host-web-parity.md)：阶段 1–3 当前收敛入口，行为差异表、生产组件 fixture 与实际验收边界。
 - [Mobile WebUI](host-web-mobile.md)：已接入实际 Web 入口，复用正式业务页面；底部导航、右侧统一状态槽、连续 Run、六种计划与手机日期/时间面板。
@@ -69,9 +70,9 @@ Desktop 的[快捷键设置](components/shortcut-settings.md)管理窗口内动�
 平台文档只拥有 window chrome、快捷键/文案、系统主题、文件系统反馈和平台准入等展示差异，不创建第二套
 产品结构。v1.05 HTML 保留当时的评审上下文，不代表当前 Windows chrome，也不是生产组件、验收证据或领域状态真源。
 
-普通用户通过 `rovai app camp open` 请求导航时，Desktop Main 必须先验证 Camp，再复用现有 window 恢复与
-Camp activation 路径；Renderer 不接收 automation credential、socket、任意 route 或本地路径，也不建立第二套
-视觉 surface。字段和错误由 [User Automation v2](../contracts/user-automation-v2.md)拥有。
+普通用户通过 `rovai app thread open` 请求导航时，Desktop Main 必须先验证 Thread，再复用现有 window 恢复与
+Thread activation 路径；Renderer 不接收 automation credential、socket、任意 route 或本地路径，也不建立第二套
+视觉 surface。字段和错误由 [User Automation v6](../contracts/user-automation-v6.md)拥有。
 
 ## 页面局部 Brief
 

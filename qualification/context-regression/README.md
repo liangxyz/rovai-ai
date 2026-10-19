@@ -2,6 +2,8 @@
 
 当前入口：[suite.json](suite.json)。协议复用既有 Qualification Case v2、sealed admission、真实 Runtime Runner、规则验收与 Semantic Judge Views；使用方法见[双轨评测](../../docs/development/evaluation.md)。
 
+DEMO-105 的既有 sealed manifest 保留历史标题中的 Gather，避免改写 Case 身份与既有证据。当前场景使用普通多目标消息与公开回复，不要求 Gather Barrier 或 completion。
+
 本目录是固定回归集。`visibility: demo` 和 `DEMO-1xx` 复用现有公开 Case v2 命名空间，表示材料公开，不表示用模拟 Runtime 执行。Runner 必须调用真实 Core/Runtime；夹具准入通过不等于任务通过。
 
 | Case | 场景 | 硬性依据 | 语义依据 |
@@ -10,7 +12,7 @@
 | DEMO-102 | 按事件 ID 去重的服务统计 | JSON 数量、禁止越界修改与记忆写入 | 统计解释与边界 |
 | DEMO-103 | A2A 实现交接与 Lead 验证 | 实际函数测试、已接纳交接 | 分工、交接、结果整合 |
 | DEMO-104 | 迁移职责拆分与汇总 | 迁移断言、至少两次交接 | 独立贡献、反馈整合 |
-| DEMO-105 | Gather 比较存储方案 | 能力约束、结果字段、至少两次交接 | 取舍与汇总质量 |
+| DEMO-105 | 多目标协作比较存储方案 | 能力约束、结果字段、至少两次交接 | 取舍与汇总质量 |
 | DEMO-106 | 双人审查后修复事务边界 | 回滚、路径边界、输入不变、A2A | 审查反馈是否进入最终方案 |
 | DEMO-107 | 读取并应用事故报告偏好 | 章节顺序、正文读取证据、记忆状态不变 | 适用性与引用依据 |
 | DEMO-108 | 避免过度套用长期偏好 | 当前任务字段、记忆状态不变 | 适用范围判断 |

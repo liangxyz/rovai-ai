@@ -131,8 +131,14 @@ export function ThreadDetailEntries({
   executionCount,
   taskCount,
   memberCount,
-  onSelect
+  onSelect,
+  tasksEnabled = true,
+  tasksOnly = false,
+  excludeTasks = false
 }: {
+  tasksEnabled?: boolean
+  tasksOnly?: boolean
+  excludeTasks?: boolean
   activeTab: ThreadDetailTab
   visible: boolean
   panelId: string
@@ -146,12 +152,12 @@ export function ThreadDetailEntries({
 }): React.JSX.Element {
   const copy = useThreadDetailCopy()
   const entries: Array<{ tab: ThreadDetailTab; count: number }> = [
-    { tab: 'tasks', count: taskCount },
-    { tab: 'members', count: memberCount }
+    ...(!tasksOnly ? [{ tab: 'members' as const, count: memberCount }] : []),
+    ...(tasksEnabled && !excludeTasks ? [{ tab: 'tasks' as const, count: taskCount }] : [])
   ]
   return (
     <div className="camp-detail-entries" role="group" aria-label={uiAttribute("当前会话详情入口")}>
-      {showExecution && <ThreadExecutionEntry
+      {showExecution && !tasksOnly && <ThreadExecutionEntry
         members={runningMembers}
         executionCount={executionCount}
         expanded={executionExpanded}
@@ -182,6 +188,7 @@ export function ThreadDetailEntries({
 
 export function ThreadDetailPopover({
   entryHost,
+  tasksEnabled = true,
   activeTab,
   visible,
   showExecution,
@@ -200,6 +207,7 @@ export function ThreadDetailPopover({
   children
 }: {
   entryHost?: HTMLElement | null
+  tasksEnabled?: boolean
   activeTab: ThreadDetailTab
   visible: boolean
   showExecution: boolean
@@ -218,6 +226,8 @@ export function ThreadDetailPopover({
   children: ReactNode
 }): React.JSX.Element {
   const mobile = useMobileLayout()
+  const primarySlot = entryHost?.querySelector('[data-detail-slot="primary"]') ?? entryHost
+  const taskSlot = entryHost?.querySelector('[data-detail-slot="tasks"]')
   const copy = useThreadDetailCopy()
   const panelId = useId()
   const panelRef = useRef<HTMLElement>(null)
@@ -266,7 +276,7 @@ export function ThreadDetailPopover({
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="mobile-camp-menu" align="end" sideOffset={4} collisionPadding={12}
           onCloseAutoFocus={event => { if (menuSelected.current) event.preventDefault(); menuSelected.current = false }}>
-          {(['tasks', 'members'] as const).map(tab => <DropdownMenu.Item key={tab} onSelect={() => {
+          {(['members'] as const).map(tab => <DropdownMenu.Item key={tab} onSelect={() => {
             menuSelected.current = true
             triggerRef.current = entryHost?.querySelector<HTMLButtonElement>('.mobile-camp-more') ?? null
             focusPanelRef.current = true
@@ -276,6 +286,12 @@ export function ThreadDetailPopover({
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6A8.4 8.4 0 0 1 12.5 3h.5a8.5 8.5 0 0 1 8 8v.5Z" /></svg>
             <span>{copy.singleChatTitle}</span>
           </DropdownMenu.Item>
+          {tasksEnabled && <DropdownMenu.Item onSelect={() => {
+            menuSelected.current = true
+            triggerRef.current = entryHost?.querySelector<HTMLButtonElement>('.mobile-camp-more') ?? null
+            focusPanelRef.current = true
+            onOpen('tasks')
+          }}><ThreadDetailIcon tab="tasks" /><span>{copy.tasks}</span></DropdownMenu.Item>}
           {onOpenMissionActivity && <DropdownMenu.Item onSelect={() => { menuSelected.current = true; onOpenMissionActivity() }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2" /></svg><span><UiText zh={"活动"} /></span>
           </DropdownMenu.Item>}
@@ -283,6 +299,8 @@ export function ThreadDetailPopover({
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   </> : <ThreadDetailEntries
+    tasksEnabled={tasksEnabled}
+    excludeTasks={!!taskSlot}
     activeTab={activeTab}
     visible={visible}
     panelId={panelId}
@@ -305,8 +323,13 @@ export function ThreadDetailPopover({
 
   return <>
     {entryHost
-      ? createPortal(entries, entryHost)
+      ? createPortal(entries, mobile ? entryHost : primarySlot!)
       : <div className="camp-detail-entry-fallback">{entries}</div>}
+    {!mobile && tasksEnabled && taskSlot && createPortal(<ThreadDetailEntries tasksOnly tasksEnabled
+      activeTab={activeTab} visible={visible} panelId={panelId} showExecution={false}
+      runningMembers={runningMembers} executionCount={executionCount} taskCount={taskCount} memberCount={memberCount}
+      onSelect={(tab, trigger, keyboard) => { triggerRef.current = trigger; focusPanelRef.current = keyboard; if (visible && activeTab === tab) onClose(); else onOpen(tab) }}
+    />, taskSlot)}
     <aside
       ref={panelRef}
       id={panelId}

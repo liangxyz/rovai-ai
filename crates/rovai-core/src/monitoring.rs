@@ -329,6 +329,7 @@ pub enum RuntimeUsageFlushTarget {
 pub struct RuntimeUsageBuffer {
     runs: BTreeMap<UsageRunKey, RuntimeUsageRun>,
     finished: BTreeSet<UsageRunKey>,
+    native_tails: BTreeSet<UsageRunKey>,
     pending: BTreeMap<BufferedUsageKey, Vec<BufferedUsageRecord>>,
     pending_since: BTreeMap<UsageRunKey, Instant>,
     seen_source_identities: BTreeSet<(BufferedUsageKey, String)>,
@@ -339,6 +340,21 @@ pub struct RuntimeUsageBuffer {
 }
 
 impl RuntimeUsageBuffer {
+    pub fn begin_native_tail(&mut self, agent_run_id: &str, execution_epoch: i64) -> bool {
+        let key = UsageRunKey {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        };
+        self.runs.contains_key(&key) && self.native_tails.insert(key)
+    }
+
+    pub fn end_native_tail(&mut self, agent_run_id: &str, execution_epoch: i64) {
+        self.native_tails.remove(&UsageRunKey {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        });
+    }
+
     pub fn finish_run(&mut self, agent_run_id: &str, execution_epoch: i64) {
         let key = UsageRunKey {
             agent_run_id: agent_run_id.to_string(),
@@ -517,7 +533,7 @@ impl RuntimeUsageBuffer {
         };
         let idle = candidates
             .into_iter()
-            .filter(|run| !self.pending_since.contains_key(run))
+            .filter(|run| !self.pending_since.contains_key(run) && !self.native_tails.contains(run))
             .collect::<BTreeSet<_>>();
         self.runs.retain(|run, _| !idle.contains(run));
         self.finished.retain(|run| !idle.contains(run));
@@ -659,7 +675,7 @@ impl MonitoringService {
         database: &Database,
         params: &MonitoringExecutionParams,
     ) -> Result<Value> {
-        validate_key(&params.camp_id, "Camp ID")?;
+        validate_key(&params.camp_id, "Thread ID")?;
         anyhow::ensure!(
             params.agent_run_ids.len() <= 500,
             "too many AgentRuns requested"
@@ -2108,6 +2124,10 @@ fn eligible_mask(runtime: AdapterKind, _runtime_version: Option<&str>) -> i64 {
                 | ELIGIBLE_REASONING_OUTPUT
         }
         AdapterKind::KimiCodeCli => full_tokens & !ELIGIBLE_REASONING_OUTPUT,
+        AdapterKind::MinimaxCodeCli => {
+            (full_tokens & !(ELIGIBLE_REASONING_OUTPUT | ELIGIBLE_REQUEST_CACHE_HIT))
+                | ELIGIBLE_COST
+        }
         AdapterKind::CursorAgent => 0,
     }
 }
@@ -4744,6 +4764,8 @@ mod tests {
                     }
                     if index + 1 == calls.len() {
                         assert!(buffer.accepts_native_poll(&run.key.agent_run_id, 1));
+                        assert!(buffer.begin_native_tail(&run.key.agent_run_id, 1));
+                        assert!(!buffer.begin_native_tail(&run.key.agent_run_id, 1));
                         buffer.finish_run(&run.key.agent_run_id, 1);
                         assert!(!buffer.accepts_native_poll(&run.key.agent_run_id, 1));
                     }
@@ -4781,6 +4803,15 @@ mod tests {
                         buffer.restore(batches).unwrap();
                         let batches = buffer.drain(RuntimeUsageFlushTarget::Periodic);
                         MonitoringService::record_usage_batches(&mut database, &batches).unwrap();
+                        if index + 1 == calls.len() {
+                            buffer
+                                .finish_idle_target_after_flush(&RuntimeUsageFlushTarget::Periodic);
+                            assert!(
+                                buffer.runs.contains_key(&run.key),
+                                "bounded tail retains only its statistics owner"
+                            );
+                            buffer.end_native_tail(&run.key.agent_run_id, 1);
+                        }
                         buffer.finish_idle_target_after_flush(&RuntimeUsageFlushTarget::Periodic);
                         assert_eq!(buffer.runs.contains_key(&run.key), index + 1 < calls.len());
                         if mode == RuntimeUsageCounterMode::Delta {

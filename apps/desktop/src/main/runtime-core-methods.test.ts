@@ -7,6 +7,7 @@ const mainSource = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
 describe('Runtime Renderer Core method allowlist', () => {
   it('exposes discovery, recovery wake, input reconciliation, explicit checking, and cancellation', () => {
     expect(RUNTIME_RENDERER_CORE_METHODS).toEqual([
+      'runtime.status.get',
       'runtime.discovery.rescan',
       'runtime.product.ensure',
       'runtime.product.check',

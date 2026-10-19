@@ -350,7 +350,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
       }
     }
     expect(css).toMatch(/\.agent-artifact-icon\.type-generic\s*\{[^}]*color: var\(--attachment-generic\)/)
-    expect(css).toMatch(/\.agent-output-file-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
+    expect(css).toMatch(/\.agent-output-file-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/)
   })
 
   it('keeps file references underline-free and shared resource glyphs at one stroke weight', () => {

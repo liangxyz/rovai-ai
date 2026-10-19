@@ -25,6 +25,7 @@ export interface FilePreviewReadingState {
   scrollLeft?: number
   codeScrollTop?: number
   codeScrollLeft?: number
+  visibleLine?: number
   pageOffsets?: number[]
   pageIndex?: number
   imageScale?: number | null

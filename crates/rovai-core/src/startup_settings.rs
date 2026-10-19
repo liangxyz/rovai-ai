@@ -246,7 +246,13 @@ impl Core {
                 with_runtime_configuration(
                     kind,
                     &search,
-                    self.deep_probe_candidate(kind, &path, RuntimeLaunchPurpose::AvailabilityCheck),
+                    self.deep_probe_candidate(
+                        kind,
+                        &path,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        expected_fingerprint.as_deref(),
+                        None,
+                    ),
                 ),
             )
             .await;

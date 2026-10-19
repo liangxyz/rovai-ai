@@ -5,6 +5,7 @@ use super::*;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Reconcile {
+    #[serde(deserialize_with = "rovai_core::thread_compat::deserialize_host_method")]
     operation: String,
     params: Value,
 }
@@ -275,6 +276,29 @@ pub(super) fn reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconciliation_uses_dispatch_aliases_without_rewriting_command_input() {
+        // The nested operation has the same naming boundary as Request.method.
+        // Params must retain their frozen spelling, including opaque user text.
+        let params =
+            json!({"commandId":"original", "threadId":"thread-a", "body":"camp.messages.send"});
+        for (current, stored) in [
+            ("thread.messages.send", "camp.messages.send"),
+            ("thread.messages.withdraw", "camp.messages.withdraw"),
+            ("threads.create", "camps.create"),
+            ("threads.rename", "camps.rename"),
+            ("threads.members.add", "camps.members.add"),
+            ("singleChat.send", "singleChat.send"),
+        ] {
+            for operation in [current, stored] {
+                let query: Reconcile =
+                    serde_json::from_value(json!({"operation":operation,"params":params})).unwrap();
+                assert_eq!(query.operation, stored);
+                assert_eq!(query.params, params);
+            }
+        }
+    }
 
     #[test]
     fn task_reconciliation_rejects_removed_input_fields() {

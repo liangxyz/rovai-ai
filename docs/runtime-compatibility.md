@@ -1,10 +1,75 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-15
+last_updated: 2026-10-18
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-18 MiniMax Code Linux x64 准入
+
+官方 mcode **0.6.12** 在 GNU x86_64 / Ubuntu 24.04.5、Node 24.21.0 上，以原生 Sub2API
+配置的 `gpt-6.1-sol` 完成真实 first/warm/cold、A→B→A、并发、热刷新、Skills/MCP、全部 30 个
+当前 CLI 操作及故障恢复。生产 20 Host LRU 和真实 30 分钟 idle TTL、文件/六类命令输出、问卷及
+Linux Chromium 的真实新增文件/Diff 分别通过。手动、自动、一次受控 checkpoint overflow 后重试、
+Core 压缩取消及同 Session 恢复闭合；原生管理命令取消不响应与相同请求重试的限制保留在报告中。
+
+纯工具 assistant 缺显示 ID 和压缩替换 journal 的两处 Usage 漏采已修复：仅按本轮冻结的精确身份，
+后台有界读取同根 Session 的原生 active/snapshot 数值并去重。8 个基础 Run、自动压缩前后及手动
+压缩冷恢复的可用四桶对账通过，仍标部分统计，未报 reasoning/费用保持未知。`plan` 加显式 bypass
+可写文件，不宣称 OS 只读沙箱；问卷仍取消、不代答，无 Fast。
+
+`minimax-code-cli × linux-x64` 为 Qualified，绑定[不可变证据](../qualification/runtime-platform/linux-x64-minimax-code-v1.json)
+SHA-256。完整矩阵、保留失败及证据类型见[目标主机报告](research/minimax-code-runtime/linux-qualification-2026-10-18.md)。
+Server 的 Ubuntu 22.04 / Debian 12 VM / Ubuntu 24.04 与 glibc 2.35 成品 gate 全绿，和 Runtime
+资格分别记账；不声称三种发行版均运行了 mcode。macOS Intel 原确认保留，arm64 仍为 Preview；Windows 同日的独立资格见下节。以下日期段保留当时范围。
+
+## 2026-10-18 MiniMax Code Windows x64 完整资格
+
+官方 mcode 0.6.12 在 Windows 10 Pro x64 / NTFS 完成十四轴和九个 Golden Flows，Windows 行提升
+为 Qualified，绑定[独立冻结记录](../qualification/runtime-platform/windows-x64-minimax-code-v1.json)。
+真实模型使用用户授权的原生 BYOK sub2api；确定性边界另用真实 CLI 与受控 Provider 验证。
+本轮发现并修复私有 Bootstrap DACL、Usage cwd 等价和模型可见 Skill verbatim 路径三个 Windows 问题。
+真实 30 分钟 idle、并发/冷恢复、压缩后能力/取消、29 项内置 CLI、图片 Steer 与打包 App 均通过。
+问卷取消、部分 Usage、无 Fast/额外目录沙箱和原生直接 compact 取消限制继续保留；
+完整结果和原失败批次见[Windows 报告](research/minimax-code-runtime/windows-qualification-2026-10-18.md)。
+macOS arm64 仍为 Preview，macOS Intel 的维护者确认不变，Linux 的独立资格见上节。以下日期段保留当时范围。
+
+## 2026-10-18 MiniMax Code macOS Intel 验收确认
+
+User seq43 明确要求「macOS intel也标记验收通过」。`minimax-code-cli × macos-x64` 据此提升为
+Qualified，绑定[独立维护者确认记录](../qualification/runtime-platform/macos-x64-minimax-code-v1.json)
+的 SHA-256；检查、成员选择与执行进入普通准入路径。本次变更未重跑 Intel 真机模型会话，确认没有
+提供目标 OS build、CLI 版本或逐项原始日志，不能将既有 arm64 的 0.6.12 结果写成 Intel 实测。
+macOS arm64 保持 Preview，Windows x64 和 Linux x64 仍未准入。问卷取消、部分 Usage、模型可选参数
+探测等既有能力边界不因本次平台确认改变。以下日期段保留当时验收范围。
+
+## 2026-10-17 MiniMax 批复修复：保持 Preview
+
+共享 ACP 在有效本轮 send、正常 end_turn 且无未收敛工具/问卷时允许空 final；发送后原生错误仍失败且不重放。
+问卷 permission fallback 默认取消，普通文件/命令/MCP 审批不变；官方 ACP 局部配置入口仍缺，
+不能把防代答当作工具已经默认移除。Usage 按原生显式显示/canonical 身份映射有界后台补采，仍标部分观测。
+Host/resume、启动 System Prompt 内容 fence、Fast 排除及前轮压缩/配置刷新结论不变。
+本轮为真实 CLI + 受控 Provider，非新增真实 LLM 或完整资格验证；见
+[修复记录](research/minimax-code-runtime/review-fixes-2026-10-17.md)。
+
+## 2026-10-16 MiniMax Code ACP：Preview 与真实开发 App 验收
+
+独立 `@minimax-ai/code` 的 mcode 0.6.12 接入共享 ACP、Fleet、Bootstrap、精确恢复、MCP、审批、
+Steer、文件/命令输出和部分 Usage；不接 Fast。macOS arm64 为 Preview，其余平台 NotQualified。
+真实官方 `MiniMax-M3.1-Flash-Preview` 完成原生 Read/Write/Add/Edit、中文空格路径、六类命令输出、
+文本与图片 Steer；图片经 native read 后正确识别数字/颜色/形状。Files Changed/Diff 已在实际开发 Renderer 点击核对。
+官方 ACP 手动 compact 后重启 App/Core，恢复同一 Native Session，Bootstrap 内容摘要不变且系统层 Charter 一份；
+身份、历史、Skill 和 MCP 均继续可用。Sub2API 经官方 custom_provider 配置，CLI 和 App 的 `gpt-6` 真实调用成功；
+Provider 选模及 MCP 撤销/恢复仍保留原 Session。原生默认沿用恢复会话的已选模型，不代表重置全局默认。
+官方账号后续返回 quota exceeded，保留失败证据，开发 App 由显式 Sub2API 配置恢复并留给 User 查看。
+seq17 复核中，隔离 64K 配置在生产 Core/真实 Sub2API 下触发两次 threshold 自动压缩，后续记忆与公开发送成功，
+Host/Session 和系统层 Bootstrap 保持。已选 Provider 的地址/Key 外部修改在下一 Run 生效，不需新增 MiniMax 专属摘要。
+原生 ask_user 问卷立即被 dismiss、Run 缺 final；关闭官方开关后工具移除。默认关闭仍是建议，未改产品默认。
+前轮受控协议/审批/取消与文件失败矩阵仍有效；overflow 压缩、完整 Skills/MCP/CLI/并发/故障/平台
+矩阵尚未闭合，不晋升 First-Class。见[三项复核](research/minimax-code-runtime/followup-2026-10-16.md)、
+[前轮真实验收](research/minimax-code-runtime/live-acceptance-2026-10-16.md)、
+[19 Runtime 固定审计](research/minimax-code-runtime/full-parity-2026-10-16.md)和[接入记录](research/minimax-code-runtime/README.md)。
 
 ## 2026-10-15 User seq44：版本复核与 TRAE 完整产品验收
 

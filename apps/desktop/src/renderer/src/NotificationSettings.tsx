@@ -1,3 +1,4 @@
+import { useTaskCapability } from './TaskCapabilityProvider'
 import { useThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
@@ -245,6 +246,7 @@ export function NotificationPreferenceEditor({
   onChange(key: SettingKey, checked: SettingValue, controlKey?: string): void
   onRetry(): void
 }): React.JSX.Element {
+  const tasks = useTaskCapability()
   const headsUpEnabled = preference.headsUpEnabled
   const statusLabel = savingKey ? uiAttribute('保存中…') : saveStatus === 'saved' ? uiAttribute('已保存') : null
 
@@ -265,7 +267,7 @@ export function NotificationPreferenceEditor({
               {headsUpEnabled ? uiAttribute("已开启") : uiAttribute("已关闭")}
             </span>
           </div>
-          <p><UiText zh={"正在查看的会话保持安静，包含它的使命和任务；重新开启提醒时不补弹旧消息。"} /></p>
+          <p><UiText zh={"正在查看的会话保持安静；重新开启提醒时不补弹旧消息。"} /></p>
         </div>
         <div className="notification-master-control">
           <span
@@ -295,7 +297,7 @@ export function NotificationPreferenceEditor({
       )}
 
       <div className="notification-scenario-grid" aria-disabled={!headsUpEnabled}>
-        {NOTIFICATION_SCENARIOS.map((scenario) => (
+        {NOTIFICATION_SCENARIOS.filter(scenario => tasks.enabled || scenario.id !== 'task').map((scenario) => (
           <NotificationScenarioGroup
             key={scenario.id}
             scenario={scenario}

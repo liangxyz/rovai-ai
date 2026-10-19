@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-10-15
+last_updated: 2026-10-18
 ---
 
 # 当前基础架构不变量
@@ -89,9 +89,9 @@ last_updated: 2026-10-15
 - Core SQLite 是通知唯一持久真源。合格来源事实、不可变 `NotificationOccurrence`、独立 Disposition、聚合 `NotificationEpisode` 和最小 `NotificationChangeJournal` 在同一 SQLite 事务中提交；通知是用户注意力投影，不能批准 Approval、改变 CampTurn 或替代来源业务对象。
 - Episode 的一般语义版本与新增注意事项 revision 分离；clear 绑定用户观察到的 attention revision，普通元数据变化、确认或解决不得复活已清除事项。
 - Core 拥有聚合、原因计数、排序、最早未确认 mention、类型化 action 和 availability。Renderer 只负责本地化、布局与执行 action；Electron Main 不保存通知副本，普通 Agent 公屏消息也不会仅因出现而生成通知。
-- 通知命令、snapshot、有界 incremental journal 与重新 snapshot 规则都是 Core API；Renderer 不保存可独立写入的 inbox、不从 Toast 生命周期推算已读/清除。序列缺口或未知 schema 时必须重取 snapshot。
+- 通知命令、snapshot、有界 incremental journal 与重新 snapshot 规则都是 Core API；Renderer 不保存可独立写入的 inbox、不从 Toast 生命周期推算已读/清除。Core 指示历史已不可连续读取（resetRequired）或未知 schema 时必须重取 snapshot；能力过滤或仅可见性切换产生的空序号沿批次游标消费，不推断为历史丢失。
 
-- 新本轮完成只由全部消息输入/产出关联分量的 Run 成功与 Delivery 结算产生；通知图不参与执行调度、预算或权限。Mission/Task 只在真实状态转换时生成事实，用户自己的状态操作不提醒，问题正文只来自显式消息来源。详见 [Notification Episode v9](../contracts/notification-episode-v9.md)。
+- 新本轮完成只由全部消息输入/产出关联分量的 Run 成功与 Delivery 结算产生；通知图不参与执行调度、预算或权限。Mission/Task 只在真实状态转换时生成事实，用户自己的状态操作不提醒，问题正文只来自显式消息来源。详见 [Notification Episode v10](../contracts/notification-episode-v10.md)。
 
 ## Camp、Workspace 与 Composer
 
@@ -207,10 +207,12 @@ last_updated: 2026-10-15
 
 ### Durable Task 与 Run instruction
 
+- 实例 Task 能力默认关闭；Core 是唯一设置真源，操作时校验当前开关。关闭仅移除 Task 能力与投影，保留记录、Session 和既有执行。字段与边界见 [Durable Task v6](../contracts/durable-task-v6.md)。
+
 - Task 是跨 Run 持续的责任对象，通知和执行是独立层。当前生命周期是 `pending | in_progress | blocked | completed | cancelled`；terminal 不可变，blocked/completed 分别需要非空原因/总结。Task 的 owner、definition、assignment 与 execution state 各自有明确权威，不由通知、Run 或发送自动推进。
 - 只有 User 或当前 Default Lead 可创建和修改 title/description、分配、释放、改派、回到 pending 或取消；`description` 统一承载 scope and requirements。历史结构化要求只在读取时确定性合成，正文发生实际编辑时与旧列原子收敛；当前输入和输出均不公开旧字段。创建要求显式当前 CampMember assignee，且不发送消息或唤醒 Agent。Assignee 只能更新自己的 `pending/in_progress/blocked/completed` 执行状态与相应说明；任一越权字段使整个 patch fail closed。
 - Unassigned 只能由 User/Lead 释放或 Camp membership 结束的原子 cutover 产生，必须保持 `pending`，不是可抢占共享队列。关系结束要在同一命令中释放其非终态任务；历史责任与已接受 Run 审计事实保留。
-- Task-linked responsibility 在 direct/A2A 的原子接受边界只准入一次，冻结 Task ID 和 Assignee。后续 Task 释放、改派、编辑或终态不追溯否定/改派已接受责任；但新的 membership、Presence、Runtime、permission 和 fencing 仍在每次真实执行时使用当前事实。
+- 新 Send 与 Task 关联解耦，旧参数忽略但原始幂等身份保持；Task 变化不撤销排队或续做。旧 Task ID/Assignee 只保留审计，membership、Runtime、permission 和 fencing 继续在执行时判断。
 - 公开 Camp 使用有序 `RUN_INPUT.messages[]` 作为 Run 的自然语言输入；Single Chat 的 ConversationMessage 继续使用 `CURRENT_INPUT`。Task 全文不复制到 Run，`purpose` 只用于 Core 审计/责任描述；不存在第二份 `expectedOutput` 或 Core 对自由文本交付质量的判断。
 
 <a id="collaboration-history-addressing"></a>
@@ -362,7 +364,7 @@ last_updated: 2026-10-15
 ### 公共历史按需读取与实时读取
 
 - 模型发送者按 [Message Senders v1](../contracts/message-senders-v1.md) 统一：公开 RUN_INPUT、SHARED_THREAD、read/search 使用 senderType/senderId，Agent/system 名称可空、User 无名称。内部作者和渠道身份保持；只在实际消息组装时取当前名称并复用同批查询，完整输入沿用已有保存与回放机制，不设置专用名称快照，不参与 Binding 兼容与授权。
-- 公开 batch 的 RUN_INPUT.messages 与 thread.read 正常条目共用 [Message Mentions v1](../contracts/message-mentions-v1.md)：保存的完整有效目标 ID、同次解析的成员名，以及固定 user 条目；不是正文人物索引或执行状态。Mention 改动不改变正文；发送者另由上述合同统一，非 batch 和单聊的 Mention 字段保持。新 Run 使用 [Manifest v39](../contracts/context-manifest-evidence-v39.md)，已领取 Run 按冻结版本恢复；不要求换 Session。
+- 公开 batch 的 RUN_INPUT.messages 与 thread.read 正常条目共用 [Message Mentions v1](../contracts/message-mentions-v1.md)：保存的完整有效目标 ID、同次解析的成员名，以及固定 user 条目；不是正文人物索引或执行状态。Mention 改动不改变正文；发送者另由上述合同统一，非 batch 和单聊的 Mention 字段保持。新公开 Run 仍使用 Manifest 40，非 batch 使用 42，配对见 [ContextManifest v42](../contracts/context-manifest-evidence-v42.md)；已领取 Run 按冻结版本恢复，不要求换 Session。
 
 - 新公开 batch AgentRun 不自动生成 `SHARED_CONVERSATION`、历史摘要或遗漏 locator。`RUN_INPUT` 仍完整有序。`RUN_FACTS.historyHint` 依据本 Agent 在此 Camp 上一次有效 accepted ACK 对应执行前公屏尾 `P` 以及本轮 claim 冻结的额外可见消息布尔结果选四种完整句子；存在只表示额外可见消息，不增加工作责任、不要求读取。提示是历史参考点，不代表阅读或完成，也不是 `camp.read --before` 游标。Charter 保留不推断遗漏、仅需当前工作时读取的纪律；`RUN_INPUT` 和已有上下文足够就直接推进，仅在缺少当前工作所需 Camp context 时 `rovai camp read`。
 - claim 同一事务用 `P`、本轮公屏尾 `T`、最终领取进入 `RUN_INPUT.messages` 的全部 ID `I` 与当前 Agent `A` 检查额外可见消息：`P > 0` 查 `(P, T]`、`P = 0` 查 `<= T`，首轮也查实际历史。可见性沿用当前 Camp `camp.read` 时间线的同 Camp／非 tombstone 规则，撤回占位符计入；仅排除 `I` 和 `author_type = agent, author_id = A`。发给其他 Agent 的可见消息及未领取队尾仍计入；不能用 waiting Delivery 候选代替历史可见集合。只做无正文、无数量、无分页上限的 `EXISTS`，失败回滚整个 claim，不创建无判断结果的 Run。Run 内部冻结 `P` 与布尔值，不复制历史；后续消息、撤回或水位变化均不重算原提示。
@@ -375,12 +377,12 @@ last_updated: 2026-10-15
 
 ### ContextManifest 与结构化 Run Facts
 
-- 普通消息和 Steer 使用共同动态上下文；本次来源决定全部消息资源。启动与后续输入分别冻结，ACK 精确关联输入，迟到证据不覆盖新标记。当前规则见 [Manifest 39](../contracts/context-manifest-evidence-v39.md) 与 [Profile 14](../contracts/context-delivery-profile-v14.md)。
+- 普通消息和 Steer 使用共同动态上下文；本次来源决定全部消息资源。启动与后续输入分别冻结，ACK 精确关联输入，迟到证据不覆盖新标记。当前规则见 [Manifest v42](../contracts/context-manifest-evidence-v42.md) 与 [Profile 15/16](../contracts/context-delivery-profile-v15.md)。
 
 - ContextManifest 保存实际输入及必要来源、遗漏与水位；Runtime Input Delivery 记录真实接收，Native Session/Run 保存执行状态。新快照不再重复保存生成材料或其独立摘要，旧输入直接复用最终 Blob；不把历史版本组合用于再次证明已冻结输入。规则见[输入快照存储](../contracts/input-snapshot-storage-v1.md)。
 - Manifest 对新 public Run 冻结完整有序 AgentRunInput、最后一条 anchor、执行配置、Skill Selection/Resolution v2、最终输入中的 `ROVAI_ADDITIONAL_SKILLS` 文本、visibility fence、claim 时前次有效接受边界及额外可见消息判断对应的 RUN_FACTS/historyHint 与 实际输入字节；历史专属 refs/evidence 为空。输入附件只使用各消息 `RUN_INPUT.messages[].attachments`。旧 Manifest 原字节留作审计；v30/10/7、v29/9/7 和非 batch v26/6/5 保留已有序列化入口；已物化输入不因生成版本组合失配而拒绝。
 - 模型投影可以 compact，但不得丢失、重命名或自由文本化 authoritative fact。稳定产品规则留在 Session Charter，per-Run 事实只出现一次；实际格式变化由原序列化 owner 管理；不为中间材料另建兼容版本。
-- 新公开 batch `RUN_FACTS` v8 必有 `attachmentOutputRoot` 和 `historyHint`，其余只允许 Mission、Task、Session continuity 与真实 external effect；不含 Gather、delegation 或 conversationMode。Single Chat 使用非 batch v5；Core 生成的模型正文不包含协议 `schemaVersion`。
+- 新公开 batch `RUN_FACTS` 必有 `attachmentOutputRoot` 和 `historyHint`，其余为按条件出现的 Mission、Session continuity 与真实 external effect。Single Chat 的 Facts schema 13 删除固定 `singleChat`，仅保留附件输出根与按条件出现的 external effect。完整业务字段见 [Run Facts v10](../contracts/run-facts-v10.md)；Core 生成的模型正文不包含协议 `schemaVersion`。
 - Mission start、Automation、Channel 与 A2A 都是普通 `RUN_INPUT.messages[]`，来源事实保留在业务域而不形成特殊 input kind。独立 `WORKSPACE` 段仍冻结实际目录/branch 并按既有 accepted-only 规则交付。默认寻址消息只在 `RUN_INPUT` 中派生冻结接收者 Mention；版本与完整 evidence 见 [ContextManifest v31](../contracts/context-manifest-evidence-v31.md)。
 - Self-active Task snapshot 只选当前成员在当前 Camp 显式负责的非终态 Task，按 Profile 的稳定 order/limit/budget priority 冻结。真实空集合产生显式 empty snapshot；候选存在但被上限/预算全部排除时整段省略并记 aggregate omitted count，不泄露被排除 ID。Renderer/Skill 不得临时改排序。
 - Structured Skill selection 以来源身份和只读 resolver 形成可选 `RUN_INPUT.messages[].skills` 链接，并按消息顺序去重整个批次。受管工具箱索引只含当前队员配置与本批显式选用；原生 Skill 只在显式选用的消息局部链接出现。Skill 不授予工具或权限；解析失败保留本批选择事实，不跳过 FIFO 队首。
@@ -430,7 +432,7 @@ last_updated: 2026-10-15
 - Core IPC 先返回并校验完整 Envelope，然后按 operation 投影一份 closed Agent result JSON。普通 Agent 输出不包含 envelope wrapper、request identity 或 receipt，也不通过递归删字段得到；每个 operation 有明确 `agentOutputSchema` 与 golden fixture。完整 Envelope 只用于 Core、Evidence、Qualification 和 host-controlled debug 边界。
 - `rovai` CLI 是 Runtime 调用 Rovai-owned built-ins 的唯一运输。内置 MCP/`rovai_team` Bridge、注入、alias map、Runtime 临时配置和 native permission bundle 已 clean break 删除；不存在 fallback 或同 Run 双运输。用户外部 MCP 继续走独立 Library/Runtime-native projection，不经 Built-in Router。
 - CLI 使用领域分组命令，但 请求记录、审计、Activity 与 Envelope 保留 canonical dotted operation identity。Native Session Bootstrap 只教稳定 CLI 入口和通用失败纪律；Agent 侧没有 `tool list`、`tool describe`、generic invoke 或全量 schema discovery。精确输入源和本命令约束由简短 `--help` 给出，复杂选择/恢复由 `cli-operations` Skill 说明。
-- CLI 将输入规范化为一个请求对象；只有 Send 正文文件可与除 `--body` 外的直接参数组合。Send 文件严格命中现有封闭请求 Schema 时保留整个请求，且禁止混入直接参数；其他合法 UTF-8 文本成为原文正文。识别后的业务失败不能降级重发。其他命令仍一次只选 direct arguments、JSON stdin/heredoc 或 JSON `--input-file`，不合并或覆盖；显式文件/参数不读取继承 stdin。文件与兼容边界见 [Built-in Tool Transport v41](../contracts/builtin-tool-transport-v41.md)。`camp.read` 只在所选来源成为 JSON 对象之后、canonical Schema 校验之前补全安全 Timeline 默认；默认 Timeline 发送给 Core 的 canonical JSON 始终包含 mode/direction/limit，其他显式 mode 继续发送各自完整 branch。其他命令不引入业务默认；输入文件路径、Shell quoting 与临时文件不是 Core 信任边界或保密保证。
+- CLI 将输入规范化为一个请求对象；只有 Send 正文文件可与除 `--body` 外的直接参数组合。Send 文件严格命中现有封闭请求 Schema 时保留整个请求，且禁止混入直接参数；其他合法 UTF-8 文本成为原文正文。识别后的业务失败不能降级重发。其他命令仍一次只选 direct arguments、JSON stdin/heredoc 或 JSON `--input-file`，不合并或覆盖；显式文件/参数不读取继承 stdin。文件与兼容边界见 [Built-in Tool Transport v42](../contracts/builtin-tool-transport-v42.md)。`camp.read` 只在所选来源成为 JSON 对象之后、canonical Schema 校验之前补全安全 Timeline 默认；默认 Timeline 发送给 Core 的 canonical JSON 始终包含 mode/direction/limit，其他显式 mode 继续发送各自完整 branch。其他命令不引入业务默认；输入文件路径、Shell quoting 与临时文件不是 Core 信任边界或保密保证。
 - 目标 Runtime 必须在接收 Run 输入前证明 CLI、当前 IPC、Run binding 和当前 contract 可用；否则以结构化理由 fail closed，不启动降级 Agent。发布资格按 Runtime 及宿主平台独立验收，不因一个平台未准入而否定其他已验收组合。
 - Business rejection 投影稳定 code、safe message、closed recovery 和合同允许的 details；不泄露 stack、SQL、内部路径、IPC 地址、secret 或未筛底层错误。乐观冲突要求重读后重新判断；只有 Core 明确允许时才以同一 request identity 有界重试。幂等重试返回原结果而不重复效果；无法证明时返回 outcome indeterminate 并要求核对当前状态。
 - CLI 子进程通过当前 Run 的受保护本地 IPC endpoint 与新 lease 继承调用身份，不从可复用 Runtime 进程身份继承权力。Runtime 及它启动的子进程共享当前 Run/Member 归属和同一 scope/version/quota/fence，不根据父进程名、命令文本或层级猜测模型意图。Run release 先 fence lease，迟到子进程调用不得归属于后续 Run。

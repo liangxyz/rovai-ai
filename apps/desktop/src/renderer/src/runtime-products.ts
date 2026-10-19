@@ -1,3 +1,4 @@
+import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import type { AdapterKind } from '@contracts'
 import antigravityLogo from './assets/runtime-logos/antigravity-color.svg'
 import claudeCodeLogo from './assets/runtime-logos/claudecode-color.svg'
@@ -29,6 +30,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'trae-cn-cli',
   'cursor-agent',
   'kimi-code-cli',
+  'minimax-code-cli',
   'grok-build',
   'deepseek-harness',
   'cline-cli',
@@ -56,6 +58,7 @@ export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'trae-cn-cli': traeLogo,
   'cursor-agent': cursorLogo,
   'kimi-code-cli': kimiLogo,
+  'minimax-code-cli': minimaxLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
   'cline-cli': clineLogo,
@@ -78,6 +81,7 @@ export function adapterLabel(kind: AdapterKind): string {
     'trae-cn-cli': 'TRAE CLI',
     'cursor-agent': 'Cursor Agent',
     'kimi-code-cli': 'Kimi Code',
+    'minimax-code-cli': 'MiniMax Code',
     'grok-build': 'Grok Build',
     'deepseek-harness': 'DeepSeek Harness',
     'cline-cli': 'Cline',

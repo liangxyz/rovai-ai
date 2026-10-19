@@ -30,7 +30,7 @@ test('production file preview keeps split geometry, reading state and stable pre
     await build({ configFile: false, logLevel: 'error', ssr: { noExternal: ['parse5', 'entities'] }, build: { ssr: join(root, 'packages/html-preview/src/site.ts'), outDir: join(fixture, 'site'), minify: false, rollupOptions: { output: { format: 'cjs', entryFileNames: 'site.cjs' } } } })
     await build({ configFile: false, logLevel: 'error', build: { ssr: join(root, 'packages/html-preview/src/file-source.ts'), outDir: join(fixture, 'source'), minify: false, rollupOptions: { output: { format: 'cjs', entryFileNames: 'source.cjs' } } } })
     await writeFile(shortcutPreload, `${shortcutCode}\nconst { contextBridge, ipcRenderer } = require('electron')
-contextBridge.exposeInMainWorld('previewHtmlFixture', { prepare: () => ipcRenderer.invoke('html-fixture-prepare'), release: () => ipcRenderer.invoke('html-fixture-release') })
+contextBridge.exposeInMainWorld('previewHtmlFixture', { prepare: () => ipcRenderer.invoke('html-fixture-prepare'), release: previewId => ipcRenderer.invoke('html-fixture-release', previewId) })
 contextBridge.exposeInMainWorld('previewWindowControls', {
   onCloseTabRequested: exports.createCloseTabShortcutHandler(ipcRenderer)
 })`)

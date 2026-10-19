@@ -1,19 +1,23 @@
 # Capability workspace acceptance
 
-Run `pnpm test:capability-workspace`. The fixture mounts production SkillSettings, McpSettings,
-CapabilityWorkspace and styles in a sandboxed Electron window. Its bridge and entities are in-memory
-fixtures; no Core, Runtime, network import or daily Skill Library is started or modified. The native
-folder chooser bridge is stubbed so cancellation and inspect requests are deterministic.
+Run `pnpm test:capability-workspace`. The fixture mounts production NativeSkillsSettings,
+ToolboxSettings, McpSettings and their shared layout/styles in a sandboxed Electron window.
+Its bridge and entities are in memory; it starts no Core or Runtime and does not read or modify
+native Skill directories, legacy Library data or MCP configuration on the host.
 
-The runner creates its own temporary userData and removes only that directory. Set
+The runner creates temporary userData and removes only that directory. Set
 `ROVAI_KEEP_CAPABILITY_FIXTURE=1` to retain screenshots; the result prints their absolute location.
-The test covers imports, scope changes, filtering, invalid JSON, CAS conflicts, peer add/import actions, form discard on navigation,
-native pointer/keyboard resizing, day/night at minimum and wide window sizes, and 200% zoom.
-Skill file navigation covers inline directories, single files, search, same-named files in different
-folders, long paths, keyboard focus, sticky controls, binary/large files, read retry and late responses.
-Installed Skills and folder/GitHub import candidates use the same navigation; changing the target resets
-the selected file, directory and search. The detail heading omits internal revision numbers.
-Unsupported local imports include same-name Codex/Claude entries, repeated reasons and long fields;
-their layout must wrap independently of the name/source row. MCP and Skill deletion use real application
-dialogs with cancellation, no extra entry focus return, focus trapping, pending dismissal guards, errors and stale-target checks.
-Core's Skill Library suite separately verifies the content/digest and default assignment contracts.
+
+Native Skills coverage includes refresh, read-only controls, file search, duplicate names in distinct
+folders, long paths, focus and keyboard navigation, sticky controls, binary/large files, read retry,
+late responses across files and Skills, day/night layouts, narrow/wide windows and 200% zoom.
+The toolbox covers member selection, failed-save rollback, retry with the same command identity,
+filtered bulk changes that preserve other members, and its reading dialog.
+
+MCP coverage retains import, assignment, invalid JSON, CAS conflicts, masked credentials and explicit
+reveal, late responses, draft discard, pointer/keyboard resizing, dialog cancellation and focus trapping,
+pending dismissal guards, deletion errors, stale targets, minimum window sizes and zoom.
+
+The retired SkillSettings page and its legacy import/group tests are removed. Shared file reading
+is now exercised through the current native settings. Core's legacy Skill Library tests continue to
+own persisted Revision, projection and recovery compatibility; this fixture is not evidence for those paths.

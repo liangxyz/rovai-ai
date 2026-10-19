@@ -344,7 +344,7 @@ impl AntigravityAppRuntimeAdapter {
             && !root.is_dir()
         {
             let internal = anyhow::anyhow!(
-                "Antigravity Camp Attachment access root is unavailable: {}",
+                "Antigravity Thread Attachment access root is unavailable: {}",
                 root.display()
             );
             let failure = antigravity_public_failure(
@@ -1150,13 +1150,13 @@ fn canonical_antigravity_workspace_roots(
     if let Some(attachment_access_root) = attachment_access_root {
         if !attachment_access_root.is_dir() {
             anyhow::bail!(
-                "Antigravity Camp Attachment access root is unavailable: {}",
+                "Antigravity Thread Attachment access root is unavailable: {}",
                 attachment_access_root.display()
             );
         }
         let attachment_access_root = attachment_access_root.canonicalize().with_context(|| {
             format!(
-                "failed to canonicalize Antigravity Camp Attachment access root {}",
+                "failed to canonicalize Antigravity Thread Attachment access root {}",
                 attachment_access_root.display()
             )
         })?;

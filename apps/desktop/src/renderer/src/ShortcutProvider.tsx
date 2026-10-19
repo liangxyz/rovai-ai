@@ -1,6 +1,7 @@
+import { useTaskCapability } from './TaskCapabilityProvider'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ShortcutActionId, ShortcutMouseSide, ShortcutPreferences, ShortcutPreferencesApi, ShortcutPreferencesSnapshot } from '@contracts'
-import { normalizeShortcut, SHORTCUTS, shortcutDefaults, shortcutKeyParts, shortcutMouseSide } from '../../shared/shortcuts'
+import { normalizeShortcut, shortcutAvailable, SHORTCUTS, shortcutDefaults, shortcutKeyParts, shortcutMouseSide } from '../../shared/shortcuts'
 import { uiAttribute } from './interface-language'
 
 type Handler = { priority: number; run(target: EventTarget | null): boolean | void }
@@ -35,6 +36,10 @@ export function useShortcutAction(id: ShortcutActionId, run: Handler['run'], ena
   useEffect(() => register?.(id, { priority, run: target => latest.current.enabled ? latest.current.run(target) : false }), [register, id, priority])
 }
 export function ShortcutProvider({ api, platform, children }: { api?: ShortcutPreferencesApi; platform: NodeJS.Platform; children: ReactNode }): React.JSX.Element {
+  const { enabled: tasksEnabled } = useTaskCapability()
+  const tasks = useRef(tasksEnabled)
+  tasks.current = tasksEnabled
+  useEffect(() => { void api?.setTasksEnabled?.(tasksEnabled).catch(() => undefined); return () => { void api?.setTasksEnabled?.(false).catch(() => undefined) } }, [api, tasksEnabled])
   const [snapshot, setSnapshot] = useState<ShortcutPreferencesSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const current = useRef(snapshot)
@@ -44,11 +49,11 @@ export function ShortcutProvider({ api, platform, children }: { api?: ShortcutPr
   const lastTarget = useRef<EventTarget | null>(null)
   const accept = useCallback((next: ShortcutPreferencesSnapshot) => {
     setSnapshot(old => old && old.revision > next.revision ? old : next)
-    setError(null)
+    setError(next.migrationPending ? uiAttribute('快捷键更新未保存，请重试。') : null)
   }, [])
   const reload = useCallback(async () => {
     if (!api) return
-    try { accept(await api.get()) } catch { setError(uiAttribute('无法读取快捷键设置，请重试。')) }
+    try { const pending = current.current; accept(pending?.migrationPending ? await api.save({ expectedRevision: pending.revision, preferences: pending.preferences }) : await api.get()) } catch { setError(uiAttribute('无法读取快捷键设置，请重试。')) }
   }, [api, accept])
   useEffect(() => {
     if (!api) return
@@ -61,7 +66,7 @@ export function ShortcutProvider({ api, platform, children }: { api?: ShortcutPr
     if (!api || !current.current) throw new Error(uiAttribute('快捷键设置尚未加载。'))
     try { accept(await api.save({ expectedRevision: current.current.revision, preferences })) }
     catch (error) {
-      await reload()
+      try { accept(await api.get()) } catch { /* Keep the current working bindings. */ }
       throw new Error(uiAttribute(error instanceof Error && error.message.includes('快捷键设置已在其他窗口更新')
         ? '快捷键设置已在其他窗口更新，请确认后重试保存。' : '无法保存快捷键设置，请重试。'))
     }
@@ -77,7 +82,7 @@ export function ShortcutProvider({ api, platform, children }: { api?: ShortcutPr
     return () => { entries.delete(handler) }
   }, [])
   const dispatch = useCallback((id: ShortcutActionId, target: EventTarget | null): boolean => {
-    if (recording.current || !current.current || document.querySelector('.app-dialog, [role="dialog"][aria-modal="true"], [role="menu"]:not([hidden]), .startup-loading-canvas, .shutdown-scrim')) return false
+    if (!shortcutAvailable(id, tasks.current) || recording.current || !current.current || document.querySelector('.app-dialog, [role="dialog"][aria-modal="true"], [role="menu"]:not([hidden]), .startup-loading-canvas, .shutdown-scrim')) return false
     const element = target instanceof Element ? target : null
     if (element?.closest('.xterm, [inert]')) return false
     if (!SHORTCUTS.find(row => row.id === id)?.editable && element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .cm-editor')) return false
@@ -117,7 +122,7 @@ export function ShortcutProvider({ api, platform, children }: { api?: ShortcutPr
     }
     const finishMouse = (event: MouseEvent): void => {
       const side = shortcutMouseSide(event.button)
-      if (side && (recording.current || current.current?.preferences.mouse[side])) event.preventDefault()
+      if (side && (recording.current || shortcutAvailable(current.current?.preferences.mouse[side], tasks.current))) event.preventDefault()
     }
     const blur = (): void => { recording.current = null; void api.setRecording(false).catch(() => undefined) }
     const unsubscribe = api.onMouseSide(nativeSide)

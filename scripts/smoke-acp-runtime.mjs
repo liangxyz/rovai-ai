@@ -163,6 +163,7 @@ try {
       permissionValues: { execution_mode: 'agent', approval_policy: 'force' },
       token: 'ROVAI_CURSOR_TWO_TURN_OK'
     },
+    { adapterKind: 'minimax-code-cli', permissionValues: { permission_mode: process.env.ROVAI_MINIMAX_PERMISSION_MODE ?? 'default', mode: 'default' }, token: 'ROVAI_MINIMAX_ACP_OK' },
     {
       adapterKind: 'kimi-code-cli',
       permissionValues: { permission_mode: process.env.ROVAI_KIMI_PERMISSION_MODE ?? 'default' },
@@ -207,7 +208,7 @@ try {
       specification.adapterKind,
       [agentId]
     )
-    const executionDeferred = ['trae-cn-cli', 'opencode-cli'].includes(specification.adapterKind)
+    const executionDeferred = ['trae-cn-cli', 'opencode-cli', 'minimax-code-cli'].includes(specification.adapterKind)
       && ['light_ready', 'installed_unverified'].includes(installation?.snapshot?.probeStatus)
     if (!executionDeferred
         && (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length)) {

@@ -3,7 +3,7 @@ document_type: ui-interaction-draft
 authority: host-web-mobile-interaction-proposal
 status: implemented
 target_version: v1.70
-last_updated: 2026-09-26
+last_updated: 2026-10-17
 ---
 
 # Mobile WebUI
@@ -168,6 +168,8 @@ Server 更新通过统一 Rust Host 的认证接口完成，使用独立 Server 
 登录页共用同一组件，按实际 Host 类型分别提示 Token 获取位置；主动退出后恢复初始标题与表单，不显示另一套重新登录页。
 
 刷新、同 Owner 重新登录继续使用同一 Bearer Session、标签页身份租约和独立草稿恢复。
+断线时与宽屏共用[全屏连接恢复遮罩](host-web-connection-recovery.md)，暂停页面操作并保留草稿，
+单一入口恢复连接与原提交，不增加手机专属重试队列。
 认证独立持久化到浏览器 IndexedDB；30 天寿命、7 天续期与浏览器重开的编辑隔离复用 [Host Web v2](../contracts/host-web-v2.md#session-lifetime-and-renewal)，手机不另建认证流程。
 登录过期复用普通登录页与现有 toast；手机布局不生成新的认证或草稿身份，不改变扫码票据、撤销与幂等命令机制。
 

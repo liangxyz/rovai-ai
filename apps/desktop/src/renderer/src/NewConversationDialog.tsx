@@ -316,7 +316,7 @@ export function NewConversationDialog({
           }}
           onCloseAutoFocus={(event) => event.preventDefault()}
           onEscapeKeyDown={(event) => {
-            if (busy || quickHelpOpen || missionDialogContent?.querySelector('.composer-caret-menu')) event.preventDefault()
+            if (busy || quickHelpOpen || missionDialogContent?.querySelector('.composer-caret-menu, .composer-web-link-actions')) event.preventDefault()
           }}
           onPointerDownOutside={(event) => {
             if (event.target instanceof Element && event.target.closest('.new-camp-quick-tooltip')) event.preventDefault()

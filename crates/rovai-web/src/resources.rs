@@ -7,6 +7,19 @@ use rovai_core::draft_client::DraftClient;
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Mutex};
 
+/// A cancelled HTTP future cannot release capacity while its filesystem work
+/// still runs on Tokio's blocking pool.
+pub(super) async fn blocking<T: Send + 'static>(
+    capacity: impl Send + 'static,
+    operation: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(move || {
+        let _capacity = capacity;
+        operation()
+    })
+    .await?
+}
+
 #[derive(Default)]
 pub struct Handles(Mutex<HashMap<String, Handle>>);
 impl Handles {
@@ -46,10 +59,12 @@ pub struct FileRequest {
 
 fn failure(code: &str) -> Value {
     json!({"ok":false,"error":{"code":code,"message":match code {
-        "file_too_large" => "文件超出浏览器预览范围，请下载查看。",
+        "file_too_large" | "decode_failed" => "此文件暂不支持在线预览，可下载到本机查看。",
         "outside_authorized_root" => "此引用超出当前预览来源的文件范围。",
         "source_not_authorized" => "当前来源已失效或未获授权。",
-        "file_not_found" => "源文件已不可用，可能已被系统清理。",
+        "file_not_found" | "attachment_missing" => "源文件已不可用，可能已被系统清理。",
+        "file_unreadable" | "attachment_unreadable" => "服务器暂时无法读取此文件，请检查文件权限后重试。",
+        "not_regular_file" | "attachment_kind_changed" => "此来源当前不是可下载的普通文件。",
         _ => "文件已变化或暂不可读，请重新打开。"
     },"retryable":true}})
 }
@@ -64,7 +79,14 @@ async fn core_value(
         .core
         .request_for_editor(method, params, client.clone())
         .await?;
-    ensure!(reply.error.is_none(), "source_not_authorized");
+    if let Some(error) = reply.error {
+        anyhow::bail!(match error["code"].as_str() {
+            Some("attachment_missing") => "file_not_found",
+            Some("attachment_unreadable") => "file_unreadable",
+            Some("attachment_kind_changed") => "not_regular_file",
+            _ => "source_not_authorized",
+        });
+    }
     reply
         .result
         .filter(|value| !value.is_null())
@@ -76,6 +98,85 @@ struct ResolvedSource {
     root: PathBuf,
     name: String,
     allow_children: bool,
+}
+
+/// A path capability resolved from an authorized source, never a client path.
+pub(super) struct DownloadTarget {
+    pub path: PathBuf,
+    pub name: String,
+}
+
+pub(super) async fn download_source(
+    state: &WebState,
+    session: &Arc<Session>,
+    mut source: Value,
+) -> Result<DownloadTarget> {
+    normalize_thread_scope(&mut source)?;
+    if let Some(locator) = source.get_mut("locator") {
+        normalize_thread_scope(locator)?;
+    }
+    let client = DraftClient::verified_web(&session.client_id)?;
+    if source["kind"] == "child_of_handle" {
+        let parent = state
+            .files
+            .0
+            .lock()
+            .expect("file registry poisoned")
+            .get(
+                source["parentHandleId"]
+                    .as_str()
+                    .context("source_not_authorized")?,
+            )
+            .filter(|handle| handle.client == client.id() && handle.allow_children)
+            .cloned()
+            .context("source_not_authorized")?;
+        reauthorize(state, &client, &parent).await?;
+        let candidate = reference_path(
+            source["rawReference"]
+                .as_str()
+                .context("source_not_authorized")?,
+            parent.path.parent().context("source_not_authorized")?,
+        )?;
+        let path = tokio::fs::canonicalize(candidate)
+            .await
+            .context("file_not_found")?;
+        ensure!(path.starts_with(&parent.root), "source_not_authorized");
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .context("source_not_authorized")?
+            .to_owned();
+        return Ok(DownloadTarget { path, name });
+    }
+    let resolved = resolve(state, &client, &source).await?;
+    Ok(DownloadTarget {
+        path: resolved.path,
+        name: resolved.name,
+    })
+}
+
+pub(super) async fn download_preview(
+    state: &WebState,
+    session: &Arc<Session>,
+    id: &str,
+) -> Result<DownloadTarget> {
+    let client = DraftClient::verified_web(&session.client_id)?;
+    let handle = state
+        .files
+        .0
+        .lock()
+        .expect("file registry poisoned")
+        .get(id)
+        // Handles belong to the proved editor identity, as do ordinary preview
+        // reads. Reauthentication grants a new Session, never revives its tickets.
+        .filter(|handle| handle.client == client.id())
+        .cloned()
+        .context("source_not_authorized")?;
+    reauthorize(state, &client, &handle).await?;
+    Ok(DownloadTarget {
+        path: handle.path,
+        name: handle.name,
+    })
 }
 
 fn is_core_file_source_kind(kind: Option<&str>) -> bool {
@@ -378,6 +479,9 @@ pub async fn files(
     Json(result.unwrap_or_else(|error| {
         failure(match error.to_string().as_str() {
             "file_too_large" => "file_too_large",
+            "decode_failed" => "decode_failed",
+            "file_unreadable" => "attachment_unreadable",
+            "not_regular_file" => "not_regular_file",
             "outside_authorized_root" => "outside_authorized_root",
             "file_not_found" => "file_not_found",
             "source_not_authorized" => "source_not_authorized",
@@ -796,6 +900,9 @@ pub async fn binary(
     result.unwrap_or_else(|error| {
         Json(failure(match error.to_string().as_str() {
             "file_too_large" => "file_too_large",
+            "decode_failed" => "decode_failed",
+            "file_unreadable" => "attachment_unreadable",
+            "not_regular_file" => "not_regular_file",
             "outside_authorized_root" => "outside_authorized_root",
             "file_not_found" => "file_not_found",
             "source_not_authorized" => "source_not_authorized",
@@ -805,7 +912,7 @@ pub async fn binary(
     })
 }
 
-fn disposition(name: &str) -> String {
+pub(super) fn disposition(name: &str) -> String {
     let encoded: String = name
         .as_bytes()
         .iter()

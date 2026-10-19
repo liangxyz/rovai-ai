@@ -1,5 +1,5 @@
 //! Shared local file snapshots. Neither this module nor the CLI owns Camp authorization.
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use std::{
@@ -243,6 +243,26 @@ struct OpenedNodeMetadata {
     kind: OpenedNodeKind,
     fingerprint: MetadataFingerprint,
     link_count: u64,
+}
+
+/// Identity and mutation evidence for an already-open regular file. This is an
+/// observation, not a snapshot or a promise that concurrent writes are atomic.
+#[cfg(any(unix, windows))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct FileObservation(OpenedNodeMetadata);
+
+#[cfg(any(unix, windows))]
+impl FileObservation {
+    pub fn byte_size(&self) -> u64 {
+        fingerprint_size(&self.0.fingerprint)
+    }
+}
+
+#[cfg(any(unix, windows))]
+pub fn observe_open_file(file: &File) -> Result<FileObservation> {
+    let node = inspect_open_node(file)?;
+    ensure!(node.kind == OpenedNodeKind::RegularFile, "not_regular_file");
+    Ok(FileObservation(node))
 }
 
 #[cfg(any(unix, windows))]
@@ -1109,19 +1129,19 @@ pub(crate) fn validate_runtime_safe_leaf(value: &str) -> Result<()> {
 pub(crate) fn validate_runtime_source_tree(path: &Path, depth: usize) -> Result<()> {
     if depth > MAX_DIRECTORY_DEPTH {
         return Err(anyhow::Error::new(LocalAttachmentError::Limit)
-            .context("Camp Attachment Runtime View source exceeds the depth limit"));
+            .context("Thread Attachment Runtime View source exceeds the depth limit"));
     }
     let source = open_source_without_following(path)?;
     let metadata = inspect_open_node(&source)?;
     if metadata.kind == OpenedNodeKind::RegularFile {
         if metadata.link_count != 1 {
-            anyhow::bail!("Camp Attachment Runtime View source contains a hard-linked file");
+            anyhow::bail!("Thread Attachment Runtime View source contains a hard-linked file");
         }
         return Ok(());
     }
     if metadata.kind != OpenedNodeKind::Directory {
         return Err(anyhow::Error::new(LocalAttachmentError::Unsupported)
-            .context("Camp Attachment Runtime View source contains an unsupported node"));
+            .context("Thread Attachment Runtime View source contains an unsupported node"));
     }
     let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
     children.sort_by_key(|entry| entry.file_name());

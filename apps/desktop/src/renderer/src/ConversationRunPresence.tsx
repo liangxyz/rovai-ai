@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AdapterInstallation, AgentProfile, AgentRunView, ThreadSnapshot } from '@contracts'
@@ -21,11 +21,12 @@ import { useNavigationPressMenu } from './useNavigationPressMenu'
 import type { AgentRunStopViewState } from './ThreadWorkspace'
 import './conversation-run-presence.css'
 
-export function ConversationRunPresence({ snapshot, slot, profiles, installations, onActivateMember, eventsByRunId, windowedEvidence, stopState, onStop, onOpen, onOpenMotionSettings, onError }: {
+export function ConversationRunPresence({ snapshot, slot, profiles, installations, source, onActivateMember, eventsByRunId, windowedEvidence, stopState, onStop, onOpen, onOpenMotionSettings, onError }: {
   snapshot: ThreadSnapshot
   slot: ConversationRunPresenceSlot
   profiles: readonly AgentProfile[]
   installations: AdapterInstallation[]
+  source: ReactNode
   onActivateMember(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
   eventsByRunId: ReadonlyMap<string, LiveRuntimeEvent[]>
   windowedEvidence: boolean
@@ -115,6 +116,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
               {authorPart('name')}
               <RunModelSummary run={run} installations={installations} displayName={name} avatarRef={avatarRef} />
             </div>}
+            {source}
             <div className="run-presence-line">
               <RunPresenceOpen threadId={snapshot.thread.id} run={run} name={name} description={description}
                 windowedEvidence={windowedEvidence} events={eventsByRunId.get(run.id)}

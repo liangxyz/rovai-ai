@@ -13,7 +13,7 @@ A candidate must:
 - remain useful beyond the current task, branch, message or Run;
 - express a user-stated stable preference, explicit future agreement or lesson supported by experience;
 - change future collaboration and stand alone as one preference, agreement or lesson;
-- belong in Memory rather than Tasks, history, project documents, code, tests, approval or audit records;
+- belong in Memory rather than history, project documents, code, tests, approval or audit records;
 - have a valid Scope, Kind, counterparty and direction;
 - add new value, or revise the same existing understanding when correction is needed.
 

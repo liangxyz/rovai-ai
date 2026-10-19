@@ -186,6 +186,11 @@ fn admit_candidate(
                         | "session/update.tool_call_update.completed.editor"
                 )
         }
+        AdapterKind::MinimaxCodeCli => {
+            protocol_family == "acp-v1"
+                && source_event_kind == "session/update.tool_call_update.completed"
+                && semantic_kind == "minimax_file_patch"
+        }
         adapter if adapter.uses_acp() => {
             protocol_family == "acp-v1"
                 && source_event_kind == "session/update.tool_call_update.completed"
@@ -259,7 +264,10 @@ fn admit_candidate(
             source_path.clone()
         };
         let (diff, evidence_entry) = match semantic_kind {
-            "codex_file_change_snapshot" | "pi_edit_patch" | "zcode_edit_patch" => {
+            "codex_file_change_snapshot"
+            | "pi_edit_patch"
+            | "zcode_edit_patch"
+            | "minimax_file_patch" => {
                 let content = raw
                     .get("diff")
                     .and_then(Value::as_str)
@@ -267,7 +275,12 @@ fn admit_candidate(
                 if content.len() > MAX_SINGLE_DIFF_BYTES {
                     return Err("runtime_diff_item_limit");
                 }
-                let content = if matches!(semantic_kind, "pi_edit_patch" | "zcode_edit_patch") {
+                let content = if semantic_kind == "minimax_file_patch" {
+                    if change_kind != "update" {
+                        return Err("runtime_diff_change_kind_invalid");
+                    }
+                    normalize_minimax_file_patch(content, &path, execution_root)?
+                } else if matches!(semantic_kind, "pi_edit_patch" | "zcode_edit_patch") {
                     if change_kind != "update" {
                         return Err("runtime_diff_change_kind_invalid");
                     }
@@ -369,7 +382,10 @@ fn admit_candidate(
     Ok(AdmittedCommandDiff {
         semantic_kind: if matches!(
             semantic_kind,
-            "codex_file_change_snapshot" | "pi_edit_patch" | "zcode_edit_patch"
+            "codex_file_change_snapshot"
+                | "pi_edit_patch"
+                | "zcode_edit_patch"
+                | "minimax_file_patch"
         ) {
             "unified_diff_snapshot".to_string()
         } else {
@@ -378,6 +394,41 @@ fn admit_candidate(
         entries,
         evidence_entries: Value::Array(evidence_entries),
     })
+}
+
+fn normalize_minimax_file_patch(
+    patch: &str,
+    normalized_path: &str,
+    execution_root: &Path,
+) -> Result<String, &'static str> {
+    // Native write uses jsdiff's Index preamble; native edit starts at ---.
+    // Both are applied result patches. Never parse the numbered display diff.
+    let (index_path, patch) = if let Some(rest) = patch.strip_prefix("Index: ") {
+        let (path, rest) = rest
+            .split_once('\n')
+            .ok_or("runtime_diff_content_invalid")?;
+        let (separator, body) = rest
+            .split_once('\n')
+            .ok_or("runtime_diff_content_invalid")?;
+        if separator != "===================================================================" {
+            return Err("runtime_diff_content_invalid");
+        }
+        (Some(path), body)
+    } else {
+        (None, patch)
+    };
+    let header_path = patch
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("--- "))
+        .ok_or("runtime_diff_content_invalid")?;
+    if index_path.is_some_and(|path| path != header_path)
+        || normalize_reported_path_for_display(execution_root, header_path).as_deref()
+            != Some(normalized_path)
+    {
+        return Err("runtime_diff_content_invalid");
+    }
+    normalize_pi_edit_patch(patch, header_path, normalized_path)
 }
 
 fn normalize_pi_edit_patch(
@@ -1178,6 +1229,68 @@ mod tests {
 
     #[test]
     fn pi_edit_patch_is_path_bound_normalized_and_counted_inside_hunks() {
+        let mini_patch =
+            "--- /repo/src/app.ts\n+++ /repo/src/app.ts\n@@ -16,2 +16,2 @@\n-old\n+new\n same\n";
+        let mini = |patch: &str| {
+            json!({"runtimeDiff":{"adapterKind":"minimax-code-cli","protocolFamily":"acp-v1",
+            "sourceEventKind":"session/update.tool_call_update.completed","semanticKind":"minimax_file_patch",
+            "entries":[{"path":"src/app.ts","changeKind":"update","diff":patch}]}})
+        };
+        for patch in [
+            mini_patch.to_string(),
+            format!(
+                "Index: /repo/src/app.ts\n===================================================================\n{mini_patch}"
+            ),
+        ] {
+            let admitted =
+                admit_runtime_diff(&mini(&patch), Path::new("/repo"), Some("minimax-code-cli"))
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(
+                admitted.evidence_entries[0]["semantics"],
+                "unified_diff_snapshot"
+            );
+            assert_eq!(
+                (admitted.entries[0].additions, admitted.entries[0].deletions),
+                (1, 1)
+            );
+            assert!(admitted.entries[0].diff.contains("@@ -16,2 +16,2 @@"));
+        }
+        for patch in [
+            mini_patch.replace("src/app.ts", "src/other.ts"),
+            format!(
+                "Index: /repo/wrong.ts\n===================================================================\n{mini_patch}"
+            ),
+            "--- /repo/src/app.ts\n+++ /repo/src/app.ts\npreview without hunk".into(),
+        ] {
+            assert!(
+                admit_runtime_diff(&mini(&patch), Path::new("/repo"), Some("minimax-code-cli"))
+                    .unwrap()
+                    .is_err()
+            );
+        }
+        let mut false_complete = mini(mini_patch);
+        false_complete["runtimeDiff"]["semanticKind"] = json!("complete_before_after");
+        assert_eq!(
+            admit_runtime_diff(
+                &false_complete,
+                Path::new("/repo"),
+                Some("minimax-code-cli")
+            )
+            .unwrap(),
+            Err("runtime_diff_source_not_allowlisted")
+        );
+        assert_eq!(
+            admit_runtime_diff_with_file_operation_path_and_managed_output_root(
+                &mini(mini_patch),
+                Path::new("/repo"),
+                Some("minimax-code-cli"),
+                None,
+                Some(Path::new("/repo/src"))
+            )
+            .unwrap(),
+            Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT)
+        );
         let payload = |patch: &str| {
             json!({
                 "runtimeDiff": {

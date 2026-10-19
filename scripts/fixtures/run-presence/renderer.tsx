@@ -111,7 +111,7 @@ function Workbench() {
   useEffect(() => {
     Object.assign(window, { __presence: { setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields,
       setLanguage: (language: 'zh-CN' | 'en') => changeInterfaceLanguage({ setInterfaceLanguage: async (interfaceLanguage: string) => ({ interfaceLanguage }) } as any, language),
-      getState: model.get, showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
+      getState: model.get, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
       showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot

@@ -68,7 +68,7 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
       if (message.method === 'Network.responseReceived') {
         const { response, requestId } = message.params
         const path = new URL(response.url).pathname
-        if (path.startsWith('/api/')) responses.push({ requestId, path, status: response.status })
+        if (path.startsWith('/api/')) responses.push({ requestId, path: path.startsWith('/api/v1/downloads/') ? '/api/v1/downloads/[redacted]' : path, status: response.status })
       }
     })
     socket.addEventListener('close', () => {
@@ -121,7 +121,12 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
       async wait(expression, timeout = 12_000) {
         const deadline = Date.now() + timeout
         while (Date.now() < deadline) {
-          if (await evaluate(expression)) return
+          try { if (await evaluate(expression)) return }
+          catch (error) {
+            // A reload replaces CDP's execution context before the new document
+            // is ready. Retry only that transition, never application failures.
+            if (!/Execution context was destroyed|Cannot find context|Inspected target navigated or closed/.test(error?.message ?? String(error))) throw error
+          }
           if (errors.length) throw Error(errors.join('\n'))
           await pause(100)
         }

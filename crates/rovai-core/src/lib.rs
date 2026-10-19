@@ -124,6 +124,7 @@ pub mod skill;
 pub mod skill_projection;
 pub mod steer;
 pub mod storage_layout;
+pub mod task_capability;
 pub mod team_tool;
 pub mod team_tool_catalog;
 pub mod thread_compat;

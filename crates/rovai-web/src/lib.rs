@@ -2,6 +2,7 @@ mod auth;
 mod channels;
 pub use channels::{ChannelFuture, ChannelHost, ChannelReply, ChannelRequest};
 mod avatars;
+mod downloads;
 mod network;
 mod operations;
 mod resources;
@@ -35,7 +36,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-const HOST_WEB_PROTOCOL_VERSION: u32 = 4;
+const HOST_WEB_PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -60,7 +61,9 @@ struct WebState {
     epoch: String,
     requests: Arc<Semaphore>,
     uploads: Arc<Semaphore>,
+    upload_attempts: Arc<uploads::Attempts>,
     files: Arc<resources::Handles>,
+    downloads: Arc<downloads::Downloads>,
 }
 
 /// Owns only a network listener and its credentials. Stopping or dropping it
@@ -140,7 +143,9 @@ impl WebServer {
             epoch: new_token()?,
             requests: Arc::new(Semaphore::new(64)),
             uploads: Arc::new(Semaphore::new(4)),
+            upload_attempts: Arc::new(uploads::Attempts::default()),
             files: Arc::new(resources::Handles::default()),
+            downloads: Arc::new(downloads::Downloads::new()?),
         };
         sessions.enable();
         let app = routes(state);
@@ -226,12 +231,14 @@ fn routes(state: WebState) -> Router {
             "/avatars",
             post(avatars::avatar).layer(DefaultBodyLimit::max(24 * 1024 * 1024)),
         )
+        .route("/downloads", post(downloads::prepare))
         .route("/files", post(resources::files))
         .route("/files/bytes", post(resources::binary))
         .route("/attachments", post(resources::attachment))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     Router::new()
         .nest("/api/v1", api)
+        .route("/api/v1/downloads/{token}", get(downloads::file))
         .route("/api/v1/login", post(login))
         .route("/api/v1/login-ticket", post(redeem_login_ticket))
         .route("/", get(index))
@@ -257,6 +264,7 @@ async fn boundary(State(state): State<WebState>, req: Request, next: Next) -> Re
         .and_then(|value| value.to_str().ok());
     let origin = req.headers().get(header::ORIGIN);
     let preview_shell = req.uri().path() == "/preview.html";
+    let download = req.uri().path().starts_with("/api/v1/downloads/");
     let preview_asset = req.uri().path().starts_with("/preview-assets/")
         && matches!(
             *req.method(),
@@ -272,7 +280,8 @@ async fn boundary(State(state): State<WebState>, req: Request, next: Next) -> Re
     {
         error(StatusCode::FORBIDDEN, "origin_not_allowed")
     } else if req.uri().query().is_some() && !preview_asset {
-        // Credentials and API parameters have no URL representation.
+        // Ordinary credentials and API parameters have no query representation.
+        // Download capabilities use a separate, short-lived token route.
         error(StatusCode::BAD_REQUEST, "query_not_allowed")
     } else {
         next.run(req).await
@@ -283,6 +292,8 @@ async fn boundary(State(state): State<WebState>, req: Request, next: Next) -> Re
         header::CACHE_CONTROL,
         HeaderValue::from_static(if immutable {
             "public, max-age=31536000, immutable"
+        } else if download {
+            "no-store, no-transform"
         } else {
             "no-store"
         }),
@@ -424,7 +435,7 @@ async fn finish_login(
     match result {
         Ok((token, session)) => {
             let mut response = state.sessions.timing(&session);
-            response.as_object_mut().expect("session timing").extend(json!({"protocolVersion":HOST_WEB_PROTOCOL_VERSION,"token":token,"clientId":session.client_id,"editorProof":identity["proof"],"ownerId":identity["ownerId"],"epoch":state.epoch,"channels":if state.channels.is_some() { "desktop" } else { "unsupported" }}).as_object().expect("session response").clone());
+            response.as_object_mut().expect("session timing").extend(json!({"protocolVersion":HOST_WEB_PROTOCOL_VERSION,"token":token,"clientId":session.client_id,"editorProof":identity["proof"],"ownerId":identity["ownerId"],"epoch":state.epoch,"fileTransfers":downloads::capabilities(&state),"channels":if state.channels.is_some() { "desktop" } else { "unsupported" }}).as_object().expect("session response").clone());
             Json(response).into_response()
         }
         Err(failure) if ticket => ticket_failure(failure),
@@ -513,6 +524,7 @@ async fn resume_session(
         .expect("Core identity object")
         .remove("proof");
     identity["protocolVersion"] = json!(HOST_WEB_PROTOCOL_VERSION);
+    identity["fileTransfers"] = downloads::capabilities(&state);
     identity["channels"] = json!(if state.channels.is_some() {
         "desktop"
     } else {
@@ -566,7 +578,7 @@ async fn renew_session(
 
 async fn capabilities(State(state): State<WebState>) -> Json<Value> {
     Json(
-        json!({"protocolVersion":HOST_WEB_PROTOCOL_VERSION,"epoch":state.epoch,"read":true,"composer":true,"uploads":true,"approval":true,"nativeFilePicker":false,"desktopWindow":false,"releaseQualified":false,"channels":if state.channels.is_some() { "desktop" } else { "unsupported" }}),
+        json!({"protocolVersion":HOST_WEB_PROTOCOL_VERSION,"epoch":state.epoch,"read":true,"composer":true,"uploads":true,"approval":true,"nativeFilePicker":false,"desktopWindow":false,"releaseQualified":false,"fileTransfers":downloads::capabilities(&state),"channels":if state.channels.is_some() { "desktop" } else { "unsupported" }}),
     )
 }
 
@@ -658,6 +670,7 @@ async fn events(
                     let event = if result.is_err() { "resync" } else { "invalidate" };
                     let mut payload = json!({"epoch":state.epoch,"revision":revision});
                     if let Ok(change) = &result {
+                        if change["method"] == "preferences.tasks_changed" { payload["tasksChanged"] = json!(true); }
                         if change["method"] == "thread.messages.changed" {
                             let params = &change["params"];
                             if let (Some(thread_id), Some(index_changed), Some(through)) = (

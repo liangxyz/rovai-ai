@@ -2,7 +2,7 @@
 document_type: architecture
 authority: notification-episode-architecture
 status: accepted
-last_updated: 2026-09-20
+last_updated: 2026-10-17
 ---
 
 # Notification Episode 架构
@@ -34,7 +34,7 @@ Renderer Attention Controller
 ```
 
 Core SQLite 是唯一持久真源。source transaction 的任一写入失败都会回滚 Occurrence、Episode 与 Journal；
-Electron Main 和 Renderer 不保存副本或聚合状态。`event_log` 可以促使刷新，但通知游标只来自 Journal。
+Electron Main 和 Renderer 不保存副本或聚合状态。`event_log` 可以促使刷新，但通知游标只来自通知时钟与 Journal。
 
 ## 深模块 seam
 
@@ -88,6 +88,9 @@ Episode 推荐动作从不参与该来源集合。执行台由稳定 Portal 在�
 - Inbox cursor 包含首次读取 high-water；Journal cursor 早于 retained floor 时要求 reset；
 - App/Renderer 启动以 unread `limit=1` 读取 Inbox high-water 与未读布尔事实，历史未读不形成 heads-up；
   运行中只消费之后的 Journal。
+- Task 开关采用设置事务内固定、持久化的通知边界。变化时递增已有通知时钟，空序号不产生通知事实或未读。
+  changesSince 同一事务返回增量和有效 Task 快照；Renderer 与设置共用按序号更新的能力投影，隔离迟到响应。
+  不等待设置读取、不另读水位，不回退或直接重置全局消费游标。见 [Notification Episode v10](../contracts/notification-episode-v10.md)。
 - Renderer 分页使用局部 candidate cursor；所有分页、精确可见性处理、Inbox 接收和 heads-up 入队成功后
   才提交共享 cursor，失败保持原边界重试。
 - Renderer 按 Journal 顺序先归约 exact invalidation、再接收同 change 的新 signal；普通 Inbox hydration

@@ -106,11 +106,11 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         WHEN NEW.version=202 BEGIN SELECT RAISE(ABORT,'activity receipt rollback'); END;",
         )
         .unwrap();
+    let error = migrate(database).unwrap_err();
     assert!(
-        migrate(database)
-            .unwrap_err()
-            .to_string()
-            .contains("activity receipt rollback")
+        error.to_string().contains("activity receipt rollback"),
+        "{error:#}; {:?}",
+        classify_database_contract(database.connection()).unwrap()
     );
     assert!(!schema_matches(database.connection()).unwrap());
     assert_eq!(snapshot(database.connection()), before);
@@ -120,7 +120,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .unwrap();
     migrate(database).unwrap();
     super::compact_execution::migrate(database).unwrap();
-    super::steer::migrate(database).unwrap();
+    database.migrate(false).unwrap();
     assert_eq!(snapshot(database.connection()), before);
     let reopened =
         Connection::open_with_flags(&database.path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -128,6 +128,5 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     assert!(matches!(
         classify_database_contract(&reopened).unwrap(),
         DatabaseContractClassification::Current(_)
-            | DatabaseContractClassification::SupportedMigrationSource(_)
     ));
 }

@@ -397,7 +397,7 @@ pub(super) fn public_command(payload: &Value) -> Option<&str> {
 fn watermarks(connection: &Connection, thread: &str, run: &str) -> Result<(i64, i64)> {
     ensure!(
         agent_run_belongs_to_camp(connection, thread, run)?,
-        "AgentRun does not exist in this Camp"
+        "AgentRun does not exist in this Thread"
     );
     Ok(connection.query_row(
         "SELECT (SELECT COALESCE(MAX(sequence), 0) FROM agent_run_execution_evidence WHERE agent_run_id = ?1),

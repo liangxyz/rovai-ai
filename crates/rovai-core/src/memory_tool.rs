@@ -81,7 +81,7 @@ impl MemoryToolService {
                         "counterpartyAgentId": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Another present member of the current Camp."
+                            "description": "Another present member of the current Thread."
                         },
                         "direction": {
                             "const": "directed",

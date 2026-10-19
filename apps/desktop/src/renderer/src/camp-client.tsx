@@ -1,3 +1,4 @@
+import { TaskCapabilityProvider } from './TaskCapabilityProvider'
 import { uiAttribute } from './interface-language'
 import { createContext, useContext, type ReactNode } from 'react'
 import type { RovaiApi } from '@contracts'
@@ -51,7 +52,7 @@ export function ThreadClientProvider({ client, children }: {
   client: ThreadClient
   children: ReactNode
 }): React.JSX.Element {
-  return <ThreadClientContext.Provider value={client}>{children}</ThreadClientContext.Provider>
+  return <ThreadClientContext.Provider value={client}><TaskCapabilityProvider client={client}>{children}</TaskCapabilityProvider></ThreadClientContext.Provider>
 }
 
 export function useThreadClient(): ThreadClient {

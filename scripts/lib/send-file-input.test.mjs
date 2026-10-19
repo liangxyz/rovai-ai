@@ -12,7 +12,7 @@ const cli = join(repository, 'target/debug', process.platform === 'win32' ? 'rov
 
 // Owns the CLI process/IPC seam. Input matrices belong to the Rust parser tests;
 // this fixture neither starts Core nor claims actual message publication.
-test('Send files preserve the IPC request, fail before dispatch and never wait on inherited stdin', async () => {
+test('CLI discovery stays local and Send files preserve requests without waiting on inherited stdin', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rovai-send-cli-'))
   const socket = process.platform === 'win32'
     ? `\\\\.\\pipe\\rovai-ai-${process.pid}-4b812837-7ffc-4ca2-ab62-d5dc89bcd411`
@@ -38,14 +38,15 @@ test('Send files preserve the IPC request, fail before dispatch and never wait o
   const contextPath = join(root, 'context.json')
   const version = Number((await readFile(join(repository, 'crates/rovai-core/src/builtin_tool_transport.rs'), 'utf8'))
     .match(/BUILTIN_TOOL_CONTRACT_VERSION: u32 = (\d+);/u)[1])
-  await writeFile(contextPath, JSON.stringify({
+  const context = {
     contractVersion: version, ipcProtocolVersion: 3,
     coreEndpoint: process.platform === 'win32'
       ? { transport: 'windows_named_pipe', name: socket } : { transport: 'unix_socket', path: socket },
     processId: 'fixture', processToken: 'fixture',
     lease: { executionRoot: root, runTmp: root, leaseId: 'fixture', leaseGeneration: 1, leaseToken: 'fixture' }
-  }))
-  async function run(args, stdin) {
+  }
+  await writeFile(contextPath, JSON.stringify(context))
+  async function run(args, stdin, jsonOutput = true) {
     const child = spawn(cli, args, {
       cwd: root, env: { ...process.env, ROVAI_CLI_CONTEXT: contextPath, ROVAI_RUN_TMP: root },
       stdio: ['pipe', 'pipe', 'pipe']
@@ -59,7 +60,7 @@ test('Send files preserve the IPC request, fail before dispatch and never wait o
       const [code, signal] = await once(child, 'close')
       assert.equal(signal, null, `CLI blocked with stdin open: ${args.join(' ')}`)
       assert.equal(stderr, '')
-      return { code, output: JSON.parse(stdout) }
+      return { code, output: jsonOutput ? JSON.parse(stdout) : stdout }
     } finally {
       clearTimeout(timer)
       child.stdin.destroy()
@@ -84,6 +85,33 @@ test('Send files preserve the IPC request, fail before dispatch and never wait o
     assert.ok(!JSON.stringify(result.output).includes(root), 'local paths must not leak')
   }
   try {
+    // Discovery is local even with an active IPC endpoint. Missing, malformed,
+    // old, future and unbound projections must not advertise Tasks.
+    for (const projection of [
+      null, '{', context, { ...context, tasksEnabled: false },
+      { ...context, tasksEnabled: true, contractVersion: version - 1 },
+      { ...context, tasksEnabled: true, contractVersion: version + 1 },
+      { ...context, tasksEnabled: true, lease: null }
+    ]) {
+      if (projection === null) await rm(contextPath, { force: true })
+      else await writeFile(contextPath, typeof projection === 'string' ? projection : JSON.stringify(projection))
+      const help = await run(['--help'], undefined, false)
+      assert.equal(help.code, 0)
+      assert.ok(!help.output.includes('rovai task'))
+      for (const args of [['task', '--help'], ['task', 'get', '--help'], ['task', 'list']]) {
+        const disabled = await run(args)
+        assert.equal(disabled.code, 2)
+        assert.deepEqual(disabled.output, { error: {
+          code: 'task.feature_disabled', message: 'Tasks are disabled. Continue with messages.', recovery: 'stop'
+        } })
+      }
+    }
+    await writeFile(contextPath, JSON.stringify({ ...context, tasksEnabled: true }))
+    assert.ok((await run(['--help'], undefined, false)).output.includes('rovai task'))
+    assert.equal((await run(['task', 'get', '--help'], undefined, false)).code, 0)
+    assert.ok(!(await run(['send', '--help'], undefined, false)).output.includes('--task-id'))
+    assert.equal(requests.length, 0, 'help and disabled Task calls must not contact Core')
+    await writeFile(contextPath, JSON.stringify(context))
     const raw = ' 中文 🌸\r\n# Markdown\n\n"quote" `code` \\n\n'
     await writeFile(join(root, 'reply.md'), raw)
     await reachesCore(['send', '--public-only', '--input-file', 'reply.md'], { body: raw, publicOnly: true })
@@ -96,6 +124,9 @@ test('Send files preserve the IPC request, fail before dispatch and never wait o
     await reachesCore(['send', '--input-file', 'request.json'], legacy)
     await reachesCore(['send'], legacy, JSON.stringify(legacy))
     await reachesCore(['send', '--body', 'direct', '--public-only'], { body: 'direct', publicOnly: true })
+    await reachesCore(['send', '--body', 'legacy', '--to', 'agent_5', '--task-id', 'task-1'], {
+      body: 'legacy', to: ['agent_5'], taskId: 'task-1'
+    })
     await rejected(['send', '--input-file', 'request.json', '--public-only'],
       'The input file matches a complete Send request and cannot be combined with command-line send options.')
     for (const [args, stdin] of [

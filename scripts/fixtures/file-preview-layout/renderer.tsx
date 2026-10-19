@@ -9,6 +9,7 @@ import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileCha
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard, ThreadWorkspace } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
+import { filePreviewSessionStore } from '../../../apps/desktop/src/renderer/src/file-preview-session'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from '../../../apps/desktop/src/renderer/src/FilePreviewLayout'
 import { FilePreviewPane } from '../../../apps/desktop/src/renderer/src/FilePreviewPane'
 import { FileReferenceLink } from '../../../apps/desktop/src/renderer/src/FileReferenceLink'
@@ -102,6 +103,7 @@ const readSteps = [readReferences, [toolPreviewReference, toolPreviewReference]]
 const unsupported = async (): Promise<never> => { throw new Error('Unexpected fixture API operation') }
 const fileOpens: OpenFilePreviewRequest[] = []
 const fileRestores: OpenFilePreviewRequest[] = []
+const sourceDownloads: OpenFilePreviewRequest[] = []
 const campBindings: Array<string | null> = []
 const releases: string[] = []
 const revealCalls: string[] = []
@@ -114,6 +116,10 @@ let deferredReadRelease: (() => void) | null = null
 let pendingToolOpen: ReturnType<FilePreviewContextValue['open']> | null = null
 let fileReads = 0
 const patchHandles = new Set<string>()
+const resolvedFiles = new Map<string, ResolvedFilePreview>()
+const updateListeners = new Set<Parameters<FilePreviewApi['onExternalUpdate']>[0]>()
+let refreshRevision = 1
+let refreshLineCount = 300
 async function resolvePreview(request: OpenFilePreviewRequest) {
   if (request.kind === 'message_reference' && request.rawReference === missingReference) {
     return { ok: false as const, error: {
@@ -148,12 +154,18 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   } else if (request.kind === 'camp_workspace' && [toolPreviewReference, ...readReferences].includes(request.rawReference)) {
     target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
       fileName: request.rawReference.split('/').at(-1)! }
+  } else if (request.kind === 'message_reference' && ['refresh.txt', 'refresh.log', 'refresh.png'].includes(request.rawReference)) {
+    target = { ...file, previewKey: request.rawReference, fileName: request.rawReference, displayPath: request.rawReference, target: undefined,
+      kind: request.rawReference.endsWith('.png') ? 'image' : request.rawReference.endsWith('.log') ? 'paged_text' : 'text' }
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
   const handleId = crypto.randomUUID()
   if (target.kind === 'patch') patchHandles.add(handleId)
-  return { ok: true as const, value: { kind: 'file_preview' as const, file: { ...target, handleId } } }
+  const resolved = { ...target, handleId }
+  resolvedFiles.set(handleId, resolved)
+  return { ok: true as const, value: { kind: 'file_preview' as const, file: resolved } }
 }
 const api: FilePreviewApi = {
+  downloadSource: async request => { sourceDownloads.push(request); return { ok: true, value: { started: true } } },
   bindThread: async (threadId) => { campBindings.push(threadId) },
   open: async (request) => {
     fileOpens.push(request)
@@ -164,6 +176,9 @@ const api: FilePreviewApi = {
     return resolvePreview(request)
   },
   readText: async ({ handleId }) => {
+    if (resolvedFiles.get(handleId)?.fileName === 'refresh.txt') return { ok: true, value: {
+      text: 'refresh revision ' + refreshRevision, contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
+    } }
     if (patchHandles.has(handleId)) return { ok: true, value: { text: 'diff --git a/find.ts b/find.ts\n--- a/find.ts\n+++ b/find.ts\n@@ -1,2 +1,2 @@\n unchanged\n-before patch\n+after patch\n\\ No newline at end of file', contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } }
     fileReads += 1
     if (deferNextRead) {
@@ -181,16 +196,36 @@ const api: FilePreviewApi = {
     } }
   },
   release: async ({ handleId }) => { releases.push(handleId); return { released: true } },
-  onExternalUpdate: () => () => {},
-  reopen: unsupported, resolveLine: unsupported,
-  readPage: async ({ offset }) => ({ ok: true, value: {
+  onExternalUpdate: listener => { updateListeners.add(listener); return () => { updateListeners.delete(listener) } },
+  reopen: unsupported,
+  resolveLine: async ({ line, expectedGeneration }) => {
+    const actual = Math.min(line, refreshLineCount)
+    return { ok: true, value: { offset: actual - 1, line: actual, contentGeneration: expectedGeneration } }
+  },
+  readPage: async ({ offset, handleId }) => {
+    if (resolvedFiles.get(handleId)?.fileName === 'refresh.log') {
+      const end = Math.min(refreshLineCount, offset + 100)
+      return { ok: true, value: {
+        text: Array.from({ length: end - offset }, (_, i) => 'line ' + (offset + i + 1) + ' revision ' + refreshRevision).join('\n'),
+        startOffset: offset, endOffset: end, startLine: offset + 1, hasPrevious: offset > 0, hasNext: end < refreshLineCount,
+        contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
+      } }
+    }
+    return { ok: true, value: {
     text: offset === 0 ? 'first-page needle' : 'second-page needle', startOffset: offset, endOffset: offset + 1024,
     startLine: offset === 0 ? 1 : 101, hasPrevious: offset > 0, hasNext: offset === 0,
     contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
-  } }),
-  readBinary: async () => ({ ok: true, value: { bytes: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>'), mime: 'image/svg+xml', contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } }),
+  } } },
+  readBinary: async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = refreshRevision * 10; canvas.height = 20
+    canvas.getContext('2d')!.fillRect(0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob>(resolve => canvas.toBlob(value => resolve(value!), 'image/png'))
+    return { ok: true, value: { bytes: new Uint8Array(await blob.arrayBuffer()), mime: 'image/png',
+      contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } }
+  },
   prepareHtmlSite: async () => ({ ok: true, value: { ...await (window as unknown as {previewHtmlFixture:{prepare():Promise<import('@contracts').FilePreviewHtmlSite>}}).previewHtmlFixture.prepare(), contentGeneration: markdownFile.contentGeneration, contentVersion: markdownFile.contentVersion } }),
-  releaseHtmlSite: async () => { await (window as unknown as {previewHtmlFixture:{release():Promise<void>}}).previewHtmlFixture.release(); return {released:true} },
+  releaseHtmlSite: async ({ previewId }) => { await (window as unknown as {previewHtmlFixture:{release(id:string):Promise<void>}}).previewHtmlFixture.release(previewId); return {released:true} },
   prepareHtml: async () => ({ ok: true, value: {
     html: markdownSource,
     tabToken: 'markdown-tab-token',
@@ -199,7 +234,11 @@ const api: FilePreviewApi = {
     contentGeneration: markdownFile.contentGeneration,
     contentVersion: markdownFile.contentVersion
   } }),
-  reload: unsupported,
+  reload: async ({ handleId }) => {
+    const next = { ...resolvedFiles.get(handleId)!, handleId: crypto.randomUUID(), contentGeneration: crypto.randomUUID() }
+    resolvedFiles.set(next.handleId, next)
+    return { ok: true, value: next }
+  },
   openInSystem: unsupported,
   revealInFolder: async ({ handleId }) => { revealCalls.push(handleId); return { ok: true, value: { revealed: true } } },
   copyPath: unsupported,
@@ -404,6 +443,7 @@ function Workspace(): React.JSX.Element {
 }
 
 let switchCamp: () => void
+let prepareColdDownload: () => void
 let setFixtureTheme: (theme: ResolvedTheme) => void
 let showToolRows: () => void
 function ToolRows(): React.JSX.Element {
@@ -455,12 +495,25 @@ function Fixture(): React.JSX.Element {
   const [toolRowsVisible, setToolRowsVisible] = useState(false)
   showToolRows = () => { setCamp('camp-1'); setToolRowsVisible(true) }
   switchCamp = () => setCamp((previous) => previous === 'camp-1' ? 'camp-2' : 'camp-1')
+  prepareColdDownload = () => {
+    filePreviewSessionStore.set('cold-download', {
+      tabs: [
+        { kind: 'execution', id: 'cold-download-current' },
+        { kind: 'file', id: 'cold-download-file',
+          sourceRequest: { kind: 'message_reference', threadId: 'cold-download', messageId: 'message-1', rawReference: file.displayPath },
+          presentation: { fileName: file.fileName, displayPath: file.displayPath, pathPresentation: file.pathPresentation } }
+      ],
+      activeTabId: 'cold-download-current', paneVisible: true
+    })
+    setToolRowsVisible(false)
+    setCamp('cold-download')
+  }
   setFixtureTheme = (theme) => {
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme === 'night' ? 'dark' : 'light'
     setResolvedTheme(theme)
   }
-  return <FilePreviewProvider threadId={camp} resolvedTheme={resolvedTheme}>
+  return <FilePreviewProvider threadId={camp} resolvedTheme={resolvedTheme} api={camp === 'cold-download' ? api : undefined}>
     <div className="app-shell app-shell-camp">
       <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
       <AppHeader threadTitle="文件预览验收" contextLabel="Rovai AI" thread={null} onFocusApprovals={() => {}} />
@@ -499,6 +552,37 @@ async function settle(): Promise<void> {
 
 Object.assign(window, { previewTest: {
   settle,
+  async refreshActive(shorten = false) {
+    const tab = previewController.activeTab
+    if (tab?.kind !== 'file' || !tab.file) throw new Error('Expected an active file')
+    const previous = tab.file.handleId
+    refreshRevision++
+    if (shorten) refreshLineCount = 5
+    for (const listener of updateListeners) listener({ threadId: 'camp-1', previewKeys: [tab.previewKey!] })
+    const deadline = performance.now() + 5000
+    while (previewController.activeTab?.kind !== 'file' || previewController.activeTab.file?.handleId === previous
+      || previewController.activeTab.isRefreshing) {
+      if (performance.now() > deadline) throw new Error('Automatic refresh did not finish')
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    await settle()
+    const current = previewController.activeTab
+    const image = element('.file-preview-tab-panel:not([hidden]) img') as HTMLImageElement | null
+    if (image) await image.decode()
+    return { revision: refreshRevision, text: element('.file-preview-tab-panel:not([hidden]) .cm-content')?.textContent,
+      imageWidth: image?.naturalWidth, readingLine: current.reading?.visibleLine,
+      startLine: current.content?.kind === 'page' ? current.content.page.startLine : null,
+      htmlOrigin: current.content?.kind === 'html' ? current.content.preview.origin : null }
+  },
+  async scrollPage() {
+    await previewController.changePage(previewController.activeTabId!, 1); await settle()
+    element('.file-preview-tab-panel:not([hidden]) .cm-scroller')!.scrollTop = 350
+    await settle()
+    return previewController.activeTab?.reading?.visibleLine
+  },
+  async prepareColdDownload() { prepareColdDownload(); await settle() },
+  downloadState: () => ({ requests: [...sourceDownloads], restores: fileRestores.length, reads: fileReads,
+    activeTabId: previewController.activeTabId, tab: previewController.tabs.find(tab => tab.id === 'cold-download-file') }),
   claimFirstRun: () => claimFirstRun(),
   executionPhase: () => executionPhase,
   activeTabKind: () => previewController.activeTab?.kind,

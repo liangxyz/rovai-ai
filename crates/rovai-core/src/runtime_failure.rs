@@ -406,6 +406,7 @@ fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
         AdapterKind::TraeCnCli => "TRAE CLI",
         AdapterKind::CursorAgent => "Cursor Agent",
         AdapterKind::KimiCodeCli => "Kimi Code",
+        AdapterKind::MinimaxCodeCli => "MiniMax Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
         AdapterKind::ClineCli => "Cline",

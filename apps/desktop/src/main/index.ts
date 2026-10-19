@@ -193,6 +193,8 @@ console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
+  'preferences.tasks.get',
+  'preferences.tasks.set',
   'diagnostics.check',
   'monitoring.snapshot',
   'monitoring.execution',
@@ -1429,6 +1431,10 @@ ipcMain.handle('rovai:shortcuts-save', async (_event, input) => {
   const snapshot = await requireShortcutPreferences().save(input)
   for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send('rovai:shortcuts-changed', snapshot)
   return snapshot
+})
+ipcMain.handle('rovai:shortcuts-tasks-enabled', (event, enabled) => {
+  if (typeof enabled !== 'boolean') throw new Error('Invalid shortcut capability')
+  shortcutInputs.get(event.sender.id)?.setTasksEnabled(enabled)
 })
 ipcMain.handle('rovai:shortcuts-recording', (event, recording) => {
   if (typeof recording !== 'boolean') throw new Error('Invalid recording state')

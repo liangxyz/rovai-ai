@@ -12,10 +12,8 @@ Use `--public-only` for a public record that must wake no Agent. Use `--to` for 
 
 Ordinary messages are already visible to the User. Add `--to-user` only for a new unresolved decision, answer or action, or an explicitly requested important asynchronous result notification.
 
-Attention belongs to this message; replies, Tasks and downstream work do not inherit it. The Agent responsible for the user-facing outcome normally decides when to request attention. Internal reviewers return results to their caller; this is workflow guidance, not a Core permission rule.
+Attention belongs to this message and is not inherited. The Agent responsible for the user-facing outcome normally decides when to request attention. Internal reviewers return results to their caller; this is workflow guidance, not a Core permission rule.
 
 Combine `--to` and `--to-user` only when each recipient has an independent action. If Agent work depends on a human decision, obtain that decision first.
-
-A one-time answer, update, question or request uses a message. Use a [Task](task.md) only for durable, independently transferable responsibility. A Task-linked Send requires exactly one effective Agent recipient; User attention does not count.
 
 A successful Send proves publication and its frozen effects, not that a recipient has started or finished.

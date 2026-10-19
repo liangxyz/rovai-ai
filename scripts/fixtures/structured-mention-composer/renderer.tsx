@@ -372,5 +372,12 @@ function Harness() {
 }
 
 // The fixture has no Core or managed avatars; formal shared components still receive an explicit client.
-const fixtureClient = new Proxy({} as ThreadClient, { get: (_target, key) => { if (key === 'editingRecovery') return undefined; throw new Error(`Unexpected fixture capability: ${String(key)}`) } })
+const fixtureClient = new Proxy({} as ThreadClient, { get: (_target, key) => {
+  if (key === 'editingRecovery' || key === 'onEvent' || key === 'onInvalidated') return undefined
+  if (key === 'request') return async (method: string) => {
+    if (method === 'preferences.tasks.get') return { enabled: false, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
+    throw new Error(`Unexpected fixture request: ${method}`)
+  }
+  throw new Error(`Unexpected fixture capability: ${String(key)}`)
+} })
 createRoot(document.getElementById('root')!).render(<ThreadClientProvider client={fixtureClient}><Harness /></ThreadClientProvider>)

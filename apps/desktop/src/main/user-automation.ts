@@ -79,6 +79,7 @@ const ADAPTER_KINDS: readonly AdapterKind[] = [
   'trae-cn-cli',
   'cursor-agent',
   'kimi-code-cli',
+  'minimax-code-cli',
   'grok-build',
   'deepseek-harness',
   'zcode-app',

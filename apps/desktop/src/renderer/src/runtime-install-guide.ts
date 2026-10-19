@@ -46,6 +46,7 @@ const GUIDES: Partial<Record<AdapterKind, RuntimeInstallGuide>> = {
   'codebuddy-cli': { docs: 'https://www.codebuddy.ai/docs/cli/quickstart' },
   'qwen-code': { docs: 'https://github.com/QwenLM/qwen-code' },
   'trae-cn-cli': { docs: 'https://www.trae.cn/' },
+  'minimax-code-cli': { docs: 'https://github.com/MiniMax-AI/minimax-code', command: 'curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash', launch: 'mcode login', connectModel: true },
   'kimi-code-cli': { docs: 'https://github.com/MoonshotAI/kimi-cli' },
   'grok-build': { docs: 'https://docs.x.ai/build/overview' },
   'deepseek-harness': { docs: 'https://github.com/deepseek-ai/deepseek-harness', command: 'npm install -g @deepseek-ai/dsh@latest', launch: 'dsh web', connectModel: true },

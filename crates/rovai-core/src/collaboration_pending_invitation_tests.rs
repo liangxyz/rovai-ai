@@ -120,7 +120,9 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
         )
         .unwrap();
         let initial = domain_state(&database, &camp);
-        let send = message(&camp, &["agent_2", "agent_2"], broadcast);
+        let mut send = message(&camp, &["agent_2", "agent_2"], broadcast);
+        // A retired Task association must not block first publication or invitations.
+        send.execution.as_mut().unwrap().task_id = Some("missing-task".into());
 
         // Standalone additions still cannot mutate a Pending Thread.
         let add = service
@@ -189,24 +191,20 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
             )
             .unwrap();
 
-        // These normal rejections happen after tentative membership writes.
+        // An invalid reply rejects after tentative membership writes.
         let mut bad_reply = send.clone();
         bad_reply.reply_to_camp_message_id = Some("missing-message".into());
-        let mut bad_task = send.clone();
-        bad_task.execution.as_mut().unwrap().task_id = Some("missing-task".into());
-        for (label, input) in [("reply", bad_reply), ("task", bad_task)] {
-            let command = envelope(&format!("reject-{broadcast}-{label}"), Some(&camp), input);
-            let rejected = service
-                .send_user_camp_message(&mut database, &command)
-                .unwrap();
-            assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-            assert_eq!(domain_state(&database, &camp), initial);
-            let replay = service
-                .send_user_camp_message(&mut database, &command)
-                .unwrap();
-            assert!(replay.replayed);
-            assert_eq!(replay.result, rejected.result);
-        }
+        let command = envelope(&format!("reject-{broadcast}-reply"), Some(&camp), bad_reply);
+        let rejected = service
+            .send_user_camp_message(&mut database, &command)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(domain_state(&database, &camp), initial);
+        let replay = service
+            .send_user_camp_message(&mut database, &command)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, rejected.result);
 
         // Failure after activation must restore both membership and client presence.
         database
@@ -232,6 +230,16 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
             .send_user_camp_message(&mut database, &command)
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        let task_link: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT json_type(payload_json, '$.taskId') FROM event_log
+                 WHERE camp_id=?1 AND event_type='camp_message.sent'",
+                [&camp],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(task_link, None);
         assert_eq!(
             accepted.result.payload["deliveryIds"]
                 .as_array()

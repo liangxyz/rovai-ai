@@ -297,7 +297,9 @@ pub(crate) fn projected_skill_links_for_claim(
                     .and_then(|result| result.ok())
                     .map(|path| CurrentInputSkillLink {
                         name: entry.name_at_send.clone(),
-                        path,
+                        path: dunce::simplified(Path::new(&path))
+                            .to_string_lossy()
+                            .into_owned(),
                         skill_id: Some(entry.skill_id.clone()),
                         message_index: Some(entry.first_message_index),
                     })
@@ -711,7 +713,9 @@ fn resolve_current_input_skills_v2(
         if let Some(path) = &path {
             links.push(CurrentInputSkillLink {
                 name: selected.name_at_send.clone(),
-                path: path.clone(),
+                path: dunce::simplified(Path::new(path))
+                    .to_string_lossy()
+                    .into_owned(),
                 skill_id: Some(selected.skill_id.clone()),
                 message_index: Some(selected.first_message_index),
             });

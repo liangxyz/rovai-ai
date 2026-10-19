@@ -567,7 +567,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             && !root.is_dir()
         {
             let internal = anyhow::anyhow!(
-                "Claude Code Camp Attachment access root is unavailable: {}",
+                "Claude Code Thread Attachment access root is unavailable: {}",
                 root.display()
             );
             let failure = claude_public_failure(

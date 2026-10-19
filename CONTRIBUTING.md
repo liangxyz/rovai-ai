@@ -22,8 +22,8 @@ User workspace and Runtime-native capabilities
 
 | Layer | Responsibility |
 |---|---|
-| **Rovai Desktop** | The Electron interface for Camps, members, Tasks, execution, approvals, and memory. |
-| **Rovai Core** | The authoritative domain and persistence layer. It owns Camp, Member, Task, Run, approval, evidence, recovery, and memory state. |
+| **Rovai Desktop** | The Electron interface for Threads, members, Tasks, execution, approvals, and memory. |
+| **Rovai Core** | The authoritative domain and persistence layer. It owns Thread, Member, Task, Run, approval, evidence, recovery, and memory state. |
 | **Runtime Adapter Layer** | Connects Rovai to each Runtime's native protocol, CLI, or ACP interface, and maps context, Sessions, permissions, MCP, Skills, and execution evidence. |
 | **Agent Runtime** | Provides model reasoning, native tools, permissions, Sessions, and Runtime-specific capabilities. |
 | **User environment** | The user's workspace, Git repository, Runtime configuration, credentials, model provider, and native tools remain user-controlled. |

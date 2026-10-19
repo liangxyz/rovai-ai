@@ -3,7 +3,7 @@ import { useThreadClient } from './camp-client'
 import { prefersReducedMotion } from './reduced-motion'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useFilePreview } from './FilePreviewContext'
+import { useFilePreview, useFilePreviewApi, canDownloadFile } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
@@ -35,6 +35,7 @@ function revealTab(strip: HTMLDivElement, tab: HTMLElement): void {
 export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
   const language = useInterfaceLanguage()
   const client = useThreadClient()
+  const api = useFilePreviewApi()
   const {
     tabs,
     activeTabId,
@@ -386,9 +387,11 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             style={{ left: menu.left, top: menu.top }}
           >
             {tab.kind === 'file' && <>
-            {(tab.file?.capabilities ?? tab.retainedCapabilities)?.includes('download') && <button role="menuitem" type="button" onClick={() => void runSystemAction(
-              () => download(tab.id), uiAttribute('已开始下载')
-            )}><UiText zh={"下载文件"} /></button>}
+            {canDownloadFile(tab, api) && <button role="menuitem" type="button"
+              disabled={tab.downloadState === 'preparing' || tab.isRefreshing || tab.loadState === 'opening'} onClick={() => {
+                setMenu(null)
+                void download(tab.id)
+              }}><UiText zh={"下载文件"} /></button>}
             {(tab.file?.capabilities ?? tab.retainedCapabilities)?.includes('open_in_system') && <><button role="menuitem" type="button" disabled={!tab.file && !tab.sourceRequest} onClick={() => void runSystemAction(
               () => openInSystem(tab.id),
               uiAttribute('已交给系统默认应用打开')

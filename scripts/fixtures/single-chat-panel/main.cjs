@@ -43,7 +43,8 @@ app.whenReady().then(async () => {
       const node = document.querySelector(${JSON.stringify(selector)})
       if (!node) throw new Error('Missing ' + ${JSON.stringify(selector)})
       node.scrollIntoView({ block: 'nearest' })
-      const rect = node.getBoundingClientRect()
+      // A wrapped inline link's union box can include non-clickable whitespace.
+      const rect = node.getClientRects()[0] ?? node.getBoundingClientRect()
       return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) }
     })()`)
     window.webContents.sendInputEvent({ type: 'mouseMove', ...point })

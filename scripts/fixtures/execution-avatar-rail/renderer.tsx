@@ -4,6 +4,8 @@ import type { AgentProfile, AgentRunView, ThreadComposerDraftView, ThreadSnapsho
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { ThreadWorkspace, type NotificationFocusTarget, type VisibleNotificationSources } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
+import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
+import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 // The actual production workspace, with closed local fixtures. No Core, Runtime or daily data.
@@ -66,7 +68,7 @@ function snapshotFor(count: number, revision: number, recipientCount = 0): Threa
     }
   })
   return {
-    schemaVersion: 35, throughGlobalSequence: revision + 1,
+    schemaVersion: 36, throughGlobalSequence: revision + 1, tasksEnabled: true,
     thread: { id: threadId, title: '执行台头像轨道', activationState: 'active', projectBindingKind: 'directory',
       projectPath: '/fixture/workspace', defaultLeadAgentId: profiles[0]?.agentId ?? null,
       membershipGeneration: 1, version: 1, createdAt: now, updatedAt: now },
@@ -116,6 +118,7 @@ Object.assign(window, { rovai: {
   filePreview: { bindThread: async () => {}, onExternalUpdate: () => () => {} },
   windowControls: { onCloseTabRequested: () => () => {} },
   request: async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
+    if (method === 'preferences.tasks.get') return { enabled: true, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
@@ -335,4 +338,4 @@ function Fixture(): React.JSX.Element {
     </main>
   </div></FilePreviewProvider>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+createRoot(document.getElementById('root')!).render(<ThreadClientProvider client={desktopThreadClient}><Fixture /></ThreadClientProvider>)

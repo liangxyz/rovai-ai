@@ -13,7 +13,7 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/capability-workspace')
 
-test('capability workspaces keep imports, credential reveal and long content usable in one pane', { timeout: 120_000 }, async (t) => {
+test('current Skills, toolbox and MCP preserve reading, member configuration and credential editing', { timeout: 120_000 }, async (t) => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-capability-workspace-test-'))
   let child

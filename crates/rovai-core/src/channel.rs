@@ -1762,7 +1762,7 @@ impl ChannelService {
             }
             if !active {
                 anyhow::bail!(
-                    "channel.topic_membership_sync_failed: requested Agent {agent_id} is not an active Topic Camp collaborator after roster reconciliation"
+                    "channel.topic_membership_sync_failed: requested Agent {agent_id} is not an active Topic Thread collaborator after roster reconciliation"
                 );
             }
         }
@@ -4508,7 +4508,7 @@ impl ChannelService {
             if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
-                    "Only this provider's trusted Channel Host can rotate a DM Camp",
+                    "Only this provider's trusted Channel Host can rotate a DM Thread",
                 ));
             }
             let owner = load_verified_owner_for_app(
@@ -5462,7 +5462,7 @@ impl ChannelService {
             {
                 return Ok(rejected(
                     "channel.project_unavailable",
-                    "The Camp project is no longer available",
+                    "The Thread project is no longer available",
                 ));
             }
 
@@ -5540,7 +5540,7 @@ impl ChannelService {
             let camp_id = binding
                 .camp_id
                 .clone()
-                .context("channel binding Camp creation did not persist an identity")?;
+                .context("channel binding Thread creation did not persist an identity")?;
             let deletion_in_progress: bool = transaction.query_row(
                 "SELECT deletion_operation_id IS NOT NULL FROM camp WHERE id = ?1",
                 [&camp_id],
@@ -5716,7 +5716,7 @@ impl ChannelService {
             let Some(pending) = pending else {
                 return Ok(rejected(
                     "channel.binding.not_found",
-                    "Pending Camp binding does not exist",
+                    "Pending Thread binding does not exist",
                 ));
             };
             if !is_channel_host_for_provider(&envelope.actor, &pending.conversation.provider) {
@@ -5860,7 +5860,7 @@ impl ChannelService {
                 if changed != 1 {
                     return Ok(rejected(
                         "channel.binding.stale_card",
-                        "Pending Camp binding changed before cancellation",
+                        "Pending Thread binding changed before cancellation",
                     ));
                 }
                 insert_project_picker_recall_delivery(
@@ -5967,12 +5967,12 @@ impl ChannelService {
             if active_binding_exists {
                 return Ok(rejected(
                     "channel.binding.already_resolved",
-                    "This channel conversation already has an immutable Camp binding",
+                    "This channel conversation already has an immutable Thread binding",
                 ));
             }
             let messages = load_pending_messages(transaction, &pending.id)?;
             if messages.is_empty() {
-                anyhow::bail!("pending Camp binding has no frozen messages");
+                anyhow::bail!("pending Thread binding has no frozen messages");
             }
             let mut all_targets = BTreeSet::new();
             for message in &messages {
@@ -6008,7 +6008,7 @@ impl ChannelService {
             if changed != 1 {
                 return Ok(rejected(
                     "channel.binding.stale_card",
-                    "Pending Camp binding changed before resolution",
+                    "Pending Thread binding changed before resolution",
                 ));
             }
             let generation: i64 = transaction.query_row(
@@ -6111,7 +6111,7 @@ impl ChannelService {
                 ],
             )?;
             if resolved != 1 {
-                anyhow::bail!("pending Camp binding resolution lost its atomic state");
+                anyhow::bail!("pending Thread binding resolution lost its atomic state");
             }
             insert_project_picker_recall_delivery(
                 transaction,
@@ -6485,7 +6485,7 @@ impl ChannelService {
             if projection.turn_cancel_requested_at.is_some() {
                 return Ok(rejected(
                     "agent_run.turn_cancellation_in_progress",
-                    "The owning CampTurn is already stopping",
+                    "The owning ThreadTurn is already stopping",
                 ));
             }
             let settlement = settle_abortive_agent_run_in_tx(
@@ -7215,7 +7215,7 @@ fn channel_membership_generations(
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .context("channel Camp membership source binding is missing")
+        .context("channel Thread membership source binding is missing")
 }
 
 #[derive(Debug)]
@@ -8436,7 +8436,7 @@ fn append_pending_camp_binding(
     let (pending_binding_id, acknowledgement_app_id, created) =
         if let Some((pending_id, owner_principal_id, acknowledgement_app_id)) = existing {
             if owner_principal_id != frozen.principal_id {
-                anyhow::bail!("pending Camp binding owner identity changed");
+                anyhow::bail!("pending Thread binding owner identity changed");
             }
             (pending_id, acknowledgement_app_id, false)
         } else {
@@ -8651,7 +8651,7 @@ fn rotate_pending_project_picker(
     let picker_message_id = pending
         .authoritative_picker_message_id
         .as_deref()
-        .context("pending Camp binding has no authoritative project picker")?;
+        .context("pending Thread binding has no authoritative project picker")?;
     let nonce = Uuid::new_v4().simple().to_string();
     let next_version = pending.version + 1;
     let changed = transaction.execute(
@@ -8669,7 +8669,7 @@ fn rotate_pending_project_picker(
         ],
     )?;
     if changed != 1 {
-        anyhow::bail!("pending Camp binding changed before picker refresh");
+        anyhow::bail!("pending Thread binding changed before picker refresh");
     }
     insert_pending_project_delivery(
         transaction,
@@ -9228,7 +9228,7 @@ fn create_channel_camp(
 ) -> Result<String> {
     let mut unique_targets = target_agent_ids.iter().cloned().collect::<BTreeSet<_>>();
     if unique_targets.is_empty() {
-        anyhow::bail!("channel Camp requires at least one target Agent");
+        anyhow::bail!("channel Thread requires at least one target Agent");
     }
     for agent_id in &unique_targets {
         let present: bool = transaction.query_row(
@@ -9242,7 +9242,7 @@ fn create_channel_camp(
     }
     let default_lead = unique_targets
         .pop_first()
-        .context("channel Camp requires a Default Lead")?;
+        .context("channel Thread requires a Default Lead")?;
     unique_targets.insert(default_lead.clone());
     let camp_id = ThreadId::new().to_string();
     transaction.execute(

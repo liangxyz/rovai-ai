@@ -1614,7 +1614,7 @@ export function SingleChatPanel({
   }, !!currentSnapshot, 100)
 
   return <>
-    {!mobile && (entryHost ? createPortal(entries, entryHost) : <div className="camp-detail-entry-fallback">{entries}</div>)}
+    {!mobile && (entryHost ? createPortal(entries, entryHost.querySelector('[data-detail-slot="single-chat"]') ?? entryHost) : <div className="camp-detail-entry-fallback">{entries}</div>)}
     <aside
       ref={panelRef}
       id={panelId}

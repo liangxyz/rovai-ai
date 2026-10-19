@@ -2,7 +2,7 @@
 
 Installation links and agent-specific account, model and tool settings. For Rovai’s interface and field descriptions, see [Agents and model configuration](https://rovai.dev/docs/agents.html).
 
-This guide uses **Rovai v0.4.7** as its baseline; selecting Pi thinking levels in Rovai requires **v0.4.8 or later**. Install and authenticate agents on the host running Rovai Desktop or Server.
+This guide uses **Rovai v0.4.7** as its baseline; selecting Pi thinking levels in Rovai requires **v0.4.8 or later**. See the [MiniMax Code section](#minimax-code) for its version scope. Install and authenticate agents on the host running Rovai Desktop or Server.
 
 After configuring the agent’s account and models, find it in Settings → Agents, then select it for a teammate. Existing native credentials and configuration are reused. Browser access uses the installation on the server host.
 
@@ -13,6 +13,7 @@ After configuring the agent’s account and models, find it in Settings → Agen
 | [Codex CLI](https://github.com/openai/codex) | `codex` |
 | [Claude Code](https://code.claude.com/docs/en/setup) | `claude` |
 | [Pi Coding Agent](https://github.com/earendil-works/pi) | `pi` |
+| [MiniMax Code](https://agent.minimax.io/docs/cli/quick-start) ([v0.4.13+](#minimax-code)) | `mcode` |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | `copilot` |
@@ -107,6 +108,51 @@ This example uses GPT-6.1 Sol. Replace the gateway URL and API key. If the file 
 After saving, reopen `/model` in Pi to load the configuration; use `/thinking` to choose a level. In Rovai, open **Teammates → Agent configuration**, open the model picker to refresh the catalog, select a specific model and thinking level, then save. With **Model default**, Rovai does not explicitly set a thinking level.
 
 The Pi commands refer to version 1.1.0. [Pi model configuration](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/models.md) · [GPT-6.1 Sol reasoning levels](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+
+## MiniMax Code: configuration files and thinking levels {#minimax-code}
+
+This section covers the standalone **MiniMax Code (`@minimax-ai/code` / `mcode`)**, using **0.6.12**. The **v0.4.13 download includes MiniMax Code integration**. The native configuration instructions can also be used independently.
+
+### Add levels to an existing custom model
+
+Configure the provider and model in mcode first. The CLI normally reads `~/.minimax/config.yaml`. If `MINIMAX_DATA_DIR` is set, use `config.yaml` inside that directory. Edit the file on the host running Rovai Desktop or Server, using the same data directory as the mcode instance launched by Rovai. [MiniMax CLI configuration](https://agent.minimax.io/docs/cli/configuration)
+
+For a working custom service such as Sub2API, find `custom_provider.<provider-key>.models.<model-id>` and merge these fields. Replace `sub2api` and `your-model-id` with the existing keys. This is a **partial fragment, not a complete configuration file**; retain the endpoint, credentials and other model fields:
+
+```yaml
+custom_provider:
+  sub2api:
+    models:
+      your-model-id:
+        reasoning: true
+        thinking:
+          effortOptions: [low, medium, high, xhigh]
+          defaultEffort: medium
+```
+
+- `reasoning: true` declares thinking support; it does not supply a list of levels.
+- `thinking.effortOptions`: the model's supported thinking levels; this example lists `low / medium / high / xhigh`.
+- `thinking.defaultEffort` is an optional native default, set to `medium` here. It is separate from a conversation selection; do not use `thinking.effort`. To pin a teammate's level, explicitly select and save it in Rovai.
+
+The official BYOK guide documents `effortOptions`; see the [official configuration types](https://github.com/MiniMax-AI/minimax-code/blob/main/packages/config/src/config.ts) for `defaultEffort`. Both fields were checked with mcode 0.6.12. For Sub2API using `openai-responses`, mcode sends ordinary levels in `reasoning.effort`. Declaring a level does not implement it upstream, so verify an actual request. [MiniMax custom model setup guide](https://agent.minimax.io/docs/code/account/byok-agent-setup)
+
+### Refresh and select in Rovai
+
+Save the file, open **Teammates → Run configuration**, choose **MiniMax Code**, and open the model picker to refresh the catalog. Select the **specific model** under the intended provider. When it reports effort options, choose a level and save the run configuration.
+
+Selecting the default model follows mcode's model choice without a separate effort setting. After selecting a specific model, **Model default** for thinking effort means Rovai sends no explicit level. If a custom model still has no options, check the data directory, provider and model keys, and that `effortOptions` is nested under the intended model.
+
+### How do MiniMax's official models differ?
+
+Official models use their native capabilities; they do not need a copy under `custom_provider`. The catalog checked with mcode 0.6.12 exposed:
+
+| Model picker entry | Thinking control |
+| --- | --- |
+| `M3` / `M3 · thinking` | Thinking off / on variants, without graded effort |
+| `M2.7 · thinking` / `M2.7-highspeed · thinking` | Fixed thinking, without graded effort |
+| `M3.1-Flash-Preview · thinking` | `default / low / medium / high / xhigh / max` |
+
+Thinking support does not necessarily include effort selection. The official catalog can change; use the options reported by the selected entry, and do not invent levels for models without that capability. [Official model catalog definitions](https://github.com/MiniMax-AI/minimax-code/blob/main/packages/config/src/minimax-model-catalog.ts)
 
 ## Adding a new agent {#adding-agents}
 

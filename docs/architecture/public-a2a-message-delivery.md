@@ -9,7 +9,7 @@ last_updated: 2026-10-15
 # Public Camp Message、Delivery 与 AgentRun
 
 本架构定义公开 Camp 的统一消息执行主链。字段合同见 [Camp Message Send v25](../contracts/camp-message-send-v25.md)、
-[Message Delivery v18](../contracts/message-delivery-v18.md)、[ContextManifest 39](../contracts/context-manifest-evidence-v39.md)
+[Message Delivery v18](../contracts/message-delivery-v18.md)、[ContextManifest 39](../contracts/context-manifest-evidence-v40.md)
 与 [Camp History v11](../contracts/camp-history-v11.md)。Single Chat 不使用本主链。
 
 ## 三类事实
@@ -101,7 +101,7 @@ Single Chat Pending 接续与 non-batch Run 由自己的提交后通知推进，
 ## 终态、停止与恢复
 
 Run 终态按输入 Delivery 分别写入 `settled | failed | cancelled`。普通 Stop 以精确 `agentRunId + version` CAS，只停止被点击
-的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md) 提交新的独立授权。Runtime 明确未接受且无
+的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v4](../contracts/agent-run-continuation-v4.md) 提交新的独立授权。Runtime 明确未接受且无
 副作用风险时，可以恢复同一冻结 Run 的运输；accepted/unknown 永不作为未执行重新投递。
 
 Run 显示失败不等于旧执行已隔离。Scheduler 在 claim 前分别检查同一 Camp+Agent 的旧执行隔离和实际共享

@@ -138,14 +138,14 @@ test('Qualification dispatch sends the sealed prompt as structured content', asy
   assert.equal(result.commandResult.status, 'accepted')
   assert.deepEqual(calls, [
     {
-      method: 'camp.messages.send',
+      method: 'thread.messages.send',
       params: {
         commandId: 'command-1',
-        campId: 'camp-1',
+        threadId: 'camp-1',
         content: { version: 2, segments: [{ kind: 'text', text: 'Implement the task.' }] },
         sourceAttachments: [],
         quotes: [],
-        replyToCampMessageId: null,
+        replyToThreadMessageId: null,
         execution
       }
     }

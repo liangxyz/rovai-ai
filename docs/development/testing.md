@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-15
+last_updated: 2026-10-17
 ---
 
 # 测试与 Smoke Test
@@ -20,7 +20,7 @@ last_updated: 2026-10-15
 node scripts/smoke-steer.mjs /absolute/empty-fixture /absolute/bin/rovai-core qwen-code
 ```
 
-第三参数为 `codex-cli`（默认）、`claude-code-cli`、`pi`、`codebuddy-cli`、`qwen-code`、`grok-build`、`kiro-cli` 、`zcode-app` 或 `trae-cn-cli`。
+第三参数为 `codex-cli`（默认）、`claude-code-cli`、`pi`、`codebuddy-cli`、`qwen-code`、`grok-build`、`kiro-cli` 、`zcode-app`、`trae-cn-cli` 或 `minimax-code-cli`。
 可选第四参数 `steer-only` 仅验同轮文字与纯附件，`mixed-only` 仅验多队员混合投递，`cancel-only`
 仅验取消后的副作用与后继 Run；默认顺序验证同轮输入、普通后继和多队员混合。混合场景额外调用
 OpenCode 作为忙碌且不支持 Steer 的接收者。Claude 使用本机显式配置的 API，报告记录其 endpoint
@@ -59,6 +59,62 @@ node scripts/probe-steer-version.mjs /absolute/new-fixture /absolute/bin/rovai-c
 有限次数通过只覆盖已执行的场景，不证明所有结束竞态或所有历史版本；边界未覆盖时使用“最早已测通过”，
 不用“最低兼容”。合并后产品证据见[Steer 收口报告](../research/runtime-monitoring/steer-hardening-2026-10-15.md)，
 此前低版本边界见[低版本验证报告](../research/runtime-monitoring/steer-low-versions-2026-10-15.md)。
+
+## MiniMax Code 控制服务验收
+
+先构建配套 Core/CLI，再用实际安装入口运行：
+
+```sh
+cargo build -p rovai-core --bins
+node scripts/smoke-minimax-runtime.mjs /absolute/path/to/mcode
+node scripts/smoke-minimax-runtime.mjs /absolute/path/to/mcode --files-only
+node scripts/smoke-minimax-runtime.mjs /absolute/path/to/mcode --completion-only --fixture-root /absolute/empty-fixture
+node scripts/smoke-minimax-runtime.mjs /absolute/path/to/mcode --questionnaires-only --fixture-root /absolute/empty-fixture
+```
+
+脚本在新建隔离目录启动真实 mcode、生产 Core、确定性 loopback Provider 与 MCP fixture。
+合成 API key 仅用于本地服务，不使用日常账户。覆盖普通 Host 复用、Core 重启同 Session、精确
+缺失 Session 替换、系统层 Bootstrap、图片 Steer 到模型请求、MCP 调用/移除、allow/deny、
+六类命令输出、零发送恢复和取消子进程。脚本模型不能替代真实账户、视觉理解或完整 First-Class
+Golden Flows；短 Run 的异步 journal Usage 可能为空。结果留在打印的临时目录，原始 report
+是私有诊断，只导出白名单摘要；本次数据目录及派生 Runtime Files Root 都不属于日常实例。
+真实模型流程另用 `smoke-acp-runtime.mjs` / `smoke-steer.mjs` 的 `minimax-code-cli` 入口。
+当前证据见[MiniMax 接入报告](../research/minimax-code-runtime/README.md)。
+
+`--completion-only` 通过真实 mcode 和确定性本地 Provider 验证发送后空 final、后继 Host 复用、
+未发送且空 final、发送后原生错误的不同结算。它不调用真实 LLM，不证明问卷已从模型工具清单移除。
+终态修改扩展既有 `accepted_send_suppresses_missing_send_recovery_for_recipient_matrix`（slow-tests）、
+ACP suffix、审批 option、失败重试和 native cursor owners；Usage 生命周期扩展原有 flush partition owner。
+
+`--questionnaires-only` 保持原生问卷工具启用，验证单选、多选、发送后问卷、default 权限模式、
+取消后新指令、Core 重启精确恢复，以及后继普通命令 allow/deny。断言原生问卷为 dismissed、
+答案与注入字段为空、`runtime_questionnaire_unsupported` 及可操作公开提示、失败 Run 不可自动重放；
+已经发送的消息保留。Host 观察使用 Core 直属子进程
+PID 集合，不能替代跨 Session 或并发 Fleet 资格。该矩阵不假造问卷 permission 请求；
+`questionnaire:` option 的防代答反例由既有 extended owner
+`approval_selects_the_exact_native_option_id` 负责。三种 focused 参数互斥。
+
+`--files-only` 验证原生 Read/Write/Edit、绝对/相对及中文空格路径、新建/覆盖/空文件、成功/失败编辑、
+原生 patch 与持久化 Files Changed，并重启 Core 核对卡片。它不启动 Renderer，不能代替点击展开验收。
+真实 CLI 的首轮调查发现显示预览被误记 full_before_after；修复使用原生 details.patch 和 created。
+文件校正扩展既有 `paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`、
+`opencode_write_uses_terminal_metadata_exists_only_with_a_corroborated_path`、
+`pi_edit_patch_is_path_bound_normalized_and_counted_inside_hunks`、
+`acp_tool_events_expose_only_the_public_command_and_payload_digests` owners；不新增 Rust 测试函数。
+
+Rust 不增加平行 owner：模型与 per-model effort 扩展 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`；
+审批 ID 配对扩展 `paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`；
+私有输出字段反例扩展 `acp_command_output_uses_standard_content_and_allowlisted_raw_fallbacks`；
+精确 Session 错误/Steer 归属复用既有 RPC/active-input owners；Usage baseline/重放/身份不符
+扩展 `native_usage` 既有 cursor owners；schema 155 扩展 catalog migration 回滚和历史源收敛 owners。
+修复前真实 0.6.12 审批终态无法关联、输出正文被丢弃；新输入矩阵保留跨 Session/Prompt 和私有字段负例。
+
+```sh
+cargo test -p rovai-core --lib --features extended-tests paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt
+cargo test -p rovai-core --lib --features extended-tests acp_command_output_uses_standard_content_and_allowlisted_raw_fallbacks
+cargo test -p rovai-core --lib --features extended-tests native_
+cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
+```
 
 ## Rust 测试准入与退役门槛
 
@@ -639,14 +695,17 @@ RuntimeDefault 不得作为 `--model` 原生参数，显式模型仍须在 sessi
 
 ### Web 文件资源开销与一致性
 
-`rovai-web::resources::content::tests::bounded_scan_preserves_digest_unicode_and_same_metadata_changes` 拥有分块
-读取的有界保留、UTF-8 跨块、稀疏行号与新鲜摘要校验。修复前每页保留整份文件；原有纯分页 parser owner
-没有文件 I/O 或跨请求摘要事实的 seam，因此该独立 owner 使用单一临时文件与固定修改时间，避免 Core/数据库 fixture。
-最小命令为 `cargo test -p rovai-web resources::content::tests::`。
+`rovai-web::resources::content::tests::candidate_analysis_bounds_paging_and_preserves_other_digest_checks` 拥有候选完整
+分析、分页/定位的读取量与摘要次数、原始修改时间检查、UTF-8 跨块、长行及缩短/空文件的有效位置。
+计数和读取中变化注入只在既有文件夹具中启用。新约定只放宽同候选分页/定位，等大小等修改时间改写
+可以继续读取；新候选、完整正文和父 generation 的摘要验证保留。旧的分页摘要拒绝断言随该合同替换，
+没有删除测试 owner 或其他负向/边界 case。最小命令为 `cargo test -p rovai-web resources::content::tests::`。
 
-既有 `host-web.test.mjs` owner 扩展认证原始字节、相同大小/修改时间下的变化拒绝、上传取消/拒绝/重放清理与
-构建缓存边界。Node SQLite fixture 设置有界 busy timeout，避免与隔离 Host 的正常事务争抢造成偶发失败。
-`camp-adapter.test.ts` 和 `file-digest.test.ts` 分别验证空句柄轮询、Host 确认后的本地图片复用及浏览器摘要缓冲上限。
+既有 `host-web.test.mjs` owner 验证上述属性校验与 generation 接线，并保留认证字节、其他读取的摘要拒绝、
+上传取消/拒绝/重放清理与构建缓存边界。Node SQLite fixture 使用有界 busy timeout。
+`file-preview-service.test.ts` 在真实文件描述符上计数，验证紧接定位的分页只读正文，其他偏移和其他句柄仍定位。
+`file-preview-resources.test.ts` 验证同版本 HTML 只准备一次、摘要不同继续读取、手动/错误/无句柄恢复及新通知水位。
+`camp-adapter.test.ts` 和 `file-digest.test.ts` 继续验证通知接线、Host 确认后的本地图片复用及浏览器摘要缓冲上限。
 手机实际 Host 用例检查上传后无原图回传、刷新后恢复 Host 读取；Run 文案由既有执行组件场景验证。
 `node scripts/measure-host-web-resources.mjs` 对独立 Host 执行 20 MiB / 80 页固定工作量，断言内容与行号一致并记录计时；
 `--legacy-json` 可对旧 Host 记录 Base64 膨胀并核对解码后的原始字节。可用 `ROVAI_HOST_BIN` / `ROVAI_WEB_UI` 选择包内产物。
@@ -985,7 +1044,7 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 | `pnpm smoke:pi-runtime` | Pi 0.84.4+ | 复制官方 Pi auth/settings/models 到临时 0700 `PI_CODING_AGENT_DIR`，隔离 Probe/Native Session/data/workspace；验证 exact cold resume、warm LRU、managed receipt、allow/deny、cancel 无副作用、Action output、locator 隐私与结构化 Usage。自动设置只在 debug Core 有效的 Pi qualification override；结果不是正式平台资格 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 默认十三种可执行实现；Cursor 未准入，Pi 仅 debug 验收 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用二十二项 CLI operation；Automation case 覆盖定义 CRUD、读取、列表与无 Runtime 队员的确定性立即运行失败；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。选择 Pi 时复制官方配置到临时 Home，不污染用户 Session；通过不晋升平台资格 |
+| `pnpm smoke:builtin-cli` | 当前可执行 Runtime；平台和 debug 限制以脚本准入为准 | 先导 Run 通过真实 `rovai` lease 产生普通 Public A2A 与附件，另一 Thread 的 Run 以自己的 lease 执行公开历史 search/read，核对消息 identity、附件和输出 Schema。Operation 集合由脚本 `expectedOperations` 维护；覆盖 Automation、Mission、Member、Task、Memory、Thread 及公开发送。另验证旧 send 输入拒绝、冲突 recovery、release fence、Replay 与后续 Run 新 lease；不存在 Gather capture 或 completion 验收。脚本仍覆盖旧 `camp` 输入别名，输出使用当前 Thread 字段。transport-independent indeterminate 由 CLI response-loss test 覆盖；Pi debug 结果不晋升正式资格 |
 | `pnpm smoke:skills` | 历史受管 Skill Library 的 Codex 默认／十三 Runtime 矩阵 | 保留旧导入、Revision 与原投递路径的兼容验证；不作为 v1.70 原生 Skills／工具箱新路径通过证据。当前 UI 验收见[桌面 UI 验收](ui-acceptance.md)，模型上下文 Gate 见[评测](evaluation.md)；Cursor `.cursor/skills` 仍为 DocumentationOnly，Pi debug 结果不晋升正式资格 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin 并 `NativeWinsSkip`；Kimi 覆盖 stdio、Streamable HTTP 和第二个 stdio Server；默认十一种。Pi 的 External MCP 为 `Unsupported`，不属于本 smoke，保存的 Assignment 在 Pi dispatch 时静默忽略 |
@@ -1565,3 +1624,40 @@ Rust 复用原 owner 并保持所有仍有效的保护：
 `failed_session_replacement`、`uncertain_input_acknowledgement`、`session_header_scan`、`manual_native_session_restart`。
 PR 默认层仍为 `cargo test --workspace`；Renderer 复用 `SingleChatPanel.test.ts`、`App.test.ts` 与 typecheck。
 不新增真实模型调用、常驻验证进程或永久禁用测试。
+
+
+## 会话 Task 开关的合同 owner（2026-10-17）
+
+复用既有 Rust owner，不新增独立 Rust fixture：`lightweight_task_updates_submitted_fields_and_is_terminal`
+扩展默认关闭、旧记录禁读写、精确回执重放、重开、升级数据/冻结证据保留与迁移故障回滚；
+`self_active_tasks_are_compact_bounded_and_frozen_in_input` 与空快照 owner 分别覆盖冻结选择不变、关闭时整节缺席。
+`continuation_rechecks_scope_and_selects_safe_session_at_claim` 保留目标和 Session 栅栏，但 Task 变更不再使等待/续做失败。
+原 Task 推导接收者 owner 改名为 `legacy_task_link_is_ignored_without_changing_explicit_recipients`：
+新 Send 的关联和接收者推导已由 Send v28 退役，显式接收者、消息授权与 raw input 幂等身份仍保留。
+原始 requestId/digest 冲突由既有 `lease_rotates_fences_and_replays_exact_request` owner 验证；
+领域 commandId 仍沿用首次结果重放，不能将运输层的摘要比较强加到领域网关。
+通知 inbox/cursor owner 扩展任务关闭时的 SQL 分页、未读数、变化水位与重新开启断言。
+数据库当前准入和 Steer 升级 owner 更新到 schema 156，继续检查保留的输入唯一性与迁移回滚；
+固定 Task 通知边界继续扩展同一 inbox/cursor owner，验证同值保存不后移、重启保留与已安装 schema 155 升级。
+Task 升级 owner 同时验证 Migration 206 列与收据的原子回滚；没有新增 Rust owner。
+同一 inbox/cursor owner 还验证通知批次携带同事务能力快照、无新通知的切换顺序、空页/reset 快照、同值保存不递增及事务回滚。
+既有通知 Electron owner 覆盖设置 get pending、失败和迟到时普通提醒及精确 Task acknowledgement 各处理一次，
+旧 Task 不补弹、迟到开启批次不能覆盖较新关闭，以及 Host 保存/切换隔离；不新建等待队列或平行 fixture。
+历史夹具的降级只用于测试，生产迁移不修改旧输入字节。
+Pending invitation owner 将旧 `execution.taskId` 从拒绝分支移到成功发送分支，验证未知旧 Task
+不会阻断首次发布/邀请，且不建立关联；无效回复、权限拒绝和事务回滚断言保留。
+`user_continuation_preserves_source_and_claims_independent_fifo_batches` 在原输入冻结后显式开启 Task，
+继续验证新 claim 选择当前任务、原输入不变、独立 FIFO 与完整历史读取。
+CLI 解析与教学 owner 保留文件输入矩阵并覆盖旧 taskId 兼容；`pnpm test:send-input-file` 的唯一进程 owner
+增加缺失/损坏/旧版/未来版/无 lease 投影、关闭错误和帮助零 IPC。普通 Rust/Renderer 通过不能替代该进程检查。
+
+最小定向命令为 `cargo test -p rovai-core --lib --features slow-tests,extended-tests task`、
+`cargo test -p rovai-core --lib --features slow-tests,extended-tests continuation_rechecks_scope_and_selects_safe_session_at_claim`、
+`cargo test -p rovai-core --bin rovai` 和 `pnpm test:send-input-file`。
+
+### 当前 Skills 设置的验收归属
+
+`pnpm test:capability-workspace` 挂载生产 `NativeSkillsSettings`、`ToolboxSettings` 和 `McpSettings`。
+它拥有原生文件阅读、失败恢复、迟到响应、键盘导航、逐队员配置与 MCP 凭据编辑的 Electron 交互覆盖；
+完整范围见 [fixture 说明](../../scripts/fixtures/capability-workspace/README.md)。旧 `SkillSettings` 页面及仅服务
+旧导入／交付组的单元测试已退役。Core 的历史 Library、Revision、投影恢复与兼容测试继续拥有旧数据路径。

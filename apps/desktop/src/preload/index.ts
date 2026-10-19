@@ -63,6 +63,7 @@ async function invokeHostWeb<T>(operation: string, input?: unknown): Promise<T> 
 
 const api: RovaiApi = {
   shortcuts: {
+    setTasksEnabled: (enabled) => ipcRenderer.invoke('rovai:shortcuts-tasks-enabled', enabled),
     get: () => ipcRenderer.invoke('rovai:shortcuts-get'),
     save: input => ipcRenderer.invoke('rovai:shortcuts-save', input),
     setRecording: recording => ipcRenderer.invoke('rovai:shortcuts-recording', recording),

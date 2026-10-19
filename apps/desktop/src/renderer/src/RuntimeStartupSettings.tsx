@@ -1,7 +1,7 @@
 import { useThreadClient } from './camp-client'
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { AdapterKind, HealthStatus, RuntimeStartupInspection } from '@contracts'
+import type { AdapterKind, RuntimeStatus, RuntimeStartupInspection } from '@contracts'
 import { configurationFromSnapshot, conflictValue, editableSnapshot, withSnapshotValue, type FieldConflict, type RuntimeStartupConfiguration, type RuntimeStartupSettings as StartupSettings } from './runtime-startup-editor'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader, DialogControlIcon } from './AppDialog'
 import { adapterLabel, PRODUCT_RUNTIME_LOGOS } from './runtime-products'
@@ -16,7 +16,7 @@ const INSPECTION_LABELS: Record<RuntimeStartupInspection['status'], string> = {
 }
 
 export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
-  runtimeKind: AdapterKind; health: HealthStatus | null; onBack(): void
+  runtimeKind: AdapterKind; health: RuntimeStatus | null; onBack(): void
 }): React.JSX.Element {
   const client = useThreadClient()
   const [saved, setSaved] = useState<StartupSettings | null>(null)

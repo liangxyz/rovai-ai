@@ -154,6 +154,7 @@ interface PreviewHandleRecord {
   allowChildren: boolean
   lastUsedAt: number
   activeReads?: number
+  resolvedLine?: { offset: number; line: number }
   retention?: FilePreviewRetentionState['handles'][number]
 }
 
@@ -496,7 +497,8 @@ export class FilePreviewService {
         }
       }
       if (text === null) return failed('decode_failed', '这个文件不是有效的 UTF-8 文本。')
-      const startLine = await this.#lineAtOffset(record, request.offset)
+      const startLine = record.resolvedLine?.offset === request.offset
+        ? record.resolvedLine.line : await this.#lineAtOffset(record, request.offset)
       const endOffset = request.offset + decodedLength
       return ok({
         text,
@@ -529,6 +531,7 @@ export class FilePreviewService {
           offset += 1
         }
       }
+      record.resolvedLine = { offset, line }
       return ok({ offset, line, contentGeneration: record.generation })
     } catch (error) {
       return this.#errorResult(error)

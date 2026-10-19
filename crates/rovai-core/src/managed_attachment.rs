@@ -690,8 +690,8 @@ impl ManagedAttachmentStore {
         let attachment_root = camp_root.join("attachments");
         let gate = managed_camp_root_gate(&attachment_root);
         let _admission = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        validate_existing_directory(&camps_root, "Runtime Camp parent")?;
-        validate_existing_directory(&camp_root, "Runtime Camp root")?;
+        validate_existing_directory(&camps_root, "Runtime Thread parent")?;
+        validate_existing_directory(&camp_root, "Runtime Thread root")?;
         validate_existing_directory(&attachment_root, "Runtime Attachment root")?;
         let managed_root = attachment_root.join(MANAGED_DIRECTORY);
         if managed_root.exists() {
@@ -785,7 +785,7 @@ impl ManagedAttachmentService {
             || state != "pending"
             || promoted_at.is_none()
         {
-            anyhow::bail!("Managed Attachment ingest is not ready for this CampMessage");
+            anyhow::bail!("Managed Attachment ingest is not ready for this ThreadMessage");
         }
         let document: IngestPlanDocument = serde_json::from_str(&plan_json)
             .context("Managed Attachment ingest plan is invalid")?;
@@ -799,7 +799,9 @@ impl ManagedAttachmentService {
                 |row| row.get(0),
             )?;
             if actual_revision != expected_revision {
-                anyhow::bail!("Camp Composer Draft revision changed before Managed ingest commit");
+                anyhow::bail!(
+                    "Thread Composer Draft revision changed before Managed ingest commit"
+                );
             }
             let stored_ids = {
                 let mut statement = transaction.prepare(
@@ -820,7 +822,7 @@ impl ManagedAttachmentService {
                 .collect::<Vec<_>>();
             if stored_ids != planned_ids {
                 anyhow::bail!(
-                    "Camp Composer Draft attachments changed before Managed ingest commit"
+                    "Thread Composer Draft attachments changed before Managed ingest commit"
                 );
             }
         }
@@ -831,7 +833,7 @@ impl ManagedAttachmentService {
         )?;
         let available_revision = current_revision
             .checked_add(1)
-            .context("Camp attachment revision overflow")?;
+            .context("Thread attachment revision overflow")?;
         let changed = transaction.execute(
             r#"
             UPDATE camp SET attachment_revision = ?2, version = version + 1, updated_at = ?3
@@ -840,7 +842,7 @@ impl ManagedAttachmentService {
             params![camp_id, available_revision, now, current_revision],
         )?;
         if changed != 1 {
-            anyhow::bail!("Camp attachment revision changed before Managed ingest commit");
+            anyhow::bail!("Thread attachment revision changed before Managed ingest commit");
         }
         let mut attachment_ids = Vec::with_capacity(document.entries.len());
         for entry in document.entries {
@@ -932,7 +934,7 @@ impl ManagedAttachmentService {
                     |row| row.get(0),
                 )
                 .optional()?
-                .context("Managed Attachment is unavailable in this Camp")?;
+                .context("Managed Attachment is unavailable in this Thread")?;
             let display_name = validate_root_relative_path(&relative_path)?
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -1225,7 +1227,7 @@ fn load_composer_sources(
         |row| row.get(0),
     )?;
     if actual_revision != draft_revision {
-        anyhow::bail!("Camp Composer Draft revision changed before Managed ingest");
+        anyhow::bail!("Thread Composer Draft revision changed before Managed ingest");
     }
     let rows = {
         let mut statement = connection.prepare(
@@ -1254,7 +1256,7 @@ fn load_composer_sources(
         .map(String::as_str)
         .collect::<Vec<_>>();
     if stored_ids != requested_ids {
-        anyhow::bail!("Camp Composer Draft attachments changed before Managed ingest");
+        anyhow::bail!("Thread Composer Draft attachments changed before Managed ingest");
     }
     rows.into_iter()
         .map(|(_, storage_path, media_type, byte_size, content_digest)| {
@@ -1297,7 +1299,7 @@ fn check_quota(transaction: &Transaction<'_>, camp_id: &str, requested: u64) -> 
         |row| row.get(0),
     )?;
     if u64::try_from(camp_used)?.saturating_add(requested) > MAX_CAMP_VIEW_BYTES {
-        anyhow::bail!("Camp Managed Attachment quota exceeded");
+        anyhow::bail!("Thread Managed Attachment quota exceeded");
     }
     if u64::try_from(instance_used)?.saturating_add(requested) > MAX_INSTANCE_VIEW_BYTES {
         anyhow::bail!("Instance Managed Attachment quota exceeded");

@@ -205,25 +205,41 @@ pub async fn git_health(path: Option<PathBuf>) -> CommandHealth {
     command_health("git", &["--version"], Some(path)).await
 }
 
-pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
+pub struct CodexCapabilityProbe {
+    pub result: AgentRuntimeProbeResult,
+    pub raw_model_catalog: Option<Value>,
+}
+
+pub async fn codex_capability_probe_at(
+    path: &Path,
+    fingerprint: Option<&str>,
+    version: Option<&str>,
+) -> CodexCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
-        return probe_result(
-            Some(path_text),
-            None,
-            None,
-            AgentRuntimeProbeStatus::NotInstalled,
-            Vec::new(),
-            required_capability_names(),
-            Some("Configured Codex executable does not exist.".into()),
-            probed_at,
-        );
+        return CodexCapabilityProbe {
+            raw_model_catalog: None,
+            result: probe_result(
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::NotInstalled,
+                Vec::new(),
+                required_capability_names(),
+                Some("Configured Codex executable does not exist.".into()),
+                probed_at,
+            ),
+        };
     }
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let fingerprint = executable_fingerprint_async(path.clone()).await;
-    let mut result = codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await;
-    redact_probe(AdapterKind::CodexCli, &mut result);
+    let fingerprint = match fingerprint {
+        Some(value) => Some(value.to_owned()),
+        None => executable_fingerprint_async(path.clone()).await,
+    };
+    let mut result =
+        codex_runtime_probe_uncached(path, path_text, fingerprint, version, probed_at).await;
+    redact_probe(AdapterKind::CodexCli, &mut result.result);
     result
 }
 
@@ -231,8 +247,16 @@ pub async fn acp_capability_probe_at_for_purpose(
     path: &Path,
     kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
+    fingerprint: Option<&str>,
 ) -> AcpCapabilityProbe {
-    let mut probe = acp_probe_at(path, kind, acp_deep_session_probe_enabled(kind), purpose).await;
+    let mut probe = acp_probe_at(
+        path,
+        kind,
+        acp_deep_session_probe_enabled(kind),
+        purpose,
+        fingerprint,
+    )
+    .await;
     redact_probe(kind, &mut probe.result);
     // Capability/session results remain protocol data for catalog and compatibility
     // consumers. Only the diagnostic view above is scrubbed.
@@ -268,14 +292,20 @@ fn runtime_launch_disallowed_detail(purpose: RuntimeLaunchPurpose) -> String {
     format!("runtime_launch_disallowed_for_{purpose}")
 }
 
-pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
-    let mut probe = claude_code_probe_at(path).await;
+pub async fn claude_code_capability_probe_at(
+    path: &Path,
+    fingerprint: Option<&str>,
+) -> ClaudeCodeCapabilityProbe {
+    let mut probe = claude_code_probe_at(path, fingerprint).await;
     redact_probe(AdapterKind::ClaudeCodeCli, &mut probe.result);
     probe
 }
 
-pub async fn antigravity_capability_probe_at(path: &Path) -> AntigravityCapabilityProbe {
-    antigravity_probe_at(path, true).await
+pub async fn antigravity_capability_probe_at(
+    path: &Path,
+    fingerprint: Option<&str>,
+) -> AntigravityCapabilityProbe {
+    antigravity_probe_at(path, true, fingerprint).await
 }
 
 /// Only the existing verified snapshot authorizes omitting full checks. Session
@@ -379,7 +409,7 @@ pub async fn refresh_model_catalog_for_selection(
     })
 }
 
-pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
+pub async fn pi_capability_probe_at(path: &Path, fingerprint: Option<&str>) -> PiCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
@@ -399,7 +429,10 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
         };
     }
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let fingerprint = executable_fingerprint_async(path.clone()).await;
+    let fingerprint = match fingerprint {
+        Some(value) => Some(value.to_owned()),
+        None => executable_fingerprint_async(path.clone()).await,
+    };
     let mut version_command = runtime_command(&path, Some(AdapterKind::Pi));
     version_command.arg("--version").stdin(Stdio::null());
     let version = bounded_output(&mut version_command, Duration::from_secs(5))
@@ -509,7 +542,7 @@ fn classify_pi_probe_failure(detail: &str) -> (AgentRuntimeProbeStatus, &'static
     )
 }
 
-async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
+async fn claude_code_probe_at(path: &Path, fingerprint: Option<&str>) -> ClaudeCodeCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
@@ -534,7 +567,10 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         );
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    let fingerprint = match fingerprint {
+        Some(value) => Some(value.to_owned()),
+        None => executable_fingerprint_async(canonical.clone()).await,
+    };
     let mut version_command = runtime_command(&canonical, Some(AdapterKind::ClaudeCodeCli));
     version_command.arg("--version");
     let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
@@ -828,10 +864,14 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
 /// Antigravity sends input in argv and cannot initialize without it. Its launch
 /// exception checks CLI flags and account/model access, never the display version.
 pub async fn antigravity_launch_preflight_at(path: &Path) -> AntigravityCapabilityProbe {
-    antigravity_probe_at(path, false).await
+    antigravity_probe_at(path, false, None).await
 }
 
-async fn antigravity_probe_at(path: &Path, include_version: bool) -> AntigravityCapabilityProbe {
+async fn antigravity_probe_at(
+    path: &Path,
+    include_version: bool,
+    fingerprint: Option<&str>,
+) -> AntigravityCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
@@ -856,7 +896,10 @@ async fn antigravity_probe_at(path: &Path, include_version: bool) -> Antigravity
         );
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    let fingerprint = match fingerprint {
+        Some(value) => Some(value.to_owned()),
+        None => executable_fingerprint_async(canonical.clone()).await,
+    };
     let reported_version = if include_version {
         let mut version_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
         version_command.arg("--version");
@@ -1558,6 +1601,7 @@ async fn acp_probe_at(
     kind: AdapterKind,
     include_session: bool,
     purpose: RuntimeLaunchPurpose,
+    fingerprint: Option<&str>,
 ) -> AcpCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
@@ -1577,6 +1621,7 @@ async fn acp_probe_at(
             | AdapterKind::ClineCli
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
+            | AdapterKind::MinimaxCodeCli
             | AdapterKind::ZcodeApp
     ) {
         return AcpCapabilityProbe {
@@ -1613,7 +1658,10 @@ async fn acp_probe_at(
         };
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    let fingerprint = match fingerprint {
+        Some(value) => Some(value.to_owned()),
+        None => executable_fingerprint_async(canonical.clone()).await,
+    };
     if !runtime_launch_allowed(kind, purpose) {
         return AcpCapabilityProbe {
             result: agent_probe_result(
@@ -2120,6 +2168,56 @@ async fn run_acp_probe_with_scope(
                 session["_meta"]["rovaiDshOptionsContext"] = json!(context);
                 session["_meta"]["rovaiDshOptionsObservedAt"] =
                     json!(chrono::Utc::now().to_rfc3339());
+            }
+            if kind == AdapterKind::MinimaxCodeCli {
+                // ACP advertises thinking effort only for the selected model. Probe
+                // each native ID in this disposable Session; no inference or global
+                // provider change is involved. Restore its initial selection afterward.
+                let models =
+                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
+                anyhow::ensure!(
+                    models.len() <= 256,
+                    "MiniMax model catalog exceeds probe bound"
+                );
+                let original =
+                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session)
+                        .context("MiniMax default model missing")?;
+                let mut options = serde_json::Map::new();
+                for (index, model) in models.iter().enumerate() {
+                    let id = 1000 + index as u64;
+                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
+                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":model.id}})).await?;
+                    // Native catalogs may include an unconfigured Provider or a
+                    // variant that this release cannot select. Its unavailable
+                    // options must not hide the working native default/catalog.
+                    let Ok(selected) = read_rpc_result(lines, id).await else {
+                        continue;
+                    };
+                    anyhow::ensure!(
+                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
+                            .as_deref()
+                            == Some(model.id.as_str()),
+                        "MiniMax did not confirm model selection"
+                    );
+                    let chosen = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                        kind, &selected,
+                    )?
+                    .into_iter()
+                    .find(|entry| entry.id == model.id)
+                    .context("MiniMax selected model missing")?;
+                    options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
+                }
+                write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":2000, "method":"session/set_config_option",
+                    "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
+                let restored = read_rpc_result(lines, 2000).await?;
+                anyhow::ensure!(
+                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&restored)
+                        .as_deref()
+                        == Some(original.as_str()),
+                    "MiniMax did not restore probe selection"
+                );
+                session["configOptions"] = restored["configOptions"].clone();
+                session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
             }
             let session_id = session
                 .get("sessionId")
@@ -2723,7 +2821,7 @@ pub fn configure_acp_command(
         AdapterKind::CursorAgent => {
             command.arg("acp");
         }
-        AdapterKind::KimiCodeCli => {
+        AdapterKind::KimiCodeCli | AdapterKind::MinimaxCodeCli => {
             command.arg("acp");
         }
         AdapterKind::CommandCodeCli => {
@@ -2835,7 +2933,7 @@ fn acp_observed_capabilities(
     }
     if matches!(
         kind,
-        AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli
+        AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::MinimaxCodeCli
     ) {
         capabilities.retain(|capability| capability != "workspace.additional_roots");
     }
@@ -2850,7 +2948,10 @@ fn acp_observed_capabilities(
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
-    if matches!(kind, AdapterKind::CommandCodeCli) {
+    if matches!(
+        kind,
+        AdapterKind::CommandCodeCli | AdapterKind::MinimaxCodeCli
+    ) {
         return [
             "acp.initialize",
             "session.new",
@@ -2973,6 +3074,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
+            | AdapterKind::MinimaxCodeCli
     )
 }
 
@@ -3030,17 +3132,39 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
                             "name": "rovai_probe",
                             "title": "Rovai-ai Runtime Probe",
                             "version": env!("CARGO_PKG_VERSION")
-                        }
+                        },
+                        "capabilities": { "experimentalApi": true }
                     }
                 }),
             )
             .await?;
-            read_rpc_result(lines, 1).await?;
+            let initialized = read_rpc_result(lines, 1).await?;
+            anyhow::ensure!(
+                initialized
+                    .get("userAgent")
+                    .and_then(Value::as_str)
+                    .is_some(),
+                "initialize result did not include userAgent"
+            );
             write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
+
+            write_json_line(
+                stdin,
+                &json!({
+                    "method": "account/read", "id": 2,
+                    "params": { "refreshToken": false }
+                }),
+            )
+            .await?;
+            let account = read_rpc_result(lines, 2).await?;
+            anyhow::ensure!(
+                crate::codex::authentication_available_from_account(&account),
+                "Codex authentication is required"
+            );
 
             let mut models = Vec::new();
             let mut cursor: Option<String> = None;
-            let mut request_id = 2_u64;
+            let mut request_id = 3_u64;
             loop {
                 write_json_line(
                     stdin,
@@ -3069,7 +3193,7 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
                     break;
                 }
                 request_id += 1;
-                if request_id > 101 {
+                if request_id > 102 {
                     bail!("model/list exceeded the pagination safety limit");
                 }
             }
@@ -3077,7 +3201,8 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
         };
         timeout(Duration::from_secs(30), query)
             .await
-            .context("model/list timed out")?
+            .context("Codex app-server query timed out")
+            .and_then(|result| result)
     };
     let stderr = process.finish().await?;
     match result {
@@ -3132,115 +3257,100 @@ async fn codex_runtime_probe_uncached(
     path: PathBuf,
     path_text: String,
     fingerprint: Option<String>,
+    known_version: Option<&str>,
     probed_at: String,
-) -> AgentRuntimeProbeResult {
-    let mut version_command = runtime_command(&path, Some(AdapterKind::CodexCli));
-    version_command.arg("--version");
-    let version_output = match bounded_output(&mut version_command, Duration::from_secs(15)).await {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            return probe_result(
-                Some(path_text),
-                None,
-                fingerprint,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                Vec::new(),
-                required_capability_names(),
-                Some(command_detail(
-                    &output.stdout.bytes,
-                    &output.stderr.bytes,
-                    "Codex version check failed",
-                )),
-                probed_at,
-            );
-        }
-        Err(error) => {
-            return probe_result(
-                Some(path_text),
-                None,
-                fingerprint,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                Vec::new(),
-                required_capability_names(),
-                Some(format!("failed to inspect Codex CLI: {error}")),
-                probed_at,
-            );
-        }
+) -> CodexCapabilityProbe {
+    let reported_version = if let Some(version) = known_version {
+        Some(version.to_owned())
+    } else {
+        let mut version_command = runtime_command(&path, Some(AdapterKind::CodexCli));
+        version_command.arg("--version");
+        let version_output =
+            match bounded_output(&mut version_command, Duration::from_secs(15)).await {
+                Ok(output) if output.status.success() => output,
+                Ok(output) => {
+                    return CodexCapabilityProbe {
+                        raw_model_catalog: None,
+                        result: probe_result(
+                            Some(path_text),
+                            None,
+                            fingerprint,
+                            AgentRuntimeProbeStatus::ProbeFailed,
+                            Vec::new(),
+                            required_capability_names(),
+                            Some(command_detail(
+                                &output.stdout.bytes,
+                                &output.stderr.bytes,
+                                "Codex version check failed",
+                            )),
+                            probed_at,
+                        ),
+                    };
+                }
+                Err(error) => {
+                    return CodexCapabilityProbe {
+                        raw_model_catalog: None,
+                        result: probe_result(
+                            Some(path_text),
+                            None,
+                            fingerprint,
+                            AgentRuntimeProbeStatus::ProbeFailed,
+                            Vec::new(),
+                            required_capability_names(),
+                            Some(format!("failed to inspect Codex CLI: {error}")),
+                            probed_at,
+                        ),
+                    };
+                }
+            };
+        Some(
+            String::from_utf8_lossy(&version_output.stdout.bytes)
+                .trim()
+                .to_string(),
+        )
     };
-    let reported_version = Some(
-        String::from_utf8_lossy(&version_output.stdout.bytes)
-            .trim()
-            .to_string(),
-    );
 
-    let mut auth_command = runtime_command(&path, Some(AdapterKind::CodexCli));
-    auth_command.args(["login", "status"]);
-    let mut initialized = false;
-    match bounded_output(&mut auth_command, Duration::from_secs(15)).await {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => {
-            // `login status` describes OpenAI login, not a custom provider's
-            // native env_key authentication. Let app-server identify the active
-            // provider; absent or malformed evidence must still fail closed.
-            if probe_initialize_handshake(&path, true).await.is_ok() {
-                initialized = true;
+    let raw_model_catalog = match codex_model_catalog(&path).await {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            let detail = format!("Codex app-server check failed: {error:#}");
+            let status = if detail.contains("Codex authentication is required") {
+                AgentRuntimeProbeStatus::AuthenticationRequired
             } else {
-                return probe_result(
+                AgentRuntimeProbeStatus::ProbeFailed
+            };
+            return CodexCapabilityProbe {
+                raw_model_catalog: None,
+                result: probe_result(
                     Some(path_text),
                     reported_version,
                     fingerprint,
-                    AgentRuntimeProbeStatus::AuthenticationRequired,
+                    status,
                     Vec::new(),
                     required_capability_names(),
-                    Some(command_detail(
-                        &output.stdout.bytes,
-                        &output.stderr.bytes,
-                        "Codex authentication is required",
-                    )),
+                    Some(detail),
                     probed_at,
-                );
-            }
+                ),
+            };
         }
-        Err(error) => {
-            return probe_result(
-                Some(path_text),
-                reported_version,
-                fingerprint,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                Vec::new(),
-                required_capability_names(),
-                Some(format!("failed to inspect Codex authentication: {error}")),
-                probed_at,
-            );
-        }
-    }
-
-    if !initialized && let Err(error) = probe_initialize_handshake(&path, false).await {
-        return probe_result(
-            Some(path_text),
-            reported_version,
-            fingerprint,
-            AgentRuntimeProbeStatus::ProbeFailed,
-            Vec::new(),
-            required_capability_names(),
-            Some(format!("Codex app-server handshake failed: {error:#}")),
-            probed_at,
-        );
-    }
+    };
 
     let (mut capabilities, missing_capabilities) = match probe_schema_capabilities(&path).await {
         Ok(result) => result,
         Err(error) => {
-            return probe_result(
-                Some(path_text),
-                reported_version,
-                fingerprint,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                vec!["app_server.initialize".into()],
-                required_capability_names(),
-                Some(format!("Codex capability schema probe failed: {error:#}")),
-                probed_at,
-            );
+            return CodexCapabilityProbe {
+                raw_model_catalog: None,
+                result: probe_result(
+                    Some(path_text),
+                    reported_version,
+                    fingerprint,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    vec!["app_server.initialize".into()],
+                    required_capability_names(),
+                    Some(format!("Codex capability schema probe failed: {error:#}")),
+                    probed_at,
+                ),
+            };
         }
     };
     capabilities.insert(0, "app_server.initialize".into());
@@ -3256,121 +3366,18 @@ async fn codex_runtime_probe_uncached(
             missing_capabilities.join(", ")
         )
     });
-    probe_result(
-        Some(path_text),
-        reported_version,
-        fingerprint,
-        status,
-        capabilities,
-        missing_capabilities,
-        detail,
-        probed_at,
-    )
-}
-
-async fn probe_initialize_handshake(path: &Path, require_external_provider: bool) -> Result<()> {
-    let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
-    command.args(["app-server", "--listen", "stdio://"]);
-    let mut process =
-        RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
-            .with_context(|| format!("failed to start {} app-server", path.display()))?;
-    let result = {
-        let (stdin, lines) = process.split_io()?;
-        let handshake = async {
-            let initialize = json!({
-                "method": "initialize",
-                "id": 1,
-                "params": {
-                    "clientInfo": {
-                        "name": "rovai_probe",
-                        "title": "Rovai-ai Runtime Probe",
-                        "version": env!("CARGO_PKG_VERSION")
-                    },
-                    "capabilities": {
-                        "experimentalApi": true
-                    }
-                }
-            });
-            stdin
-                .write_all(serde_json::to_string(&initialize)?.as_bytes())
-                .await?;
-            stdin.write_all(b"\n").await?;
-            stdin.flush().await?;
-
-            while let Some(line) = lines.next_line().await? {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let message: Value =
-                    serde_json::from_str(&line).context("invalid initialize response")?;
-                if message.get("id").and_then(Value::as_u64) != Some(1) {
-                    continue;
-                }
-                if let Some(error) = message.get("error") {
-                    bail!("initialize was rejected: {error}");
-                }
-                let result = message
-                    .get("result")
-                    .context("initialize result was missing")?;
-                if result.get("userAgent").and_then(Value::as_str).is_none() {
-                    bail!("initialize result did not include userAgent");
-                }
-                stdin
-                    .write_all(
-                        serde_json::to_string(&json!({"method": "initialized", "params": {}}))?
-                            .as_bytes(),
-                    )
-                    .await?;
-                stdin.write_all(b"\n").await?;
-                stdin.flush().await?;
-                if !require_external_provider {
-                    return Ok(());
-                }
-                stdin
-                    .write_all(
-                        serde_json::to_string(&json!({
-                            "method": "account/read", "id": 2,
-                            "params": { "refreshToken": false }
-                        }))?
-                        .as_bytes(),
-                    )
-                    .await?;
-                stdin.write_all(b"\n").await?;
-                stdin.flush().await?;
-                while let Some(line) = lines.next_line().await? {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    let account: Value =
-                        serde_json::from_str(&line).context("invalid account/read response")?;
-                    if account.get("id").and_then(Value::as_u64) != Some(2) {
-                        continue;
-                    }
-                    anyhow::ensure!(
-                        account.get("error").is_none()
-                            && account
-                                .pointer("/result/requiresOpenaiAuth")
-                                .and_then(Value::as_bool)
-                                == Some(false),
-                        "active provider did not confirm that OpenAI login is unnecessary"
-                    );
-                    return Ok(());
-                }
-                bail!("app-server exited before account/read completed");
-            }
-            bail!("app-server exited before initialize completed")
-        };
-        timeout(Duration::from_secs(15), handshake)
-            .await
-            .context("initialize timed out")?
-    };
-    let stderr = process.finish().await?;
-    match result {
-        Ok(()) => Ok(()),
-        Err(error) if stderr.bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
-            Err(error.context(format!("app-server stderr: {}", stderr.lossy_text())))
-        }
-        Err(error) => Err(error),
+    CodexCapabilityProbe {
+        raw_model_catalog: Some(raw_model_catalog),
+        result: probe_result(
+            Some(path_text),
+            reported_version,
+            fingerprint,
+            status,
+            capabilities,
+            missing_capabilities,
+            detail,
+            probed_at,
+        ),
     }
 }
 
@@ -3716,6 +3723,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         ),
         AdapterKind::CursorAgent => (&["ROVAI_CURSOR_BIN"][..], "cursor-agent"),
         AdapterKind::KimiCodeCli => (&["ROVAI_KIMI_BIN"][..], "kimi"),
+        AdapterKind::MinimaxCodeCli => (&["ROVAI_MINIMAX_CODE_BIN"][..], "mcode"),
         AdapterKind::GrokBuild => (&["ROVAI_GROK_BIN"][..], "grok"),
         AdapterKind::DeepseekHarness => (&["ROVAI_DEEPSEEK_HARNESS_BIN"][..], "dsh"),
         AdapterKind::ClineCli => (&["ROVAI_CLINE_BIN"][..], "cline"),
@@ -3776,8 +3784,8 @@ mod tests {
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
     use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
 
-    // Owns Codex's login/provider process boundary. The ACP Home fixture uses
-    // another protocol and cannot establish the meaning of account/read.
+    // Owns Codex's combined no-input process boundary, native authentication,
+    // pagination and cleanup; the ACP fixtures cannot establish account/read semantics.
     #[tokio::test]
     async fn codex_probe_requires_login_unless_native_provider_explicitly_waives_it() {
         let python = std::process::Command::new("python3")
@@ -3786,92 +3794,146 @@ mod tests {
             .unwrap();
         assert!(python.status.success());
         let python = String::from_utf8(python.stdout).unwrap();
-        for (login, account, admits) in [
+        for (account, expected) in [
             (
-                false,
+                json!({"result":{"account":{"type":"chatgpt"}}}),
+                AgentRuntimeProbeStatus::Ready,
+            ),
+            (
                 json!({"result":{"account":null,"requiresOpenaiAuth":false}}),
-                true,
+                AgentRuntimeProbeStatus::Ready,
             ),
             (
-                false,
                 json!({"result":{"account":null,"requiresOpenaiAuth":true}}),
-                false,
+                AgentRuntimeProbeStatus::AuthenticationRequired,
             ),
-            (false, json!({"result":{"account":null}}), false),
             (
-                false,
+                json!({"result":{"account":null}}),
+                AgentRuntimeProbeStatus::AuthenticationRequired,
+            ),
+            (
                 json!({"result":{"requiresOpenaiAuth":"false"}}),
-                false,
+                AgentRuntimeProbeStatus::AuthenticationRequired,
             ),
             (
-                false,
                 json!({"error":{"code":-32601},"result":{"requiresOpenaiAuth":false}}),
-                false,
+                AgentRuntimeProbeStatus::ProbeFailed,
             ),
-            (true, json!({"error":{"code":-32601}}), true),
         ] {
-            let root = env::temp_dir().join(format!("rovai-codex-auth-{}", uuid::Uuid::new_v4()));
-            let _cleanup = ProbeRootCleanup(root.clone());
-            fs::create_dir_all(&root).unwrap();
-            fs::write(
-                root.join("case.json"),
-                json!({"login":login,"account":account}).to_string(),
-            )
-            .unwrap();
-            let binary = root.join("codex");
-            fs::write(&binary, format!("#!{}\n{}", python.trim(), r#"
-import json, pathlib, sys
+            for experimental in [false, true] {
+                let root =
+                    env::temp_dir().join(format!("rovai-codex-auth-{}", uuid::Uuid::new_v4()));
+                let _cleanup = ProbeRootCleanup(root.clone());
+                fs::create_dir_all(&root).unwrap();
+                let mut schemas = std::collections::BTreeMap::<&str, Vec<&str>>::new();
+                for (_, file, token) in REQUIRED_CODEX_CAPABILITIES {
+                    schemas
+                        .entry(file)
+                        .or_default()
+                        .push(token.trim_matches('"'));
+                }
+                fs::write(
+                    root.join("case.json"),
+                    json!({"account":account,"schemas":schemas,"experimental":experimental})
+                        .to_string(),
+                )
+                .unwrap();
+                let binary = root.join("codex");
+                fs::write(&binary, format!("#!{}\n{}", python.trim(), r#"
+import json, os, pathlib, sys
 root = pathlib.Path(__file__).parent
 case = json.loads((root / 'case.json').read_text())
+with (root / 'launches').open('a') as log: log.write(json.dumps(sys.argv[1:]) + '\n')
 if sys.argv[1:] == ['--version']:
     print('codex-cli fixture'); sys.exit(0)
-if sys.argv[1:] == ['login', 'status']:
-    print('Logged in' if case['login'] else 'Not logged in')
-    sys.exit(0 if case['login'] else 1)
+assert sys.argv[1] == 'app-server', 'no standalone login status'
 if 'generate-json-schema' in sys.argv:
+    if '--experimental' in sys.argv: sys.exit(1) # Optional failure cannot downgrade Ready.
     out = pathlib.Path(sys.argv[sys.argv.index('--out') + 1]); out.mkdir(parents=True, exist_ok=True)
-    for name in ['ClientRequest.json', 'ServerNotification.json', 'ServerRequest.json']:
-        (out / name).write_text('{}')
+    for name, tokens in case['schemas'].items(): (out / name).write_text(json.dumps(tokens))
+    (out / 'v2').mkdir()
+    for name in ['ThreadStartResponse.json', 'TurnStartResponse.json', 'ItemStartedNotification.json']:
+        (out / 'v2' / name).write_text('{}')
+    if not case['experimental']:
+        (out / 'v2' / 'TurnStartParams.json').write_text('{"properties":{"serviceTierForTurn":{}}}')
     sys.exit(0)
+(root / 'server-pid').write_text(str(os.getpid()))
+initialized = False
 for line in sys.stdin:
     request = json.loads(line)
-    with (root / 'methods').open('a') as log: log.write(request['method'] + '\n')
-    if request['method'] == 'initialize':
+    method = request['method']
+    with (root / 'methods').open('a') as log: log.write(method + '\n')
+    if method == 'initialize':
+        assert request['params']['capabilities']['experimentalApi'] is True
         print(json.dumps({'id':request['id'], 'result':{'userAgent':'fixture'}}), flush=True)
-    elif request['method'] == 'account/read':
-        assert request['params'] == {'refreshToken':False}
+    elif method == 'initialized':
+        assert 'id' not in request
+        initialized = True # Notification: deliberately no response.
+    elif method == 'account/read':
+        assert initialized and request['params'] == {'refreshToken':False}
         print(json.dumps({'id':request['id'], **case['account']}), flush=True)
+    elif method == 'model/list':
+        assert initialized and request['params']['includeHidden'] is True
+        cursor = request['params']['cursor']
+        print(json.dumps({'id':request['id'], 'result':{'data':[{'id': 'second' if cursor else 'first'}], 'nextCursor':None if cursor else 'next'}}), flush=True)
 "#)).unwrap();
-            fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
-            let probe = codex_runtime_probe_at(&binary).await;
-            // Empty capability schemas deliberately keep the separate capability
-            // gate closed; acceptance here must not imply full Runtime readiness.
-            assert_eq!(
-                probe.status,
-                if admits {
-                    AgentRuntimeProbeStatus::MissingCapabilities
-                } else {
-                    AgentRuntimeProbeStatus::AuthenticationRequired
-                },
-                "{account}: {probe:?}"
-            );
-            let methods = fs::read_to_string(root.join("methods")).unwrap();
-            if login {
-                // Initialized is a notification: cleanup may stop the fixture
-                // before it reads it. No account/read is needed after login.
-                assert_eq!(methods.lines().next(), Some("initialize"));
-                assert!(!methods.lines().any(|method| method == "account/read"));
-            } else {
+                fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+                let checked = codex_capability_probe_at(&binary, None, None).await;
                 assert_eq!(
-                    methods.lines().collect::<Vec<_>>(),
-                    vec!["initialize", "initialized", "account/read"]
+                    checked.result.status, expected,
+                    "{account}: {:?}",
+                    checked.result
+                );
+                let mut methods = vec!["initialize", "initialized", "account/read"];
+                if expected == AgentRuntimeProbeStatus::Ready {
+                    methods.extend(["model/list", "model/list"]);
+                    assert_eq!(
+                        checked.raw_model_catalog.unwrap()["data"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        2
+                    );
+                } else {
+                    assert!(checked.raw_model_catalog.is_none());
+                }
+                assert_eq!(
+                    fs::read_to_string(root.join("methods"))
+                        .unwrap()
+                        .lines()
+                        .collect::<Vec<_>>(),
+                    methods
+                );
+                let launches = fs::read_to_string(root.join("launches")).unwrap();
+                assert_eq!(
+                    launches.lines().count(),
+                    if expected == AgentRuntimeProbeStatus::Ready {
+                        3 + usize::from(experimental)
+                    } else {
+                        2
+                    }
+                );
+                let pid: i32 = fs::read_to_string(root.join("server-pid"))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert_ne!(
+                    unsafe { libc::kill(pid, 0) },
+                    0,
+                    "temporary app-server must be reaped"
+                );
+                // A trustworthy version belongs to this stable selected program.
+                fs::write(root.join("launches"), "").unwrap();
+                let _ = codex_capability_probe_at(&binary, None, Some("codex-cli fixture")).await;
+                assert!(
+                    !fs::read_to_string(root.join("launches"))
+                        .unwrap()
+                        .contains("--version")
                 );
             }
         }
     }
 
-    // Owns the light/full admission decision; transport tests cannot establish
-    // that historical Ready evidence is still strong enough to skip full checks.
     #[test]
     fn catalog_refresh_requires_current_full_acp_evidence() {
         for kind in [
@@ -3944,7 +4006,7 @@ esac
         std::fs::set_permissions(&executable, permissions).unwrap();
         std::fs::write(root.join("models"), "claude-sonnet-4-6\n").unwrap();
         let full_started = std::time::Instant::now();
-        let full = antigravity_capability_probe_at(&executable).await;
+        let full = antigravity_capability_probe_at(&executable, None).await;
         let full_ms = full_started.elapsed().as_millis();
         assert_eq!(full.result.status, AgentRuntimeProbeStatus::Ready);
         assert_eq!(
@@ -4312,6 +4374,7 @@ while IFS= read -r ignored; do :; done
             AdapterKind::KiroCli,
             true,
             RuntimeLaunchPurpose::HealthProbe,
+            None,
         )
         .await;
         assert_eq!(
@@ -4359,6 +4422,7 @@ while IFS= read -r ignored; do :; done
             &path,
             AdapterKind::TraeCnCli,
             RuntimeLaunchPurpose::AvailabilityCheck,
+            None,
         )
         .await;
         assert_eq!(
@@ -4408,6 +4472,7 @@ while IFS= read -r ignored; do :; done
             &runtime,
             AdapterKind::TraeCnCli,
             RuntimeLaunchPurpose::HealthProbe,
+            None,
         )
         .await;
         assert_eq!(probe.result.status, AgentRuntimeProbeStatus::ProbeFailed);
@@ -4469,12 +4534,14 @@ while IFS= read -r ignored; do :; done
             &runtime,
             AdapterKind::TraeCnCli,
             RuntimeLaunchPurpose::AvailabilityCheck,
+            None,
         )
         .await;
         let dispatch = acp_capability_probe_at_for_purpose(
             &runtime,
             AdapterKind::TraeCnCli,
             RuntimeLaunchPurpose::DispatchPreflight,
+            None,
         )
         .await;
 
@@ -4601,6 +4668,7 @@ exit 1
             &runtime,
             AdapterKind::GrokBuild,
             RuntimeLaunchPurpose::HealthProbe,
+            None,
         )
         .await;
         assert_eq!(
@@ -4651,6 +4719,7 @@ while IFS= read -r ignored; do :; done
             &runtime,
             AdapterKind::GrokBuild,
             RuntimeLaunchPurpose::HealthProbe,
+            None,
         )
         .await;
         assert_eq!(
@@ -4724,6 +4793,7 @@ printf '%s\n' "$resume" >> "$request_log"
                 &runtime,
                 AdapterKind::GrokBuild,
                 RuntimeLaunchPurpose::HealthProbe,
+                None,
             )
             .await;
             if resume_accepted {

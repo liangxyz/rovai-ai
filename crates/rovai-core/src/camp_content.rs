@@ -423,7 +423,7 @@ pub fn render_composer_plain_text(
 
 pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()> {
     if content.len() > MAX_CONTENT_SEGMENTS {
-        anyhow::bail!("Structured Camp Message Content has too many segments");
+        anyhow::bail!("Structured Thread Message Content has too many segments");
     }
     let mut text_bytes = 0_usize;
     for segment in content {
@@ -431,7 +431,7 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
             StructuredThreadMessageSegment::Text { text } => {
                 text_bytes = text_bytes
                     .checked_add(text.len())
-                    .context("Structured Camp Message Content size overflow")?;
+                    .context("Structured Thread Message Content size overflow")?;
             }
             StructuredThreadMessageSegment::MemberMention { agent_id } => {
                 if agent_id.is_empty() || agent_id.trim() != agent_id || agent_id.len() > 256 {
@@ -520,12 +520,12 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
                                 })
                             })
                     })
-                    .context("Structured Camp Message Content size overflow")?;
+                    .context("Structured Thread Message Content size overflow")?;
             }
         }
     }
     if text_bytes > MAX_CONTENT_TEXT_BYTES {
-        anyhow::bail!("Structured Camp Message Content text exceeds 1 MiB");
+        anyhow::bail!("Structured Thread Message Content text exceeds 1 MiB");
     }
     Ok(())
 }
@@ -887,7 +887,9 @@ pub fn reproject_current_user_messages(
     let mut updated = 0_usize;
     for (message_id, content_json) in messages {
         let content: StructuredThreadMessageContent = serde_json::from_str(&content_json)
-            .with_context(|| format!("Camp Message {message_id} has invalid structured content"))?;
+            .with_context(|| {
+                format!("Thread Message {message_id} has invalid structured content")
+            })?;
         validate_content(&content)?;
         if !mentions_current_user(&content) {
             continue;

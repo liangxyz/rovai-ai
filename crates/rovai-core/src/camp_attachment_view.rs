@@ -511,7 +511,7 @@ impl ThreadAttachmentViewStore {
                     return Err(error);
                 };
                 eprintln!(
-                    "Camp {camp_id} Published Attachment View remains fail closed after startup reconciliation: {error_code}"
+                    "Thread {camp_id} Published Attachment View remains fail closed after startup reconciliation: {error_code}"
                 );
             }
         }
@@ -961,7 +961,7 @@ impl ThreadAttachmentViewStore {
                 ));
                 let destination = attachment_root.join(attachment_id);
                 if destination.exists() {
-                    anyhow::bail!("Camp Attachment View destination already exists");
+                    anyhow::bail!("Thread Attachment View destination already exists");
                 }
                 prepare_runtime_entry_for_atomic_promote(&source)?;
                 fs::rename(&source, &destination)
@@ -1134,7 +1134,7 @@ impl ThreadAttachmentViewStore {
             |row| row.get(0),
         )?;
         if operation_camp_id != camp_id {
-            anyhow::bail!("camp_attachment_view_recovery_required: publication Camp changed");
+            anyhow::bail!("camp_attachment_view_recovery_required: publication Thread changed");
         }
         self.remove_operation_staging(database.connection(), &operation_id)?;
         let now = chrono::Utc::now().to_rfc3339();
@@ -1483,7 +1483,7 @@ impl ThreadAttachmentViewStore {
             "initial_backfill" => ("initializing", Some(error_code)),
             "controlled_rebuild" => ("integrity_failed", Some(error_code)),
             "camp_delete_cleanup" => ("cleanup_pending", Some(error_code)),
-            _ => anyhow::bail!("Camp Attachment View operation kind is invalid"),
+            _ => anyhow::bail!("Thread Attachment View operation kind is invalid"),
         };
         let view_updated = transaction.execute(
             r#"
@@ -1619,7 +1619,7 @@ impl ThreadAttachmentViewStore {
             &self.root_identity_digest,
             camp_id,
         )
-        .with_context(|| format!("camp_attachment_view_integrity_failed: Camp {camp_id}"))
+        .with_context(|| format!("camp_attachment_view_integrity_failed: Thread {camp_id}"))
     }
 
     pub fn verify_camp_ready_receipt(&self, database: &Database, camp_id: &str) -> Result<()> {
@@ -1633,7 +1633,7 @@ impl ThreadAttachmentViewStore {
             camp_id,
         )
         .map(|_| ())
-        .with_context(|| format!("camp_attachment_view_integrity_failed: Camp {camp_id}"))
+        .with_context(|| format!("camp_attachment_view_integrity_failed: Thread {camp_id}"))
     }
 
     pub fn camp_has_active_runtime(&self, database: &Database, camp_id: &str) -> Result<bool> {
@@ -1672,7 +1672,7 @@ impl ThreadAttachmentViewStore {
         command_id: &str,
     ) -> Result<Option<PreparedThreadAttachmentCleanup>> {
         ThreadId::parse(camp_id)?;
-        Uuid::parse_str(command_id).context("Camp delete command ID must be a UUID")?;
+        Uuid::parse_str(command_id).context("Thread delete command ID must be a UUID")?;
         let existing = database
             .connection()
             .query_row(
@@ -1718,7 +1718,7 @@ impl ThreadAttachmentViewStore {
                 || attachment_relative_path != camp_attachment_root_relative(camp_id)
             {
                 anyhow::bail!(
-                    "camp_attachment_view_integrity_failed: Camp cleanup root identity is invalid"
+                    "camp_attachment_view_integrity_failed: Thread cleanup root identity is invalid"
                 );
             }
             Some(state)
@@ -1837,7 +1837,7 @@ impl ThreadAttachmentViewStore {
             |row| row.get(0),
         )?;
         if camp_exists {
-            anyhow::bail!("camp_attachment_view_recovery_required: Camp deletion did not commit");
+            anyhow::bail!("camp_attachment_view_recovery_required: Thread deletion did not commit");
         }
         let changed = database.connection().execute(
             r#"
@@ -1888,7 +1888,7 @@ impl ThreadAttachmentViewStore {
             .flatten();
         if deletion_operation_id.as_deref() != Some(cleanup.command_id.as_str()) {
             anyhow::bail!(
-                "camp_attachment_view_recovery_required: cleanup does not own the Camp deletion"
+                "camp_attachment_view_recovery_required: cleanup does not own the Thread deletion"
             );
         }
         let changed = transaction.execute(
@@ -2207,7 +2207,7 @@ impl ThreadAttachmentViewStore {
                     Ok(()) => return Ok(()),
                     Err(error) => {
                         eprintln!(
-                            "Camp {camp_id} Published Attachment View integrity incident: {error:#}"
+                            "Thread {camp_id} Published Attachment View integrity incident: {error:#}"
                         );
                         return self.rebuild_integrity_failed_camp(
                             database,
@@ -2388,7 +2388,7 @@ impl ThreadAttachmentViewStore {
                 &row.content_digest,
             ) {
                 eprintln!(
-                    "Camp {camp_id} Attachment {} remains unavailable to Runtime: {error:#}",
+                    "Thread {camp_id} Attachment {} remains unavailable to Runtime: {error:#}",
                     row.attachment_id
                 );
                 continue;
@@ -2412,7 +2412,7 @@ impl ThreadAttachmentViewStore {
                 params![camp_id, row.attachment_id],
             )?;
             if changed != 1 {
-                anyhow::bail!("Camp Attachment recoverable state changed during verification");
+                anyhow::bail!("Thread Attachment recoverable state changed during verification");
             }
         }
         Ok(())
@@ -2437,7 +2437,7 @@ impl ThreadAttachmentViewStore {
                 Ok(_) => readable.push(row.clone()),
                 Err(error) => {
                     eprintln!(
-                        "Camp {camp_id} Attachment {} is omitted from Runtime after integrity verification failed: {error:#}",
+                        "Thread {camp_id} Attachment {} is omitted from Runtime after integrity verification failed: {error:#}",
                         row.attachment_id
                     );
                     unavailable_ids.push(row.attachment_id.clone());
@@ -2459,7 +2459,9 @@ impl ThreadAttachmentViewStore {
                 params![camp_id, attachment_id],
             )?;
             if changed != 1 {
-                anyhow::bail!("Camp Attachment availability changed during integrity degradation");
+                anyhow::bail!(
+                    "Thread Attachment availability changed during integrity degradation"
+                );
             }
         }
         transaction.commit()?;
@@ -2498,7 +2500,7 @@ impl ThreadAttachmentViewStore {
             params![camp_id, chrono::Utc::now().to_rfc3339()],
         )?;
         if changed != 1 {
-            anyhow::bail!("Camp Attachment degraded View did not become ready");
+            anyhow::bail!("Thread Attachment degraded View did not become ready");
         }
         Ok(())
     }
@@ -2513,7 +2515,7 @@ impl ThreadAttachmentViewStore {
         rows: &[AuthorityAttachmentRow],
     ) -> Result<()> {
         if !matches!(operation_kind, "initial_backfill" | "controlled_rebuild") {
-            anyhow::bail!("Camp Attachment View backfill operation kind is invalid");
+            anyhow::bail!("Thread Attachment View backfill operation kind is invalid");
         }
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
@@ -2639,7 +2641,7 @@ impl ThreadAttachmentViewStore {
                 let destination = attachment_root.join(&row.attachment_id);
                 let promote = (|| -> Result<String> {
                     if path_entry_exists(&destination)? {
-                        anyhow::bail!("Camp Attachment View destination already exists");
+                        anyhow::bail!("Thread Attachment View destination already exists");
                     }
                     fs::rename(&entry_root, &destination).context(
                         "camp_attachment_view_storage_unavailable: atomic promote failed",
@@ -2825,7 +2827,7 @@ impl ThreadAttachmentViewStore {
                 if camp_exists {
                     if status == "committed" {
                         anyhow::bail!(
-                            "camp_attachment_view_recovery_required: committed cleanup still has a Camp"
+                            "camp_attachment_view_recovery_required: committed cleanup still has a Thread"
                         );
                     }
                     let owns_deletion: bool = database.connection().query_row(
@@ -2892,7 +2894,7 @@ impl ThreadAttachmentViewStore {
                     Ok(()) => self.complete_publication(database, &operation_id)?,
                     Err(error) => {
                         eprintln!(
-                            "Camp {camp_id} committed Attachment View operation requires a controlled rebuild: {error:#}"
+                            "Thread {camp_id} committed Attachment View operation requires a controlled rebuild: {error:#}"
                         );
                         database.connection().execute(
                             r#"
@@ -2972,10 +2974,10 @@ impl ThreadAttachmentViewStore {
         for entry in fs::read_dir(&camps_root)?.collect::<std::io::Result<Vec<_>>>()? {
             let name = entry.file_name();
             let Some(name) = name.to_str() else {
-                anyhow::bail!("camp_attachment_view_integrity_failed: non-UTF8 Camp directory");
+                anyhow::bail!("camp_attachment_view_integrity_failed: non-UTF8 Thread directory");
             };
             if ThreadId::parse(name).is_err() {
-                anyhow::bail!("camp_attachment_view_integrity_failed: unknown Camp directory");
+                anyhow::bail!("camp_attachment_view_integrity_failed: unknown Thread directory");
             }
             if !known.contains(name) {
                 remove_managed_tree(&entry.path())?;
@@ -3369,7 +3371,7 @@ pub fn commit_publication_in_message_transaction(
 ) -> Result<()> {
     if prepared_attachment_ids.is_empty() {
         if operation_id.is_some() {
-            anyhow::bail!("Camp Attachment View publication was provided for an empty Draft");
+            anyhow::bail!("Thread Attachment View publication was provided for an empty Draft");
         }
         return Ok(());
     }
@@ -4177,13 +4179,13 @@ fn commit_operation_entries(
     }
     let next_generation = current_generation
         .checked_add(1)
-        .context("Camp Attachment View generation overflow")?;
+        .context("Thread Attachment View generation overflow")?;
     let next_catalog_revision = if operation_kind == "controlled_rebuild" {
         current_catalog_revision
     } else {
         current_catalog_revision
             .checked_add(1)
-            .context("Camp Attachment View catalog revision overflow")?
+            .context("Thread Attachment View catalog revision overflow")?
     };
     if operation_kind == "controlled_rebuild" {
         let (entry_count, _, semantic_digest) = semantic_catalog_state(transaction, camp_id)?;
@@ -4395,7 +4397,7 @@ fn catalog_state_through_generation(
     let aggregate_bytes = rows.iter().try_fold(0_i64, |total, row| {
         total
             .checked_add(row.2)
-            .context("Camp View byte total overflow")
+            .context("Thread View byte total overflow")
     })?;
     let values = rows
         .iter()
@@ -4465,7 +4467,7 @@ fn semantic_catalog_state_through_revision(
     let aggregate_bytes = rows.iter().try_fold(0_i64, |total, row| {
         total
             .checked_add(row.2)
-            .context("Camp semantic View byte total overflow")
+            .context("Thread semantic View byte total overflow")
     })?;
     let values = rows
         .iter()
@@ -4569,11 +4571,11 @@ fn prepare_ready_camp_view_verification(
         || aggregate_bytes != receipt.aggregate_bytes
         || catalog_digest != receipt.catalog_digest
     {
-        anyhow::bail!("Camp Attachment View aggregate receipt is inconsistent");
+        anyhow::bail!("Thread Attachment View aggregate receipt is inconsistent");
     }
     let (_, _, semantic_catalog_digest) = semantic_catalog_state(connection, camp_id)?;
     if semantic_catalog_digest != receipt.semantic_catalog_digest {
-        anyhow::bail!("Camp Attachment View semantic receipt is inconsistent");
+        anyhow::bail!("Thread Attachment View semantic receipt is inconsistent");
     }
     verify_resolution_ledger(connection, camp_id, &receipt)?;
     Ok(ThreadAttachmentViewVerification {
@@ -4620,7 +4622,7 @@ fn load_ready_camp_view_receipt(
             },
         )
         .optional()?
-        .context("Camp Attachment View state is missing")?;
+        .context("Thread Attachment View state is missing")?;
     if view.0 != "ready"
         || view.1 < 1
         || view.2 != camp_attachment_root_relative(camp_id)
@@ -4633,7 +4635,7 @@ fn load_ready_camp_view_receipt(
         || view.11 < 0
         || view.11 > view.10
     {
-        anyhow::bail!("Camp Attachment View state receipt is inconsistent");
+        anyhow::bail!("Thread Attachment View state receipt is inconsistent");
     }
     Ok(ReadyThreadViewReceipt {
         generation: view.1,
@@ -4681,7 +4683,7 @@ fn verify_resolution_ledger(
     };
     if receipt.resolved_revision == 0 {
         if !rows.is_empty() || receipt.resolution_digest != empty_digest {
-            anyhow::bail!("Camp Attachment empty resolution ledger is inconsistent");
+            anyhow::bail!("Thread Attachment empty resolution ledger is inconsistent");
         }
         return Ok(());
     }
@@ -4700,14 +4702,14 @@ fn verify_resolution_ledger(
                 || tombstone_digest.is_some()
                 || failure_code.is_some()
             {
-                anyhow::bail!("Camp Attachment migration resolution checkpoint is inconsistent");
+                anyhow::bail!("Thread Attachment migration resolution checkpoint is inconsistent");
             }
             previous_revision = revision;
             digest = entry_digest.expect("checked migration checkpoint digest");
             continue;
         }
         if revision != previous_revision + 1 {
-            anyhow::bail!("Camp Attachment resolution ledger is not contiguous");
+            anyhow::bail!("Thread Attachment resolution ledger is not contiguous");
         }
         let operation_id = operation_id.expect("checked operation ID");
         let (operation_revision, operation_resolution, operation_digest, operation_failure): (
@@ -4726,7 +4728,7 @@ fn verify_resolution_ledger(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
         if operation_revision != revision || operation_resolution != outcome {
-            anyhow::bail!("Camp Attachment resolution operation receipt is inconsistent");
+            anyhow::bail!("Thread Attachment resolution operation receipt is inconsistent");
         }
         let attachment_ids = load_all_operation_attachment_ids(connection, &operation_id)?;
         let projected_attachment_ids = {
@@ -4753,7 +4755,7 @@ fn verify_resolution_ledger(
         let mut expected_projected_ids = attachment_ids.clone();
         expected_projected_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         if projected_attachment_ids != expected_projected_ids {
-            anyhow::bail!("Camp Attachment public resolution state is inconsistent");
+            anyhow::bail!("Thread Attachment public resolution state is inconsistent");
         }
         digest = match outcome.as_str() {
             "available" => {
@@ -4767,7 +4769,7 @@ fn verify_resolution_ledger(
                     || tombstone_digest.is_some()
                     || failure_code.is_some()
                 {
-                    anyhow::bail!("Camp Attachment available resolution receipt is inconsistent");
+                    anyhow::bail!("Thread Attachment available resolution receipt is inconsistent");
                 }
                 canonical_json_digest(&json!({
                     "previous": digest,
@@ -4780,7 +4782,7 @@ fn verify_resolution_ledger(
                 attachment_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
                 let failure_code = failure_code
                     .as_deref()
-                    .context("Camp Attachment failed resolution has no failure code")?;
+                    .context("Thread Attachment failed resolution has no failure code")?;
                 let expected_tombstone_digest = canonical_json_digest(&json!({
                     "operationId": operation_id,
                     "semanticRevision": revision,
@@ -4792,7 +4794,7 @@ fn verify_resolution_ledger(
                     || entry_digest.is_some()
                     || operation_failure.as_deref() != Some(failure_code)
                 {
-                    anyhow::bail!("Camp Attachment failed resolution tombstone is inconsistent");
+                    anyhow::bail!("Thread Attachment failed resolution tombstone is inconsistent");
                 }
                 canonical_json_digest(&json!({
                     "previous": digest,
@@ -4800,15 +4802,15 @@ fn verify_resolution_ledger(
                     "tombstoneDigest": expected_tombstone_digest,
                 }))?
             }
-            _ => anyhow::bail!("Camp Attachment resolution outcome is invalid"),
+            _ => anyhow::bail!("Thread Attachment resolution outcome is invalid"),
         };
         if operation_digest.as_deref() != Some(digest.as_str()) {
-            anyhow::bail!("Camp Attachment operation resolution digest is inconsistent");
+            anyhow::bail!("Thread Attachment operation resolution digest is inconsistent");
         }
         previous_revision = revision;
     }
     if previous_revision != receipt.resolved_revision || digest != receipt.resolution_digest {
-        anyhow::bail!("Camp Attachment resolution ledger aggregate is inconsistent");
+        anyhow::bail!("Thread Attachment resolution ledger aggregate is inconsistent");
     }
     Ok(())
 }
@@ -4848,11 +4850,11 @@ fn confirm_ready_camp_view(
         &verification.camp_id,
     )?;
     if current != verification.receipt {
-        anyhow::bail!("Camp Attachment View changed during physical verification");
+        anyhow::bail!("Thread Attachment View changed during physical verification");
     }
     let persisted_ids = load_view_entry_ids(connection, &verification.camp_id)?;
     if persisted_ids != verification.filesystem_ids {
-        anyhow::bail!("Camp Attachment View catalog changed during physical verification");
+        anyhow::bail!("Thread Attachment View catalog changed during physical verification");
     }
     Ok(())
 }
@@ -5372,7 +5374,7 @@ fn staging_entry_relative(operation_id: &str, attachment_id: &str) -> String {
 }
 
 fn validate_operation_id(value: &str) -> Result<()> {
-    Uuid::parse_str(value).context("Camp Attachment View operation ID is invalid")?;
+    Uuid::parse_str(value).context("Thread Attachment View operation ID is invalid")?;
     Ok(())
 }
 
@@ -5398,7 +5400,7 @@ fn validate_root_relative_path(path: &Path) -> Result<()> {
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
     {
-        anyhow::bail!("Camp Attachment View journal path is invalid");
+        anyhow::bail!("Thread Attachment View journal path is invalid");
     }
     Ok(())
 }
@@ -5689,7 +5691,7 @@ fn directory_identity_digest(path: &Path) -> Result<String> {
 fn entry_identity_digest(path: &Path) -> Result<String> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        anyhow::bail!("Camp Attachment View entry is a symlink");
+        anyhow::bail!("Thread Attachment View entry is a symlink");
     }
     #[cfg(target_os = "macos")]
     let identity_digest = {
@@ -5882,14 +5884,14 @@ fn validate_runtime_attachment_root(path: &Path) -> Result<()> {
 fn validate_camp_root_authorization(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        anyhow::bail!("runtime_camp_files_root_invalid: Camp Attachment root is unsafe");
+        anyhow::bail!("runtime_camp_files_root_invalid: Thread Attachment root is unsafe");
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = metadata.permissions().mode() & 0o777;
         if !matches!(mode, 0o500 | 0o700) {
-            anyhow::bail!("runtime_camp_files_root_invalid: Camp Attachment root is not private");
+            anyhow::bail!("runtime_camp_files_root_invalid: Thread Attachment root is not private");
         }
     }
     Ok(())
@@ -5898,7 +5900,7 @@ fn validate_camp_root_authorization(path: &Path) -> Result<()> {
 fn harden_runtime_entry(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        anyhow::bail!("Camp Attachment View entry contains a symlink");
+        anyhow::bail!("Thread Attachment View entry contains a symlink");
     }
     if metadata.is_dir() {
         for child in fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()? {
@@ -5908,14 +5910,14 @@ fn harden_runtime_entry(path: &Path) -> Result<()> {
     } else if metadata.is_file() {
         set_file_mode(path, 0o400)
     } else {
-        anyhow::bail!("Camp Attachment View entry contains an unsupported node");
+        anyhow::bail!("Thread Attachment View entry contains an unsupported node");
     }
 }
 
 fn make_staging_entry_private(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        anyhow::bail!("Camp Attachment View staging contains a symlink");
+        anyhow::bail!("Thread Attachment View staging contains a symlink");
     }
     if metadata.is_dir() {
         for child in fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()? {
@@ -5927,19 +5929,19 @@ fn make_staging_entry_private(path: &Path) -> Result<()> {
         {
             use std::os::unix::fs::MetadataExt;
             if metadata.nlink() != 1 {
-                anyhow::bail!("Camp Attachment View staging contains a hard-linked file");
+                anyhow::bail!("Thread Attachment View staging contains a hard-linked file");
             }
         }
         set_file_mode(path, 0o600)
     } else {
-        anyhow::bail!("Camp Attachment View staging contains an unsupported node");
+        anyhow::bail!("Thread Attachment View staging contains an unsupported node");
     }
 }
 
 fn validate_staging_tree_modes(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        anyhow::bail!("Camp Attachment View staging contains a symlink");
+        anyhow::bail!("Thread Attachment View staging contains a symlink");
     }
     if metadata.is_dir() {
         validate_managed_directory(path, Some(0o700))?;
@@ -5949,13 +5951,13 @@ fn validate_staging_tree_modes(path: &Path) -> Result<()> {
         return Ok(());
     }
     if !metadata.is_file() {
-        anyhow::bail!("Camp Attachment View staging contains an unsupported node");
+        anyhow::bail!("Thread Attachment View staging contains an unsupported node");
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         if metadata.permissions().mode() & 0o777 != 0o600 || metadata.nlink() != 1 {
-            anyhow::bail!("Camp Attachment View staging file mode or link count is unsafe");
+            anyhow::bail!("Thread Attachment View staging file mode or link count is unsafe");
         }
     }
     Ok(())
@@ -5964,7 +5966,7 @@ fn validate_staging_tree_modes(path: &Path) -> Result<()> {
 fn prepare_runtime_entry_for_atomic_promote(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        anyhow::bail!("Camp Attachment View entry root must be a directory");
+        anyhow::bail!("Thread Attachment View entry root must be a directory");
     }
     for child in fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()? {
         harden_runtime_entry(&child.path())?;

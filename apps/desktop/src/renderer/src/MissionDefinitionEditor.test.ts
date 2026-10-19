@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { missionAttachmentDrafts, missionLocalAttachmentView, type MissionDraftAttachment } from './MissionDefinitionEditor'
 import { attachmentFormatLabel } from './attachment-presentation'
-import type { AgentProfile, MissionDescriptionContent } from '@contracts'
+import type { AgentProfile, MissionDescriptionContent, MissionRecord } from '@contracts'
+import { MissionDescription } from './MissionDescription'
+import { MissionPeopleProvider } from './MissionControls'
 import { missionContentFromDocument, missionDescriptionContent, missionDescriptionDocument, missionDescriptionText, missionMentionIds, unavailableMissionMentionIds } from './mission-description'
 
 describe('Mission description identity and repair', () => {
@@ -26,6 +30,34 @@ describe('Mission description identity and repair', () => {
     expect(unavailableMissionMentionIds(content, agents, [])).toEqual(['away', 'removed', 'missing'])
     expect(unavailableMissionMentionIds(content, agents, ['away'], ['present'])).toEqual(['present', 'removed', 'missing'])
     expect(unavailableMissionMentionIds([], agents, [], ['present'])).toEqual([])
+  })
+
+  it('decorates only web URLs while retaining literal text and ordered member identities', () => {
+    const content: MissionDescriptionContent = [
+      { kind: 'text', text: '参考 https://example.com/plan，交给 ' },
+      { kind: 'member_mention', agentId: 'alice' },
+      { kind: 'text', text: '\n**原文** [网页](http://example.com/info) [文件](docs/plan.md) javascript:alert(1)' }
+    ]
+    const agents = [{ agentId: 'alice', displayName: '新名字', presence: 'present' }] as AgentProfile[]
+    const mission = { description: '', descriptionContent: content, memberAgentIds: ['alice'] } as MissionRecord
+    const before = JSON.stringify(mission)
+    const markup = renderToStaticMarkup(createElement(MissionPeopleProvider, { agents, children: createElement(MissionDescription, { mission }) }))
+    expect(markup.replace(/<[^>]*>/gu, '')).toBe(missionDescriptionText(content, agents))
+    expect(markup.match(/<a /gu)).toHaveLength(2)
+    expect(markup.match(/data-resource-type="web"/gu)).toHaveLength(2)
+    expect(markup).toContain('aria-label="查看新名字的基础信息"')
+    expect(markup).not.toContain('rovai-file-reference')
+    expect(markup).not.toContain('<strong>')
+    expect(markup).not.toContain('href="javascript:')
+    expect(JSON.stringify(mission)).toBe(before)
+  })
+
+  it('keeps legacy literal mentions when adding web link presentation', () => {
+    const mission = { description: '@手写名字 https://example.com/legacy', memberAgentIds: [] } as unknown as MissionRecord
+    const markup = renderToStaticMarkup(createElement(MissionDescription, { mission }))
+    expect(markup.replace(/<[^>]*>/gu, '')).toBe(mission.description)
+    expect(markup).toContain('data-resource-type="web"')
+    expect(markup).not.toContain('message-mention-token')
   })
 })
 

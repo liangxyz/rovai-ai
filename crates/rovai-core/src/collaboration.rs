@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-pub const DURABLE_TASK_CONTRACT_VERSION: u32 = 5;
+pub const DURABLE_TASK_CONTRACT_VERSION: u32 = 6;
 const TRUSTED_MEMBERSHIP_SYSTEM_COMPONENTS: &[&str] = &["channel-membership-sync"];
 
 use crate::{
@@ -323,7 +323,8 @@ pub struct ThreadMemberRemovalPreview {
     pub remaining_member_count: i64,
     pub next_default_lead_agent_id: Option<String>,
     pub non_terminal_agent_run_count: i64,
-    pub open_assigned_task_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_assigned_task_count: Option<i64>,
     pub pending_delivery_count: i64,
     pub running_delivery_count: i64,
     pub removable: bool,
@@ -639,7 +640,7 @@ impl CollaborationService {
                 }) {
                     return Ok(Err(rejected(
                         "quote.invalid_source",
-                        "Every quote must have been captured from this Camp",
+                        "Every quote must have been captured from this Thread",
                     )));
                 }
                 let content = composer_document_to_content(&envelope.payload.content)?;
@@ -714,7 +715,10 @@ impl CollaborationService {
                 source_command_id,
             )) = message
             else {
-                return Ok(rejected("message.not_found", "Camp message does not exist"));
+                return Ok(rejected(
+                    "message.not_found",
+                    "Thread message does not exist",
+                ));
             };
             if author_type != "user"
                 || author_id != crate::current_user::CURRENT_USER_ID
@@ -738,7 +742,7 @@ impl CollaborationService {
             if version != envelope.payload.expected_version {
                 return Ok(rejected(
                     "message.withdraw_stale",
-                    "The Camp message changed before withdrawal",
+                    "The Thread message changed before withdrawal",
                 ));
             }
             let source_command_id = source_command_id
@@ -812,7 +816,7 @@ impl CollaborationService {
             if changed != 1 {
                 return Ok(rejected(
                     "message.withdraw_stale",
-                    "The Camp message changed before withdrawal",
+                    "The Thread message changed before withdrawal",
                 ));
             }
             erase_command_result_receipt(
@@ -987,7 +991,7 @@ impl CollaborationService {
             .iter()
             .find_map(|(agent_id, configured)| configured.then_some(agent_id.clone()))
             .or_else(|| profiles.first().map(|(agent_id, _)| agent_id.clone()))
-            .context("test Camp requires at least one present member")?;
+            .context("test Thread requires at least one present member")?;
         let member_agent_ids = profiles
             .iter()
             .map(|(agent_id, _)| agent_id.clone())
@@ -1016,7 +1020,7 @@ impl CollaborationService {
         }
         let camp_id = created.result.payload["threadId"]
             .as_str()
-            .context("test Camp creation returned no Camp ID")?
+            .context("test Thread creation returned no Thread ID")?
             .to_string();
         let mut sent = self.send_test_camp_message(
             database,
@@ -1073,13 +1077,13 @@ impl CollaborationService {
     ) -> Result<CommandExecution> {
         let title = normalize_camp_name(&envelope.payload.title);
         if envelope.payload.title.trim().is_empty() {
-            anyhow::bail!("Camp title must not be empty");
+            anyhow::bail!("Thread title must not be empty");
         }
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.rename_user_required",
-                    "Only a User can rename a Camp",
+                    "Only a User can rename a Thread",
                 ));
             }
             if transaction.query_row(
@@ -1095,7 +1099,7 @@ impl CollaborationService {
             if title.chars().count() > CAMP_NAME_MAX_SCALARS {
                 return Ok(rejected(
                     "camp.name_too_long",
-                    "Camp name must not exceed 80 Unicode scalar values",
+                    "Thread name must not exceed 80 Unicode scalar values",
                 ));
             }
             let version = transaction
@@ -1106,12 +1110,12 @@ impl CollaborationService {
                 )
                 .optional()?;
             let Some(version) = version else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
             if camp_is_pending(transaction, &envelope.payload.camp_id)? {
                 return Ok(rejected(
                     "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
+                    "A pending Thread must be activated by its first message",
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -1173,12 +1177,12 @@ impl CollaborationService {
                 )
                 .optional()?;
             let Some(version) = version else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
             if camp_is_pending(transaction, &envelope.payload.camp_id)? {
                 return Ok(rejected(
                     "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
+                    "A pending Thread must be activated by its first message",
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -1206,7 +1210,7 @@ impl CollaborationService {
             )? {
                 return Ok(rejected(
                     "camp.default_lead_unavailable",
-                    "Default Lead must be an active Camp member",
+                    "Default Lead must be an active Thread member",
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
@@ -1259,7 +1263,7 @@ impl CollaborationService {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.default_lead_reconcile_user_required",
-                    "Only a User can reconcile a Camp default Lead",
+                    "Only a User can reconcile a Thread default Lead",
                 ));
             }
             let camp = transaction
@@ -1270,12 +1274,12 @@ impl CollaborationService {
                 )
                 .optional()?;
             let Some((current_lead, version)) = camp else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
             if camp_is_pending(transaction, &envelope.payload.camp_id)? {
                 return Ok(rejected(
                     "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
+                    "A pending Thread must be activated by its first message",
                 ));
             }
 
@@ -1383,7 +1387,7 @@ impl CollaborationService {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.delete_user_required",
-                    "Only a User can permanently delete a Camp",
+                    "Only a User can permanently delete a Thread",
                 ));
             }
             let version = transaction
@@ -1394,7 +1398,7 @@ impl CollaborationService {
                 )
                 .optional()?;
             let Some(version) = version else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
             if version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
@@ -1472,7 +1476,7 @@ impl CollaborationService {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.pending_discard_user_required",
-                    "Only a User can discard a pending Camp",
+                    "Only a User can discard a pending Thread",
                 ));
             }
             let state = transaction
@@ -1504,7 +1508,7 @@ impl CollaborationService {
             if activation_state != "pending" {
                 return Ok(rejected(
                     "camp.pending_discard_active",
-                    "An active Camp cannot be discarded as a draft",
+                    "An active Thread cannot be discarded as a draft",
                 ));
             }
             let meaningful_draft: bool = transaction.query_row(
@@ -1737,15 +1741,19 @@ impl CollaborationService {
         )?;
         let non_terminal_agent_run_count =
             legacy_non_terminal_agent_run_count + batch_non_terminal_agent_run_count;
-        let open_assigned_task_count: i64 = connection.query_row(
-            r#"
+        let open_assigned_task_count = crate::task_capability::enabled(connection)?
+            .then(|| {
+                connection.query_row(
+                    r#"
             SELECT COUNT(*) FROM task
             WHERE camp_id = ?1 AND assignee_agent_id = ?2
               AND status IN ('pending', 'in_progress', 'blocked')
             "#,
-            params![camp_id, agent_id],
-            |row| row.get(0),
-        )?;
+                    params![camp_id, agent_id],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .transpose()?;
         let legacy_pending_delivery_count = affected_deliveries
             .iter()
             .filter(|delivery| delivery.status == "pending")
@@ -1816,12 +1824,12 @@ impl CollaborationService {
                 )
                 .optional()?;
             let Some(membership_generation) = camp else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
             if camp_is_pending(transaction, &envelope.payload.camp_id)? {
                 return Ok(rejected(
                     "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
+                    "A pending Thread must be activated by its first message",
                 ));
             }
             if !actor_has_capability(
@@ -1865,14 +1873,14 @@ impl CollaborationService {
             let Some((status, membership_version, default_lead_agent_id)) = member else {
                 return Ok(rejected(
                     "camp.member_not_found",
-                    "Agent is not a member of this Camp",
+                    "Agent is not a member of this Thread",
                 ));
             };
             if status != "active" {
                 return Ok(CommandHandlerResult::rejected(
                     "camp.member_not_active",
                     json!({
-                        "message": "Agent is no longer an active member of this Camp",
+                        "message": "Agent is no longer an active member of this Thread",
                         "membershipVersion": membership_version,
                         "membershipGeneration": membership_generation,
                     }),
@@ -1917,7 +1925,7 @@ impl CollaborationService {
                     if !replacement_valid {
                         return Ok(rejected(
                             "camp.default_lead_unavailable",
-                            "Replacement Default Lead must be another active Camp member",
+                            "Replacement Default Lead must be another active Thread member",
                         ));
                     }
                 }
@@ -1994,6 +2002,9 @@ impl CollaborationService {
         envelope: &CommandEnvelope<CreateTaskCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
+            if !crate::task_capability::enabled(transaction)? {
+                return Ok(rejected(crate::task_capability::DISABLED_CODE, crate::task_capability::DISABLED_MESSAGE));
+            }
             if matches!(envelope.actor, ActorRef::System { .. }) {
                 return Ok(rejected(
                     "task.actor_not_allowed",
@@ -2014,7 +2025,7 @@ impl CollaborationService {
             {
                 return Ok(rejected(
                     "task.create_forbidden",
-                    "Only the current Camp Default Lead can create a Task",
+                    "Only the current Thread Default Lead can create a Task",
                 ));
             }
             validate_task_input(&envelope.payload)?;
@@ -2024,7 +2035,7 @@ impl CollaborationService {
             if envelope.camp_id.as_deref() != Some(envelope.payload.camp_id.as_str()) {
                 return Ok(rejected(
                     "task.camp_mismatch",
-                    "Task is outside the command Camp",
+                    "Task is outside the command Thread",
                 ));
             }
             let camp_exists = transaction
@@ -2035,12 +2046,12 @@ impl CollaborationService {
                 )
                 .optional()?;
             if camp_exists.is_none() {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             }
             if camp_is_pending(transaction, &envelope.payload.camp_id)? {
                 return Ok(rejected(
                     "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
+                    "A pending Thread must be activated by its first message",
                 ));
             }
             if !is_current_camp_member(
@@ -2050,7 +2061,7 @@ impl CollaborationService {
             )? {
                 return Ok(rejected(
                     "task.assignee_unavailable",
-                    "Task assignee is not a current Camp member",
+                    "Task assignee is not a current Thread member",
                 ));
             }
 
@@ -2062,7 +2073,7 @@ impl CollaborationService {
             if open_task_count >= 512 {
                 return Ok(rejected(
                     "task.camp_capacity_exceeded",
-                    "Camp already has 512 non-terminal Tasks",
+                    "Thread already has 512 non-terminal Tasks",
                 ));
             }
 
@@ -2153,6 +2164,9 @@ impl CollaborationService {
     ) -> Result<CommandExecution> {
         validate_task_update_input(&envelope.payload)?;
         self.gateway.execute(database, envelope, |transaction| {
+            if !crate::task_capability::enabled(transaction)? {
+                return Ok(rejected(crate::task_capability::DISABLED_CODE, crate::task_capability::DISABLED_MESSAGE));
+            }
             let task = load_task_record(transaction, &envelope.payload.task_id)?;
             let Some(mut projected) = task else {
                 return Ok(rejected("task.not_found", "Task does not exist"));
@@ -2163,7 +2177,7 @@ impl CollaborationService {
             if camp_is_pending(transaction, &projected.camp_id)? {
                 return Ok(rejected(
                     "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
+                    "A pending Thread must be activated by its first message",
                 ));
             }
             let scope = match task_read_scope(
@@ -2213,7 +2227,7 @@ impl CollaborationService {
                     if !is_current_camp_member(transaction, &projected.camp_id, agent_id)? {
                         return Ok(rejected(
                             "task.assignee_unavailable",
-                            "Task assignee is not a current Camp member",
+                            "Task assignee is not a current Thread member",
                         ));
                     }
                     Some(agent_id.clone())
@@ -2409,6 +2423,7 @@ impl CollaborationService {
         actor: &ActorRef,
         execution_epoch: Option<i64>,
     ) -> Result<Vec<TaskRecord>> {
+        crate::task_capability::require_enabled(database.connection())?;
         let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
         let mut statement = database.connection().prepare(
             r#"
@@ -2443,6 +2458,7 @@ impl CollaborationService {
         execution_epoch: Option<i64>,
         query: &TaskListQuery,
     ) -> Result<TaskListPage> {
+        crate::task_capability::require_enabled(database.connection())?;
         let can_update_any = matches!(actor, ActorRef::User { .. })
             || actor_is_default_lead(database.connection(), camp_id, actor)?;
         task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
@@ -2533,6 +2549,7 @@ impl CollaborationService {
         actor: &ActorRef,
         execution_epoch: Option<i64>,
     ) -> Result<Option<TaskQueryItem>> {
+        crate::task_capability::require_enabled(database.connection())?;
         let can_update_any = matches!(actor, ActorRef::User { .. })
             || actor_is_default_lead(database.connection(), camp_id, actor)?;
         let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
@@ -2669,7 +2686,7 @@ impl CollaborationService {
                     .optional()?
                     .is_some();
                 if !camp_exists {
-                    return Ok(Err(rejected("camp.not_found", "Camp does not exist")));
+                    return Ok(Err(rejected("camp.not_found", "Thread does not exist")));
                 }
                 let display_name = transaction
                     .query_row(
@@ -2681,7 +2698,7 @@ impl CollaborationService {
                 let Some(display_name) = display_name else {
                     return Ok(Err(rejected(
                         "mention_target_unavailable",
-                        "Every Member Mention must identify a present current Camp member",
+                        "Every Member Mention must identify a present current Thread member",
                     )));
                 };
                 if active_address_target(transaction, &camp_id, &envelope.payload.agent_id)?
@@ -2689,7 +2706,7 @@ impl CollaborationService {
                 {
                     return Ok(Err(rejected(
                         "mention_target_unavailable",
-                        "Every Member Mention must identify a present current Camp member",
+                        "Every Member Mention must identify a present current Thread member",
                     )));
                 };
                 let rendered_body = render_plain_text(&content, |agent_id| {
@@ -2769,7 +2786,7 @@ impl CollaborationService {
             .optional()?
             .is_some();
         if !camp_exists {
-            return Ok(Err(rejected("camp.not_found", "Camp does not exist")));
+            return Ok(Err(rejected("camp.not_found", "Thread does not exist")));
         }
         let address = ThreadMessageAddress::Explicit {
             agent_ids: input.addressed_agent_ids.clone(),
@@ -3052,7 +3069,7 @@ impl CollaborationService {
                         )
                         .optional()?;
                     if camp_exists.is_none() {
-                        return Ok(rejected("camp.not_found", "Camp does not exist"));
+                        return Ok(rejected("camp.not_found", "Thread does not exist"));
                     }
                     if !actor_can_write_camp(
                         transaction,
@@ -3062,7 +3079,7 @@ impl CollaborationService {
                     )? {
                         return Ok(rejected(
                             "camp.actor_unavailable",
-                            "Agent Actor is not active in this Camp or its Run epoch is stale",
+                            "Agent Actor is not active in this Thread or its Run epoch is stale",
                         ));
                     }
                     if command.execution.is_some()
@@ -3093,31 +3110,6 @@ impl CollaborationService {
                             "camp_message.no_addressable_member",
                             "Execution request requires at least one addressable Agent",
                         ));
-                    }
-                    if let Some(task_id) = command
-                        .execution
-                        .as_ref()
-                        .and_then(|execution| execution.task_id.as_deref())
-                    {
-                        if resolution.targets.len() != 1 {
-                            return Ok(rejected(
-                                "agent_run.task_recipient_mismatch",
-                                "Task-linked execution requires exactly one recipient",
-                            ));
-                        }
-                        if task_link_admission(
-                            transaction,
-                            task_id,
-                            &command.camp_id,
-                            &resolution.targets[0].agent_id,
-                        )? {
-                            // The task link is valid; claim-time configuration is frozen later.
-                        } else {
-                            return Ok(rejected(
-                                "agent_run.task_not_executable",
-                                "Task is not ready for this executable assignee",
-                            ));
-                        }
                     }
                     // Domain and audit timestamps must reflect the user's wall clock. Execution
                     // Budget observation has a separate non-decreasing clock because its elapsed
@@ -3356,7 +3348,7 @@ fn invite_pending_thread_mentions(
     if active_member_count(transaction, camp_id)? > 0 && default_lead.is_none() {
         return Ok(Some(rejected(
             "camp.default_lead_invariant",
-            "Camp has active members but no Default Lead",
+            "Thread has active members but no Default Lead",
         )));
     }
     let now = chrono::Utc::now().to_rfc3339();
@@ -3392,12 +3384,12 @@ pub(crate) fn add_camp_member_in_tx(
         )
         .optional()?;
     let Some((default_lead, membership_generation)) = camp_state else {
-        return Ok(rejected("camp.not_found", "Camp does not exist"));
+        return Ok(rejected("camp.not_found", "Thread does not exist"));
     };
     if camp_is_pending(transaction, &envelope.payload.camp_id)? {
         return Ok(rejected(
             "camp.pending_activation_required",
-            "A pending Camp must be activated by its first message",
+            "A pending Thread must be activated by its first message",
         ));
     }
     if !actor_has_capability(
@@ -3454,12 +3446,12 @@ pub(crate) fn add_camp_member_in_tx(
             return Ok(rejected("agent.unavailable", "AgentProfile is not active"));
         }
         let current_overrides = serde_json::from_str::<Value>(current_overrides_json)
-            .context("active Camp membership capability overrides are invalid")?;
+            .context("active Thread membership capability overrides are invalid")?;
         if current_overrides != envelope.payload.capability_overrides {
             return Ok(CommandHandlerResult::rejected(
                 "camp.member_capability_conflict",
                 json!({
-                    "message": "The active Camp member has different capability overrides",
+                    "message": "The active Thread member has different capability overrides",
                     "agentId": envelope.payload.agent_id,
                     "currentMembershipVersion": membership_version,
                     "currentMembershipGeneration": membership_generation,
@@ -3509,7 +3501,7 @@ pub(crate) fn add_camp_member_in_tx(
     if active_member_count > 0 && default_lead.is_none() {
         return Ok(rejected(
             "camp.default_lead_invariant",
-            "Camp has active members but no Default Lead",
+            "Thread has active members but no Default Lead",
         ));
     }
 
@@ -3550,13 +3542,13 @@ pub(crate) fn create_camp_in_tx(
     if !matches!(actor, ActorRef::User { .. }) {
         return Ok(rejected(
             "camp.user_required",
-            "Only a User can create a Camp",
+            "Only a User can create a Thread",
         ));
     }
     if normalized_name.chars().count() > CAMP_NAME_MAX_SCALARS {
         return Ok(rejected(
             "camp.name_too_long",
-            "Camp name must not exceed 80 Unicode scalar values",
+            "Thread name must not exceed 80 Unicode scalar values",
         ));
     }
     if command.collaboration_mode != ThreadCollaborationMode::Peer {
@@ -3576,7 +3568,7 @@ pub(crate) fn create_camp_in_tx(
         if !unique_member_ids.insert(member_id.as_str()) {
             return Ok(rejected(
                 "camp.invalid_initial_member",
-                "Initial Camp members must be distinct",
+                "Initial Thread members must be distinct",
             ));
         }
         let presence = transaction
@@ -3953,18 +3945,18 @@ fn load_structured_draft_submission(
     else {
         return Ok(Err(rejected(
             "draft_changed",
-            "Camp Composer Draft no longer matches the requested Revision",
+            "Thread Composer Draft no longer matches the requested Revision",
         )));
     };
     if revision != expected_revision {
         return Ok(Err(rejected(
             "draft_changed",
-            "Camp Composer Draft no longer matches the requested Revision",
+            "Thread Composer Draft no longer matches the requested Revision",
         )));
     }
 
     let composer_document = parse_composer_document_json(&content_json)
-        .context("Camp Composer Draft contains invalid Composer Document")?;
+        .context("Thread Composer Draft contains invalid Composer Document")?;
     let mut content = composer_document_to_content(&composer_document)?;
     validate_user_authored_content(&content)?;
     if reply_to_camp_message_id.is_none()
@@ -4030,7 +4022,7 @@ fn load_structured_draft_submission(
         anyhow::ensure!(!body.trim().is_empty(), "quote.question_required");
     }
     if !prepared_attachment_ids.is_empty() && !source_attachments.is_empty() {
-        anyhow::bail!("Camp Composer Draft mixes legacy Prepared and Source Attachments");
+        anyhow::bail!("Thread Composer Draft mixes legacy Prepared and Source Attachments");
     }
     load_structured_content_submission(
         transaction,
@@ -4072,7 +4064,7 @@ fn load_structured_content_submission(
         if !reply_is_available {
             return Ok(Err(rejected(
                 "camp_message.invalid_reply",
-                "Reply target is outside the Camp or no longer available",
+                "Reply target is outside the Thread or no longer available",
             )));
         }
     }
@@ -4092,7 +4084,7 @@ fn load_structured_content_submission(
         {
             return Ok(Err(rejected(
                 "mention_target_unavailable",
-                "Every Member Mention must identify a present current Camp member",
+                "Every Member Mention must identify a present current Thread member",
             )));
         }
         member_names.insert(
@@ -4105,7 +4097,7 @@ fn load_structured_content_submission(
     {
         return Ok(Err(rejected(
             "camp_message.empty_body",
-            "Camp message must contain text or at least one ready attachment",
+            "Thread message must contain text or at least one ready attachment",
         )));
     }
     let generated_camp_name =
@@ -4280,12 +4272,12 @@ fn queue_camp_message_and_runs(
             || input.legacy_attachment_publication_operation_id.is_some()
             || input.managed_attachment_ingest_intent_id.is_some())
     {
-        anyhow::bail!("Non-Composer Camp message cannot consume Composer attachments");
+        anyhow::bail!("Non-Composer Thread message cannot consume Composer attachments");
     }
     if input.legacy_attachment_publication_operation_id.is_some()
         && input.managed_attachment_ingest_intent_id.is_some()
     {
-        anyhow::bail!("Camp message cannot commit legacy and Managed attachments together");
+        anyhow::bail!("Thread message cannot commit legacy and Managed attachments together");
     }
     let attachment_publication = if input.draft_client.is_desktop()
         && input.consume_composer_draft
@@ -4390,7 +4382,6 @@ fn queue_camp_message_and_runs(
             "addressSource": input.resolution.source,
             "addressedAgentIds": addressed_agent_ids,
             "deliveryIds": delivery_ids,
-            "taskId": input.execution.and_then(|execution| execution.task_id.as_deref()),
         }),
     )?;
     crate::message_changes::record(
@@ -4491,7 +4482,7 @@ fn resolve_address(
                 }
                 return Ok(AddressingOutcome::Rejected(rejected(
                     "camp.default_lead_invariant",
-                    "Camp has active members but no valid Default Lead",
+                    "Thread has active members but no valid Default Lead",
                 )));
             };
             let Some(target) = active_address_target(transaction, camp_id, &default_lead)? else {
@@ -4521,7 +4512,7 @@ fn resolve_address(
                 let Some(target) = active_address_target(transaction, camp_id, agent_id)? else {
                     return Ok(AddressingOutcome::Rejected(rejected(
                         "camp_message.invalid_explicit_target",
-                        "Every explicit target must be an active Camp member",
+                        "Every explicit target must be an active Thread member",
                     )));
                 };
                 targets.push(target);
@@ -4589,7 +4580,7 @@ fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
             [camp_id],
             |row| row.get(0),
         )
-        .context("failed to count active Camp members")
+        .context("failed to count active Thread members")
 }
 
 fn active_address_target(
@@ -4622,7 +4613,7 @@ fn active_address_target(
             },
         )
         .optional()
-        .context("failed to resolve active Camp member Conversation")
+        .context("failed to resolve active Thread member Conversation")
 }
 
 pub(crate) fn actor_can_write_camp(
@@ -4690,7 +4681,9 @@ fn task_read_scope(
         ActorRef::User { .. } => Ok(TaskReadScope::All),
         ActorRef::Agent { .. } => {
             if !actor_can_write_camp(connection, actor, execution_epoch, camp_id)? {
-                anyhow::bail!("task.query_forbidden: AgentRun is stale or outside the active Camp");
+                anyhow::bail!(
+                    "task.query_forbidden: AgentRun is stale or outside the active Thread"
+                );
             }
             Ok(TaskReadScope::All)
         }
@@ -4973,39 +4966,6 @@ fn validate_camp_message_input(command: &SendUserThreadDraftCommand) -> Result<(
         }
     }
     Ok(())
-}
-
-pub(crate) fn task_link_admission(
-    transaction: &Transaction<'_>,
-    task_id: &str,
-    camp_id: &str,
-    recipient_agent_id: &str,
-) -> Result<bool> {
-    let task = transaction
-        .query_row(
-            r#"
-            SELECT status, assignee_agent_id
-            FROM task WHERE id = ?1 AND camp_id = ?2
-            "#,
-            params![task_id, camp_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-        )
-        .optional()?;
-    let Some((status, assignee_agent_id)) = task else {
-        return Ok(false);
-    };
-    if !matches!(status.as_str(), "pending" | "in_progress") {
-        return Ok(false);
-    }
-    let Some(assignee_agent_id) = assignee_agent_id else {
-        return Ok(false);
-    };
-    if assignee_agent_id != recipient_agent_id
-        || !is_active_member(transaction, camp_id, recipient_agent_id)?
-    {
-        return Ok(false);
-    }
-    Ok(true)
 }
 
 pub(crate) fn build_effective_config(
@@ -5331,7 +5291,7 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
             },
         )
         .optional()?
-        .context("CampTurn Execution Budget target does not exist")?;
+        .context("ThreadTurn Execution Budget target does not exist")?;
     let (
         camp_id,
         status,
@@ -5353,7 +5313,7 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
         });
     }
     if !matches!(status.as_str(), "running" | "waiting") {
-        anyhow::bail!("terminal CampTurn cannot newly exhaust its Execution Budget");
+        anyhow::bail!("terminal ThreadTurn cannot newly exhaust its Execution Budget");
     }
 
     let updated = transaction.execute(
@@ -5371,7 +5331,7 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
         params![camp_turn_id, now, reason.as_str(), command_id],
     )?;
     if updated != 1 {
-        anyhow::bail!("CampTurn changed before its Execution Budget was exhausted");
+        anyhow::bail!("ThreadTurn changed before its Execution Budget was exhausted");
     }
     let settlement = crate::runtime::settle_abortive_camp_turn_in_tx(
         transaction,
@@ -5434,7 +5394,16 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
     // link cannot be nulled. The occurrence belongs to this Camp: remove it
     // (its notification deliveries cascade) before the Camp's messages and
     // Deliveries. The Automation definition and other occurrences are kept.
-    transaction.execute("DELETE FROM automation_run WHERE camp_id = ?1", [camp_id])?;
+    // Historical migration fixtures also use aggregate deletion before the
+    // Automation schema exists (for example, the v135-v139 Pi receipt owner).
+    let automation_runs_exist: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'automation_run')",
+        [],
+        |row| row.get(0),
+    )?;
+    if automation_runs_exist {
+        transaction.execute("DELETE FROM automation_run WHERE camp_id = ?1", [camp_id])?;
+    }
     transaction.execute(
         "DELETE FROM message_attachment WHERE camp_id = ?1",
         [camp_id],
@@ -5732,7 +5701,7 @@ fn validate_task_input(command: &CreateTaskCommand) -> Result<()> {
         || command.title.trim().is_empty()
         || command.assignee_agent_id.trim().is_empty()
     {
-        anyhow::bail!("Task Camp, title, and assignee must not be empty");
+        anyhow::bail!("Task Thread, title, and assignee must not be empty");
     }
     if command.title.trim().chars().count() > 160 {
         anyhow::bail!("Task title must not exceed 160 characters");
@@ -5888,7 +5857,7 @@ fn membership_generation_conflict(current_generation: i64) -> CommandHandlerResu
     CommandHandlerResult::rejected(
         "camp.membership_generation_conflict",
         json!({
-            "message": "Camp membership changed before this command was applied",
+            "message": "Thread membership changed before this command was applied",
             "currentMembershipGeneration": current_generation,
         }),
     )
@@ -5912,7 +5881,7 @@ fn validate_membership_mutation_source(
     if !TRUSTED_MEMBERSHIP_SYSTEM_COMPONENTS.contains(&component_id.as_str()) {
         return Ok(Some(rejected(
             "camp.membership_system_not_allowed",
-            "System component is not allowlisted for Camp membership changes",
+            "System component is not allowlisted for Thread membership changes",
         )));
     }
     let Some(source) = source else {
@@ -5945,7 +5914,7 @@ fn validate_membership_mutation_source(
     let Some(last_generation) = last_generation else {
         return Ok(Some(rejected(
             "camp.membership_source_untrusted",
-            "Membership source is not bound to this Camp and System component",
+            "Membership source is not bound to this Thread and System component",
         )));
     };
     if source.reconciliation_generation != last_generation + 1 {
@@ -6185,7 +6154,7 @@ pub(crate) fn end_camp_membership(
                 ))
             },
         )
-        .context("active Camp membership disappeared before removal")?;
+        .context("active Thread membership disappeared before removal")?;
     let next_default_lead_agent_id = if current_lead.as_deref() == Some(agent_id) {
         if let Some(replacement) = replacement_default_lead_agent_id {
             let replacement_valid: bool = transaction.query_row(
@@ -6207,7 +6176,7 @@ pub(crate) fn end_camp_membership(
             )?;
             if !replacement_valid {
                 anyhow::bail!(
-                    "camp.default_lead_unavailable: replacement must be another active Camp member"
+                    "camp.default_lead_unavailable: replacement must be another active Thread member"
                 );
             }
             Some(replacement.to_string())
@@ -6324,7 +6293,7 @@ pub(crate) fn end_camp_membership(
         params![camp_id, agent_id, now],
     )?;
     if changed != 1 {
-        anyhow::bail!("active Camp membership changed before removal cutover");
+        anyhow::bail!("active Thread membership changed before removal cutover");
     }
 
     let membership_version = current_membership_version + 1;
@@ -8171,6 +8140,7 @@ mod slow_tests {
     #[test]
     fn removal_cutover_releases_work_persists_reconciliation_and_never_revives_the_old_run() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
@@ -8243,7 +8213,7 @@ mod slow_tests {
         assert!(!preview.is_default_lead);
         assert!(preview.next_default_lead_agent_id.is_none());
         assert_eq!(preview.non_terminal_agent_run_count, 1);
-        assert_eq!(preview.open_assigned_task_count, 1);
+        assert_eq!(preview.open_assigned_task_count, Some(1));
         let removed = service
             .remove_camp_member(
                 &mut database,
@@ -8906,6 +8876,7 @@ mod slow_tests {
     #[test]
     fn camp_rename_lead_change_and_quiescent_delete_with_cleanup_are_versioned() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
@@ -10009,7 +9980,7 @@ mod slow_tests {
         assert_eq!(rejected_empty.result.code, "camp_message.empty_body");
         assert_eq!(
             rejected_empty.result.payload["message"],
-            "Camp message must contain text or at least one ready attachment"
+            "Thread message must contain text or at least one ready attachment"
         );
         let empty = store.load_draft(&database, &camp_id).unwrap();
 
@@ -10819,26 +10790,88 @@ mod slow_tests {
         let baseline_turns = row_count(&database, "camp_turn");
         let baseline_runs = row_count(&database, "agent_run");
 
-        let created = service
-            .create_task(
-                &mut database,
-                &user_envelope(
-                    "create-lightweight-task",
-                    Some(&camp_id),
-                    CreateTaskCommand {
-                        camp_id: camp_id.clone(),
-                        title: "  实现轻量 Task  ".to_string(),
-                        description: "  不自动唤醒任何队员  ".to_string(),
-                        assignee_agent_id: "agent_2".to_string(),
-                    },
-                ),
-            )
-            .expect("Task creation should succeed");
+        let create = user_envelope(
+            "create-lightweight-task",
+            Some(&camp_id),
+            CreateTaskCommand {
+                camp_id: camp_id.clone(),
+                title: "  实现轻量 Task  ".to_string(),
+                description: "  不自动唤醒任何队员  ".to_string(),
+                assignee_agent_id: "agent_2".to_string(),
+            },
+        );
+        assert!(!crate::task_capability::enabled(database.connection()).unwrap());
+        let refused = service.create_task(&mut database, &create).unwrap();
+        assert_eq!(refused.result.code, "task.feature_disabled");
+        assert_eq!(row_count(&database, "task"), 0);
+        crate::task_capability::set(database.connection(), true).unwrap();
+        // A rejected command is a receipt too; use a new identity for the new operation.
+        let create = user_envelope("create-enabled-task", Some(&camp_id), create.payload);
+        let created = service.create_task(&mut database, &create).unwrap();
         let task_id = created.result.payload["taskId"]
             .as_str()
             .unwrap()
             .to_string();
         assert_eq!(created.result.status, CommandResultStatus::Applied);
+        crate::db::assert_task_capability_upgrade(&mut database);
+        let projection = serde_json::to_value(
+            ReadModelService
+                .camp_open_projection(&mut database, &camp_id)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(projection["tasksEnabled"], false);
+        assert!(projection.get("tasks").is_none());
+        assert!(projection["coverage"].get("tasks").is_none());
+        let snapshot = serde_json::to_value(
+            ReadModelService
+                .camp_snapshot(&mut database, &camp_id)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(snapshot.get("tasks").is_none());
+        let replay = service.create_task(&mut database, &create).unwrap();
+        assert_eq!(replay.result.payload, created.result.payload);
+        assert!(
+            service
+                .get_visible_task(&database, &camp_id, &task_id, &create.actor, None)
+                .unwrap_err()
+                .to_string()
+                .contains("task.feature_disabled")
+        );
+        assert!(
+            service
+                .list_visible_tasks(&database, &camp_id, &create.actor, None)
+                .unwrap_err()
+                .to_string()
+                .contains("task.feature_disabled")
+        );
+        let blocked_update = service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "disabled-update",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id: task_id.clone(),
+                        title: Some("must not change".into()),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(blocked_update.result.code, "task.feature_disabled");
+        crate::task_capability::set(database.connection(), true).unwrap();
+        assert_eq!(
+            service
+                .get_visible_task(&database, &camp_id, &task_id, &create.actor, None)
+                .unwrap()
+                .unwrap()
+                .task
+                .title,
+            "实现轻量 Task"
+        );
+
         assert_eq!(row_count(&database, "camp_message"), baseline_messages);
         assert_eq!(row_count(&database, "camp_turn"), baseline_turns);
         assert_eq!(row_count(&database, "agent_run"), baseline_runs);
@@ -11007,6 +11040,7 @@ mod slow_tests {
     #[test]
     fn legacy_task_requirements_are_projected_and_only_cleared_by_a_changed_description() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let created = service
@@ -11121,6 +11155,7 @@ mod slow_tests {
     #[test]
     fn task_query_filters_before_stable_cursor_pagination_without_writes() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
@@ -11320,6 +11355,7 @@ mod slow_tests {
     #[test]
     fn agent_task_updates_respect_lead_and_assignee_authority() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
@@ -11681,6 +11717,7 @@ mod slow_tests {
     #[test]
     fn queued_run_remains_dispatchable_after_task_changes() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
@@ -11803,6 +11840,7 @@ mod slow_tests {
     #[test]
     fn remove_member_atomically_ends_membership_releases_tasks_and_reconciles_lead() {
         let (mut database, directory) = test_database();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let collaboration = CollaborationService::default();
         let camp_id = create_camp_with_members(
             &collaboration,
@@ -11863,7 +11901,7 @@ mod slow_tests {
         assert!(preview.removable);
         assert_eq!(preview.display_name, "研究员");
         assert_eq!(preview.current_camp_membership_count, 2);
-        assert_eq!(preview.open_assigned_task_count, 1);
+        assert_eq!(preview.open_assigned_task_count, Some(1));
         assert_eq!(preview.default_lead_camp_count, 2);
         assert_eq!(preview.sole_member_camp_count, 1);
         let empty_impact = preview

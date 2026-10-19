@@ -10,12 +10,12 @@ use serde_json::{Map, Value, json};
 
 use crate::team_tool_catalog::builtin_tool_definitions;
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 41;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 42;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 3;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 41;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 42;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 14;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v41";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v42";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -81,6 +81,8 @@ pub struct BuiltinToolCliContext {
     pub process_id: String,
     pub process_token: String,
     pub lease: Option<BuiltinToolLeaseContext>,
+    #[serde(default)]
+    pub tasks_enabled: bool,
 }
 
 impl BuiltinToolCliContext {
@@ -567,12 +569,15 @@ pub fn builtin_tool_identity_by_command(
         .find(|identity| identity.group == group && identity.action == action)
 }
 
-pub fn builtin_tool_list() -> Result<BuiltinToolList> {
+pub fn builtin_tool_list(tasks_enabled: bool) -> Result<BuiltinToolList> {
     let definitions = catalog_operations()?;
     Ok(BuiltinToolList {
         contract_version: BUILTIN_TOOL_CONTRACT_VERSION,
         operations: definitions
             .iter()
+            .filter(|definition| {
+                tasks_enabled || !crate::task_capability::is_task_operation(&definition.name)
+            })
             .map(|definition| BuiltinToolListItem {
                 name: definition.name.clone(),
                 command: definition.command.clone(),
@@ -582,8 +587,17 @@ pub fn builtin_tool_list() -> Result<BuiltinToolList> {
     })
 }
 
-pub fn builtin_tool_description(operation: &str) -> Result<BuiltinToolDescription> {
+pub fn builtin_tool_description(
+    operation: &str,
+    tasks_enabled: bool,
+) -> Result<BuiltinToolDescription> {
     let operation = crate::thread_compat::canonical_operation(operation);
+    anyhow::ensure!(
+        tasks_enabled || !crate::task_capability::is_task_operation(operation),
+        "{}: {}",
+        crate::task_capability::DISABLED_CODE,
+        crate::task_capability::DISABLED_MESSAGE
+    );
     let definitions = catalog_operations()?;
     let definition = definitions
         .iter()
@@ -816,14 +830,15 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
             recovery: BuiltinToolRecovery::FixInput,
         });
     }
+    if crate::task_capability::is_task_operation(operation) {
+        errors.push(BuiltinToolErrorContract {
+            code: crate::task_capability::DISABLED_CODE.into(),
+            recovery: BuiltinToolRecovery::Stop,
+        });
+    }
     match operation {
         "thread.message.send" => {
-            for code in [
-                "message.addressing_invalid",
-                "message.public_only_conflict",
-                "message.task_recipient_ambiguous",
-                "message.invalid_task",
-            ] {
+            for code in ["message.addressing_invalid", "message.public_only_conflict"] {
                 errors.push(BuiltinToolErrorContract {
                     code: code.to_string(),
                     recovery: BuiltinToolRecovery::FixInput,
@@ -1067,12 +1082,12 @@ pub fn builtin_tool_envelope_schema() -> Value {
 }
 
 pub fn validate_builtin_tool_contract() -> Result<()> {
-    let list = builtin_tool_list()?;
+    let list = builtin_tool_list(true)?;
     if list.operations.len() != BUILTIN_TOOL_CLI_IDENTITIES.len() {
         bail!("Built-in Tool catalog is incomplete");
     }
     for identity in BUILTIN_TOOL_CLI_IDENTITIES {
-        let description = builtin_tool_description(identity.operation)?;
+        let description = builtin_tool_description(identity.operation, true)?;
         let expected_command = if identity.action.is_empty() {
             vec![identity.group]
         } else {
@@ -1100,10 +1115,10 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 41);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 41);
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 42);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 42);
         assert_eq!(BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION, 14);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v41");
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v42");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -1199,7 +1214,7 @@ mod tests {
 
     #[test]
     fn list_and_describe_share_the_current_catalog() {
-        let list = builtin_tool_list().unwrap();
+        let list = builtin_tool_list(true).unwrap();
         assert!(
             serde_json::to_value(&list)
                 .unwrap()
@@ -1207,7 +1222,7 @@ mod tests {
                 .is_none()
         );
         for operation in &list.operations {
-            let description = builtin_tool_description(&operation.name).unwrap();
+            let description = builtin_tool_description(&operation.name, true).unwrap();
             assert_eq!(description.name, operation.name);
             assert_eq!(description.summary, operation.summary);
             assert_eq!(description.command, operation.command);
@@ -1218,7 +1233,7 @@ mod tests {
                     && error.recovery == BuiltinToolRecovery::Stop
             }));
         }
-        let camp_search = builtin_tool_description("thread.search").unwrap();
+        let camp_search = builtin_tool_description("thread.search", true).unwrap();
         assert!(camp_search.errors.iter().any(|error| {
             error.code == "camp.invalid_argument" && error.recovery == BuiltinToolRecovery::FixInput
         }));
@@ -1237,7 +1252,7 @@ mod tests {
             recovery_for_operation_error("mission.status", "mission.invalid_source_message"),
             BuiltinToolRecovery::FixInput
         );
-        let mission_status = builtin_tool_description("mission.status").unwrap();
+        let mission_status = builtin_tool_description("mission.status", true).unwrap();
         assert!(mission_status.errors.iter().any(|error| {
             error.code == "mission.invalid_source_message"
                 && error.recovery == BuiltinToolRecovery::FixInput
@@ -1248,7 +1263,7 @@ mod tests {
                 .iter()
                 .all(|error| error.code != "mission.source_message_required")
         );
-        let send = builtin_tool_description("thread.message.send").unwrap();
+        let send = builtin_tool_description("thread.message.send", true).unwrap();
         assert_eq!(
             send.arguments
                 .iter()

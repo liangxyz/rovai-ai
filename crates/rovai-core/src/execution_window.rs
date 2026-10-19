@@ -96,7 +96,7 @@ pub fn read_range(
     );
     let transaction = database.connection_mut().transaction()?;
     let belongs = agent_run_belongs_to_camp(&transaction, camp_id, agent_run_id)?;
-    ensure!(belongs, "AgentRun does not exist in this Camp");
+    ensure!(belongs, "AgentRun does not exist in this Thread");
     let through_sequence: i64 = transaction.query_row(
         "SELECT COALESCE(MAX(sequence), 0) FROM agent_run_execution_evidence WHERE agent_run_id = ?1",
         [agent_run_id], |row| row.get(0),
@@ -281,7 +281,7 @@ pub fn read_changes(
     );
     let transaction = database.connection_mut().transaction()?;
     let belongs = agent_run_belongs_to_camp(&transaction, camp_id, agent_run_id)?;
-    ensure!(belongs, "AgentRun does not exist in this Camp");
+    ensure!(belongs, "AgentRun does not exist in this Thread");
     let through_change_sequence: i64 = transaction.query_row(
         "SELECT execution_evidence_change_sequence FROM agent_run WHERE id = ?1",
         [agent_run_id],

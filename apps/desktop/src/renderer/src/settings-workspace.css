@@ -1499,3 +1499,9 @@
 .runtime-conflict-value { color: var(--muted); overflow-wrap: anywhere; }
 .runtime-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .runtime-conflict-actions .quiet-button { min-height: 32px; }
+
+:root .settings-panel .general-world-map-setting.general-task-setting {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}

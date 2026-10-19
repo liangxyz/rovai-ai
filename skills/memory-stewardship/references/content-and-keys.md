@@ -7,7 +7,7 @@ Write one durable understanding, usable without this conversation, as specific g
 Examples:
 
 - Preference: Distinguish confirmed decisions, assumptions and open questions in implementation plans.
-- Agreement: Include the goal, verified state, evidence, open issues and next action in durable Task handoffs.
+- Agreement: Include the goal, verified state, evidence, open issues and next action in handoffs.
 - Lesson: Once requirements are clear, produce a verifiable implementation without reopening resolved questions.
 
 A one-time reaction is not automatically a stable rule. Write actual Memory content in the user's language.

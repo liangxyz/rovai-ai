@@ -1773,7 +1773,7 @@ impl ExecutionEvidenceService {
                 },
             )
             .optional()?
-            .context("Execution Evidence does not exist in this Camp")?;
+            .context("Execution Evidence does not exist in this Thread")?;
         if let Some(payload) = crate::execution_text::live_payload(database, evidence_id)? {
             return Ok(payload);
         }

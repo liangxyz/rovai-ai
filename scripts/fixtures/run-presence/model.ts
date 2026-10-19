@@ -250,6 +250,7 @@ const invalidationListeners = new Set<() => void>()
 const controls = { steerReview: false, holdContinue: false, holdStop: false, holdDispatch: false, holdContinuationProjection: false, holdEntrySnapshot: false,
   failNextExecutionPage: executionReadMode === 'fail', holdExecutionPage: executionReadMode === 'hold',
   holdExecutionChanges: false, liveEvidence: false,
+  holdSourceRead: false, failNextSourceRead: false, wrongSourceOwner: false,
   persistServer: false, continuationMode: 'normal', stopError: false,
   executionReads: [] as any[], hiddenMessages: [] as any[],
   continueAttempts: [] as any[], stopAttempts: [] as any[], receipts: new Map<string, any>() }
@@ -264,6 +265,29 @@ export const model = {
   },
   get: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) },
   note: (note: string) => update({ note }),
+  showSourceCase(kind: 'batch' | 'batch-history' | 'history' | 'missing' | 'withdrawn' | 'legacy' | 'attachment') {
+    this.setScenario('stream'); halt()
+    const source = makeMessage('source-first', 1, '第一条原始输入：核对执行行的来源。')
+    const peer = makeMessage('source-peer', 2, '第二条来自奥黛丽的补充。', 1)
+    const following = Array.from({ length: 12 }, (_, index) => makeMessage(`source-following-${index}`, index + 3,
+      `后续消息 ${index + 1}，不是这次执行的输入。`, 2))
+    if (kind === 'attachment') {
+      source.body = ''; source.content = []
+      source.attachments = [{ id: 'source-file', displayName: '核对清单.txt', kind: 'file',
+        mediaType: 'text/plain', byteSize: 128, previewKind: 'none', availability: 'available' }]
+    }
+    if (kind === 'withdrawn') source.withdrawn = true
+    const absent = kind === 'history' || kind === 'batch-history' || kind === 'missing'
+    const run = { ...makeRun('run-alice', 0, 'running', kind === 'legacy' ? [] : kind.startsWith('batch')
+      ? [source.id, peer.id, source.id] : [source.id]), anchorMessageId: following.at(-1)!.id,
+      publicTailSequenceAtStart: 14, inputSummary: source.body }
+    controls.hiddenMessages = kind === 'history' || kind === 'batch-history' ? [source] : []
+    controls.holdSourceRead = false; controls.failNextSourceRead = false; controls.wrongSourceOwner = false
+    controls.executionReads = []
+    update({ streamPaused: true, snapshot: { ...state.snapshot,
+      messages: [...(absent ? [] : [source]), peer, ...following], agentRuns: [run],
+      messageDeliveries: [], executionEvidence: evidence(run) } })
+  },
   showSteerCase(kind: 'empty' | 'attachment' | 'idle' | 'other-member' | 'ready' | 'mixed' | 'incompatible' | 'not-ready' | 'unknown' | 'accepted' | 'mixed-receipt' | 'queued' | 'ended') {
     this.setScenario('stream'); halt();
     controls.steerReview = true
@@ -498,9 +522,15 @@ export const model = {
       }
       if (method === 'thread.messages.anchorPreview') return { schemaVersion: 1, threadId: state.snapshot.thread.id, messageId: input.messageId, throughGlobalSequence: state.version, sourceAvailable: true, firstReply: null }
       if (method === 'threads.members.fast.set') return { status: 'applied', payload: {} }
-      if (method === 'thread.messages.around') return { schemaVersion: 1, threadId: state.snapshot.thread.id, anchorMessageId: input.messageId,
-        sourceAvailable: [...state.snapshot.messages, ...controls.hiddenMessages].some((message: any) => message.id === input.messageId),
-        messages: [...state.snapshot.messages, ...controls.hiddenMessages], hasEarlier: false, hasLater: false }
+      if (method === 'thread.messages.around') {
+        if (controls.failNextSourceRead) { controls.failNextSourceRead = false; throw new Error('Simulated source read failure') }
+        const response = { schemaVersion: 1, threadId: controls.wrongSourceOwner ? 'wrong-thread' : state.snapshot.thread.id,
+          anchorMessageId: input.messageId, throughGlobalSequence: state.version,
+          sourceAvailable: [...state.snapshot.messages, ...controls.hiddenMessages].some((message: any) => message.id === input.messageId),
+          messages: structuredClone([...state.snapshot.messages, ...controls.hiddenMessages]), hasEarlier: false, hasLater: false }
+        while (controls.holdSourceRead) await new Promise(resolve => setTimeout(resolve, 20))
+        return response
+      }
       if (method === 'agentRunEvidence.getContent') {
         const e = state.snapshot.executionEvidence.find((x: any) => x.id === input.evidenceId)
         return { payload: e?.payload || {}, canonical: e?.canonical || null }

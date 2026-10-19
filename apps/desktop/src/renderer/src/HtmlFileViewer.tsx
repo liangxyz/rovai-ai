@@ -9,20 +9,21 @@ import { UiText, uiAttribute } from './interface-language'
 
 const labels = { script: '脚本错误', promise: '异步脚本错误', resource: '资源加载失败', policy: '浏览器策略阻止', document: '页面加载失败', channel: '诊断通道不可用' }
 
-export function HtmlViewer({ tab, pathControl, updateAction }: {
-  tab: FilePreviewTabModel; pathControl: ReactNode; updateAction: ReactNode
+export function HtmlViewer({ tab, pathControl, updateAction, downloadAction }: {
+  tab: FilePreviewTabModel; pathControl: ReactNode; updateAction: ReactNode; downloadAction: ReactNode
 }): React.JSX.Element {
   const versions = [{ file: tab.file, content: tab.content, candidate: false },
     ...(tab.candidate ? [{ file: tab.candidate.file, content: tab.candidate.loaded.content, candidate: true }] : [])]
   return <>{versions.map(version => <div key={version.file?.handleId ?? tab.id}
     className="file-preview-html-version" hidden={version.candidate} inert={version.candidate}>
     <HtmlPageViewer tab={{ ...tab, file: version.file, content: version.content }}
-      candidate={version.candidate} pathControl={pathControl} updateAction={updateAction} />
+      candidate={version.candidate} downloadAction={version.candidate ? null : downloadAction} pathControl={pathControl} updateAction={updateAction} />
   </div>)}</>
 }
 
-function HtmlPageViewer({ tab, pathControl, updateAction, candidate }: {
+function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candidate }: {
   candidate: boolean
+  downloadAction: ReactNode
   tab: FilePreviewTabModel
   pathControl: ReactNode
   updateAction: ReactNode
@@ -124,12 +125,23 @@ function HtmlPageViewer({ tab, pathControl, updateAction, candidate }: {
   </button> : summary && <span className="file-preview-html-feedback">{summary}</span>
   return <div className="file-preview-html-stage" data-document-state={documentState} data-script-state={scriptFailed ? 'error' : 'no-error-observed'} data-resource-state={resourceFailed ? 'partial-failure' : 'no-error-observed'} data-channel-state={channelState} data-server-diagnostics-state={loadState.serverDiagnostics}>
     <span className="sr-only" role="status">{summary}</span>
-    {(pathControl || feedback || updateAction) && <div className={pathControl ? 'file-preview-path-row' : 'file-preview-html-feedback-row'}>
+    {(pathControl || feedback || updateAction || downloadAction) && <div className={pathControl || downloadAction ? 'file-preview-path-row' : 'file-preview-html-feedback-row'}>
       {pathControl}
       {updateAction}
       {feedback}
-      {pathControl && <button type="button" className="file-preview-html-source-toggle" aria-pressed={sourceMode}
-        onClick={() => toggleHtmlSource(tab.id)}>{sourceMode ? uiAttribute("交互预览") : uiAttribute("源码")}</button>}
+      <div className="file-preview-html-actions">
+        {(pathControl || downloadAction) && <div className="file-preview-view-switch" role="group" aria-label={uiAttribute('HTML 视图')}>
+          <button type="button" className="file-action-button" aria-label={uiAttribute('交互预览')} title={uiAttribute('交互预览')}
+            aria-pressed={!sourceMode} onClick={() => { if (sourceMode) toggleHtmlSource(tab.id) }}>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 8h14M6 6h.01M9 6h.01"/></svg>
+          </button>
+          <button type="button" className="file-action-button" aria-label={uiAttribute('查看源码')} title={uiAttribute('查看源码')}
+            aria-pressed={sourceMode} onClick={() => { if (!sourceMode) toggleHtmlSource(tab.id) }}>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6-4 4 4 4m8-8 4 4-4 4M11.5 3.5l-3 13"/></svg>
+          </button>
+        </div>}
+        {downloadAction}
+      </div>
     </div>}
     {hasDetails && <div id={detailsId} className="file-preview-html-diagnostics" hidden={!expanded}>
       {tab.refreshError && <p role="alert"><UiText zh={"重新加载失败："} />{tab.refreshError}<UiText zh={"。已显示的内容会保留。"} /></p>}

@@ -1,3 +1,4 @@
+import { useTaskCapability } from './TaskCapabilityProvider'
 import { WindowCloseSettings } from './WindowCloseSettings'
 import { GeneralLeadSelect } from './GeneralLeadSelect'
 import { readErrorMessage } from './error-message'
@@ -57,6 +58,7 @@ export function GeneralSettings({
   onPreferencesChange?(preferences: GeneralPreferencesSnapshot): void
 }): React.JSX.Element {
   if (!api) throw new Error(uiAttribute('通用设置缺少客户端偏好适配。'))
+  const tasks = useTaskCapability()
   const t = useUiText()
   const interfaceLanguage = useInterfaceLanguage()
   const [preferences, setPreferences] = useState<GeneralPreferencesSnapshot | null>(initialPreferences)
@@ -548,6 +550,12 @@ export function GeneralSettings({
                 <button className="quiet-button compact" type="button" onClick={() => void loadPreferences()}><UiText zh={"重新读取"} /></button>
               </div>
             )}
+            <label className="general-world-map-setting general-task-setting">
+              <span><strong><UiText zh="会话任务" /></strong><small id="general-task-description"><UiText zh="在所有会话中提供任务面板和队员任务工具；关闭不删除已有任务记录。" /></small></span>
+              <input type="checkbox" role="switch" aria-label={uiAttribute('会话任务')} aria-describedby="general-task-description" checked={tasks.enabled} disabled={!tasks.ready || tasks.saving} onChange={event => void tasks.setEnabled(event.target.checked)} />
+            </label>
+            {tasks.saving && <p className="general-inline-status" role="status"><UiText zh="正在保存…" /></p>}
+            {tasks.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={tasks.error === 'save' ? '未能保存，请重试。' : '无法读取会话任务设置，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void tasks.retry()}><UiText zh="重试" /></button></div>}
           </div>
         </section>
 

@@ -1,6 +1,5 @@
 import { useAttachmentLocation } from './attachment-location'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
-import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import { attachmentRevealLabel } from './AttachmentCard'
 import { ImageContextMenu, type ImageAction, type ImageMenuPosition } from './ImageContextMenu'
@@ -243,7 +242,7 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [menu, setMenu] = useState<ImageMenuPosition | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [actionNotice, setActionNotice] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<{ text: string; silent?: boolean; failed?: boolean } | null>(null)
   const [action, setAction] = useState<ImageAction | null>(null)
   const actionPending = useRef(false)
   const [refreshRevision, setRefreshRevision] = useState(0)
@@ -252,9 +251,25 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
   const hadCachedPayload = useRef(false)
   const committedUrl = useRef<string | null>(null)
   const ownedUrls = useRef(new Set<string>())
+  const canDownload = source.kind === 'attachment' && client.attachments.kind === 'download'
+  const downloadAvailable = canDownload && ['available', 'unknown'].includes(availability)
+
+  const downloadFile = async (): Promise<void> => {
+    if (source.kind !== 'attachment' || client.attachments.kind !== 'download' || actionPending.current) return
+    actionPending.current = true
+    setAction('save'); setActionNotice(null)
+    try {
+      const result = await client.attachments.download(source.locator)
+      setAvailability(result.availability)
+      if (result.error) throw new Error(uiAttribute('下载附件失败'))
+      setActionNotice({ text: uiAttribute('已交给浏览器下载。'), silent: true })
+    } catch (error) {
+      setActionNotice({ text: error instanceof Error ? error.message : uiAttribute('下载附件失败'), failed: true })
+    } finally { actionPending.current = false; setAction(null) }
+  }
 
   useEffect(() => {
-    if (!actionNotice || action) return
+    if (!actionNotice || actionNotice.failed || action) return
     const timer = window.setTimeout(() => setActionNotice(null), 5000)
     return () => window.clearTimeout(timer)
   }, [actionNotice, action])
@@ -263,13 +278,13 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
     if (actionPending.current) return
     actionPending.current = true
     setAction(nextAction)
-    setActionNotice(nextAction === 'copy' ? uiAttribute('正在复制图片…') : null)
+    setActionNotice(nextAction === 'copy' ? { text: uiAttribute('正在复制图片…') } : null)
     try {
       if (nextAction === 'copy') {
         const image = tile.current?.querySelector('img')
         if (!image) throw new Error('image_unavailable')
         await writeClipboardImage(image)
-        setActionNotice(uiAttribute('已复制图片'))
+        setActionNotice({ text: uiAttribute('已复制图片') })
       } else if (nextAction === 'save') {
         if (!url) throw new Error('image_unavailable')
         const link = document.createElement('a')
@@ -283,17 +298,17 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
         link.remove()
       } else if (nextAction === 'path') {
         if (!fileLocation.location?.path || !await writeClipboardText(fileLocation.location.path)) throw new Error('copy_failed')
-        setActionNotice(uiAttribute('已复制完整路径'))
+        setActionNotice({ text: uiAttribute('已复制完整路径') })
       } else if (source.kind === 'attachment' && client.attachments.kind === 'native') {
         const result = await client.attachments.reveal(source.locator)
         setAvailability(result.availability)
         if (result.error) throw new Error('reveal_failed')
       }
     } catch {
-      setActionNotice(nextAction === 'copy' ? uiAttribute('未能复制图片，请重试或保存图片。')
+      setActionNotice({ text: nextAction === 'copy' ? uiAttribute('未能复制图片，请重试或保存图片。')
         : nextAction === 'save' ? uiAttribute('未能保存图片，请重试。')
           : nextAction === 'path' ? uiAttribute('未能复制路径，请重试。')
-            : uiAttribute('无法显示此附件所在位置。'))
+            : uiAttribute('无法显示此附件所在位置。') })
     } finally {
       actionPending.current = false
       setAction(null)
@@ -322,7 +337,8 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
     displayName={source.image.displayName} ready={Boolean(url)} busy={action}
     hasPath={Boolean(fileLocation.location?.path)}
     revealLabel={menu && source.kind === 'attachment' && client.attachments.kind === 'native' ? attachmentRevealLabel(client.platform) : undefined}
-    onAction={value => { void runImageAction(value) }} />
+    saveLabel={canDownload ? uiAttribute('下载原图') : undefined} canSave={canDownload ? downloadAvailable : Boolean(url)}
+    onAction={value => { void (value === 'save' && canDownload ? downloadFile() : runImageAction(value)) }} />
 
   const createOwnedUrl = useCallback((blob: Blob): string => {
     const nextUrl = URL.createObjectURL(blob)
@@ -431,37 +447,52 @@ function ImageTile({ source }: { source: GalleryImage }): JSX.Element {
       ? uiAttribute('图片不可读')
       : availability === 'kind_changed'
         ? uiAttribute('文件类型已变化')
-        : uiAttribute('图片已不可用')
+        : canDownload && availability === 'available' ? uiAttribute('暂不支持预览') : uiAttribute('图片已不可用')
   const loading = !url && !failed
+  const canOpen = Boolean(url) || (canDownload && failed)
 
   return (
     <figure className="image-tile" ref={tile} title={fileLocation.label}
       onMouseEnter={fileLocation.inspect} onFocus={fileLocation.inspect}
-      onContextMenu={showMenu}>
+      onContextMenu={event => event.preventDefault()}>
       <button type="button" className="image-tile-preview"
-        aria-disabled={!url}
+        aria-disabled={!canOpen}
         aria-label={uiAttribute("查看大图 {0}", String(source.image.displayName))}
         aria-busy={loading}
-        onClick={() => { if (url) showPreview() }}
-        onKeyDown={showMenu}>
+        onClick={() => { if (canOpen) showPreview() }}>
         {url ? <img src={url} alt={source.image.displayName} />
           : <span className="image-tile-placeholder">
               {failed ? unavailableLabel : uiAttribute("正在读取图片…")}
             </span>}
       </button>
+
       {notice && <figcaption className="image-tile-notice" role="status">{notice}</figcaption>}
-      {!open && contextMenu}
-      {actionNotice && createPortal(<div className="image-action-notice" role="status" aria-hidden={open || undefined}>{actionNotice}</div>, document.body)}
-      {url && (
-        <Dialog.Root open={open} onOpenChange={setOpen}>
+      {canOpen && (
+        <Dialog.Root open={open} onOpenChange={value => { setOpen(value); if (!value) setMenu(null) }}>
           <Dialog.Portal>
             <Dialog.Overlay className="attachment-lightbox-overlay" />
             <Dialog.Content className="attachment-lightbox image-gallery-lightbox" aria-describedby={undefined}
               onContextMenu={showMenu} onKeyDown={showMenu}
-              onCloseAutoFocus={(event) => { event.preventDefault() }}>
+              onCloseAutoFocus={event => { event.preventDefault(); tile.current?.querySelector<HTMLButtonElement>('.image-tile-preview')?.focus({ preventScroll: true }) }}>
               <Dialog.Title className="sr-only"><UiText zh={"图片预览"} /></Dialog.Title>
-              <span className="sr-only" role="status">{actionNotice}</span>
-              <img src={url} alt={source.image.displayName} />
+              {url ? <img src={url} alt={source.image.displayName} /> : <div className="image-lightbox-unavailable">
+                <p>{availability === 'available' ? uiAttribute('此图片暂不支持在线预览，可下载到本机查看。') : unavailableLabel}</p>
+              </div>}
+              <div className="image-lightbox-actions">
+                <button type="button" className="file-action-button" title={uiAttribute('复制图片')} aria-label={uiAttribute('复制图片')}
+                  disabled={action !== null || !url} onClick={() => void runImageAction('copy')}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M12 7V3H3v9h4"/></svg>
+                </button>
+                {(canDownload ? downloadAvailable : Boolean(url)) && <button type="button" className="file-action-button"
+                  title={action === 'save' ? uiAttribute('准备下载…') : canDownload ? uiAttribute('下载原图') : uiAttribute('保存图片')}
+                  aria-label={canDownload ? uiAttribute('下载原图') : uiAttribute('保存图片')} aria-busy={action === 'save'} disabled={action !== null}
+                  onClick={() => void (canDownload ? downloadFile() : runImageAction('save'))}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true" className={action === 'save' ? 'file-action-spinner' : undefined}>
+                    <path d={action === 'save' ? 'M17 10a7 7 0 1 1-7-7' : 'M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4'} />
+                  </svg>
+                </button>}
+              </div>
+              {actionNotice && <div className={actionNotice.silent ? 'sr-only' : 'image-lightbox-feedback'} role={actionNotice.failed ? 'alert' : 'status'}>{actionNotice.text}</div>}
               <Dialog.Close className="attachment-lightbox-close" aria-label={uiAttribute("关闭图片预览")}>
                 <svg viewBox="0 0 18 18" aria-hidden="true"><path d="m5 5 8 8M13 5l-8 8" /></svg>
               </Dialog.Close>

@@ -241,7 +241,7 @@ fn export_snapshot(
     });
     if serde_json::to_vec(&result)?.len() > BYTE_LIMIT {
         bail!(
-            "trace_export_limit_exceeded: narrow the window or Camp scope; no partial report is returned"
+            "trace_export_limit_exceeded: narrow the window or Thread scope; no partial report is returned"
         );
     }
     Ok(result)
@@ -277,7 +277,7 @@ fn query(connection: &Connection, body: &str, params: &TraceExportParams) -> Res
     while let Some(row) = rows.next()? {
         if result.len() == ROW_LIMIT {
             bail!(
-                "trace_export_limit_exceeded: narrow the window or Camp scope; no partial report is returned"
+                "trace_export_limit_exceeded: narrow the window or Thread scope; no partial report is returned"
             );
         }
         let value: String = row.get(0)?;

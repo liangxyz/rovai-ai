@@ -14,6 +14,9 @@ pub(crate) fn record_status_transition(
     actor: &ActorRef,
     change: StatusTransition<'_>,
 ) -> Result<()> {
+    if change.kind == "task" && !crate::task_capability::enabled(tx)? {
+        return Ok(());
+    }
     let now = chrono::Utc::now().to_rfc3339();
     // Every real transition resolves the previous question, including user changes.
     if change.kind == "mission" {

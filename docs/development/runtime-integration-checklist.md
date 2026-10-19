@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-09-16
+last_updated: 2026-10-18
 ---
 
 # Agent Runtime 一等接入与准入 Checklist
@@ -31,7 +31,8 @@ last_updated: 2026-09-16
 
 **正式“第一版接入”必须达到 First-Class。** Core Compatible 只是开发中的中间状态，不能作为“已完成接入”发布。
 经当前 Version Decision 明确接受的 Runtime Platform `preview` 可以把已进入 Product Runtime Catalog 的 Adapter
-开放给用户主动测试，但必须显示实验性、保留缺失资格 reason/空 evidence revision，且不计作 First-Class 完成。
+开放给用户主动测试，保留缺失资格 reason/空 evidence revision，且不计作 First-Class 完成；
+可见状态按当前平台准入合同呈现，不另加与合同冲突的试验标签。
 
 每个能力轴分别记录：
 
@@ -124,11 +125,14 @@ Compaction 的目标是保持 Context 合同，不是机械地监听某个事件
 
 ### 3.6 Skills
 
-- [ ] 复用现有 Skill 设置页和 Runtime delivery group，不增加 Adapter 私有的第二套 Skill 配置。
-- [ ] 分配给该 group 的 Skill 通过 Runtime 原生目录、协议或资源发现真实可用，并与原生/project Skill 兼容追加。
-- [ ] 同名冲突、更新、删除和禁用具有明确语义；下一次 eligible Session/Run 能看到最新结果。
-- [ ] 未分配的 Skill 不可见；Host/Session 复用后不存在上一 Session 的 Skill 泄漏。
-- [ ] 真实 Runtime 能列出或调用预期 Skill，而不是只验证投影文件存在。
+按当前 [Skills 架构](../architecture/skills.md)与 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md)验收；
+历史 Skill Library/group 项目投递不再是新 Run 的要求。
+
+- [ ] 平台固定索引、逐成员工具箱索引和 Harness 原址候选复用共享来源，不增加 Adapter 私有配置。
+- [ ] 原生 user/project 来源可列出、读取并实际调用；受管平台和工具箱资源能被真实 Runtime 按索引读取。
+- [ ] 更新、删除、禁用及同名多来源具有明确语义；已删除显式引用保持不可用，不自动改绑。
+- [ ] 相邻成员、Host/Session 复用和 cold resume 只接收当前索引，不泄漏另一成员的工具箱。
+- [ ] 真实 Runtime 完成调用或读取，而不是只验证文件存在；不为了验收恢复已退役的项目投影。
 
 ### 3.7 External MCP
 

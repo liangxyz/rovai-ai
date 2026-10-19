@@ -5,6 +5,7 @@ import { StrictMode, useEffect, useState } from 'react'
 import { RemoteConnectionStatus } from '../../desktop/src/renderer/src/RemoteConnectionStatus'
 import { HostWorkspacePicker } from './HostWorkspacePicker'
 import { WebLogin } from './WebLogin'
+import { WebConnectionRecovery } from './WebConnectionRecovery'
 import '../../desktop/src/renderer/src/remote-connection.css'
 import type { WorkspaceSelection } from '@contracts'
 import { createRoot } from 'react-dom/client'
@@ -12,6 +13,7 @@ import { BusinessApp } from '../../desktop/src/renderer/src/BusinessApp'
 import { ThreadClientProvider } from '../../desktop/src/renderer/src/camp-client'
 import { CurrentUserProfileProvider } from '../../desktop/src/renderer/src/CurrentUserProfile'
 import { ConsoleClient, type ConnectionState } from './client'
+import { UploadStatus } from './UploadStatus'
 import { createThreadAdapter, browserPlatform } from './camp-adapter'
 import '../../desktop/src/renderer/src/styles.css'
 import '../../desktop/src/renderer/src/member-editor.css'
@@ -156,15 +158,16 @@ function WebEntry() {
   }
   const current = adapter
   return <>
-    {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client}>
-      <CurrentUserProfileProvider api={current.profile}>
-        <BusinessApp environment={current.environment} remoteConnection={<RemoteConnectionStatus origin={transport.origin} state={authenticated ? connection : 'expired'} onLogout={() => { setError(null); void transport.logout().catch(e => setError(e instanceof Error ? e.message : '退出未完成，请重试。')) }} />} sidebarFooter={authenticated && connection === 'offline' ? <div className="web-connection" role="status">
-          <span>连接中断，编辑保留</span>
-        </div> : undefined} />
-      </CurrentUserProfileProvider>
-    </ThreadClientProvider></div>}
-    {authenticated && error && <div className="web-recovery-error" role="alert">{error}<button type="button" className="quiet-button compact" onClick={() => setError(null)}>关闭</button></div>}
-    {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
+    <WebConnectionRecovery transport={transport} enabled={authenticated} onNotice={setError}>
+      {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client}>
+        <CurrentUserProfileProvider api={current.profile}>
+          <BusinessApp environment={current.environment} remoteConnection={<RemoteConnectionStatus origin={transport.origin} state={authenticated ? connection : 'expired'} onLogout={() => { setError(null); void transport.logout().catch(e => setError(e instanceof Error ? e.message : '退出未完成，请重试。')) }} />} />
+        </CurrentUserProfileProvider>
+      </ThreadClientProvider></div>}
+      {authenticated && <UploadStatus transport={transport} />}
+      {authenticated && error && <div className="web-recovery-error" role="alert">{error}<button type="button" className="quiet-button compact" onClick={() => setError(null)}>关闭</button></div>}
+      {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
+    </WebConnectionRecovery>
     {!authenticated && <WebLogin hostKind={hostKind}
       status={scanning ? 'scanning' : restoring ? 'restoring' : busy ? 'submitting' : null}
       error={error} onLogin={token => { void login(token) }} />}

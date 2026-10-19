@@ -134,6 +134,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
         | AdapterKind::CommandCodeCli
+        | AdapterKind::MinimaxCodeCli
         | AdapterKind::CursorAgent => CompactionDetectorPolicy::Disabled,
     }
 }
@@ -157,6 +158,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
         | AdapterKind::CommandCodeCli
+        | AdapterKind::MinimaxCodeCli
         | AdapterKind::CursorAgent => "ROVAI_INTERNAL_UNUSED_COMPACTION_DETECTOR_POLICY",
     }
 }
@@ -941,6 +943,7 @@ fn qualified_admission(
         | AdapterKind::AntigravityApp
         | AdapterKind::TraeCnCli
         | AdapterKind::CommandCodeCli
+        | AdapterKind::MinimaxCodeCli
         | AdapterKind::CursorAgent => false,
     }
 }

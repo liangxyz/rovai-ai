@@ -175,7 +175,7 @@ pub(super) fn assert_upgrade(db: &mut Database) {
         .execute_batch("DROP TRIGGER reject_compact_receipt;")
         .unwrap();
     migrate(db).unwrap();
-    super::steer::migrate(db).unwrap();
+    db.migrate(false).unwrap();
     assert_eq!(snapshot(db.connection()), before);
     let c = Connection::open_with_flags(&db.path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
     assert_eq!(snapshot(&c), before);

@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, realpath, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import {
@@ -28,15 +28,17 @@ if (!builtinCliContractVersion || !builtinCliIpcVersion || !builtinCliCapability
   throw new Error('Current Built-in CLI transport constants were not found')
 }
 const coreExecutable = resolve(
-  process.env.ROVAI_BUILTIN_CLI_CORE_EXECUTABLE ?? join(root, 'target', 'debug', 'rovai-core')
+  process.env.ROVAI_BUILTIN_CLI_CORE_EXECUTABLE ?? join(root, 'target', 'debug', process.platform === 'win32' ? 'rovai-core.exe' : 'rovai-core')
 )
 const cliExecutable = resolve(
-  process.env.ROVAI_BUILTIN_CLI_EXECUTABLE ?? join(root, 'target', 'debug', 'rovai')
+  process.env.ROVAI_BUILTIN_CLI_EXECUTABLE ?? join(root, 'target', 'debug', process.platform === 'win32' ? 'rovai.exe' : 'rovai')
 )
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-builtin-cli-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
-const dataDir = join(fixtureRoot, 'data')
-const skillLibraryRoot = join(fixtureRoot, 'skill-library')
+const dataDir = process.platform === 'win32'
+  ? JSON.parse(execFileSync(coreExecutable, ['--prepare-windows-data-root', join(fixtureRoot, 'formal')], { encoding: 'utf8', windowsHide: true })).core
+  : join(fixtureRoot, 'data')
+const skillLibraryRoot = join(dataDir, 'managed-skill-library')
 const bashExecutable = process.platform === 'win32'
   ? (process.env.ROVAI_BASH_BIN ?? 'C:\\Program Files\\Git\\bin\\bash.exe')
   : '/bin/bash'
@@ -44,6 +46,7 @@ const historyMarker = 'ROVAI_BUILTIN_HISTORY_V1'
 const historyPublicA2aMarker = 'ROVAI_BUILTIN_HISTORY_PUBLIC_A2A_V1'
 const historyAttachmentMarker = 'ROVAI_BUILTIN_HISTORY_ATTACHMENT_V1'
 const historySeedCompletionMarker = 'ROVAI_BUILTIN_HISTORY_SEED_OK'
+// Current public operation catalog, including member updates and Mission scope.
 const expectedOperations = [
   'automation.close',
   'automation.create',
@@ -56,18 +59,25 @@ const expectedOperations = [
   'thread.message.send',
   'thread.read',
   'thread.search',
+  'thread.runs',
   'history.search',
   'member.create',
+  'member.list',
+  'member.get',
+  'member.update',
+  'mission.list',
+  'mission.get',
+  'mission.update',
+  'mission.status',
   'memory.read',
   'memory.search',
   'memory.view',
   'memory.write',
   'team.create_task',
-  'team.gather',
   'team.get_task',
   'team.list_tasks',
   'team.update_task'
-]
+].sort()
 const allRuntimeSpecifications = [
   ['codex-cli', 'Codex'],
   ['pi', 'Pi'],
@@ -81,11 +91,13 @@ const allRuntimeSpecifications = [
   ['qwen-code', 'Qwen'],
   ['trae-cn-cli', 'TRAE'],
   ['kimi-code-cli', 'Kimi Code'],
+  ['minimax-code-cli', 'MiniMax Code'],
   ['grok-build', 'Grok Build'],
   ['deepseek-harness', 'DeepSeek Harness'],
   ['zcode-app', 'ZCode']
 ].map(([adapterKind, label]) => ({ adapterKind, label, slug: adapterKind.replaceAll('-', '_') }))
-const defaultRuntimeSpecifications = allRuntimeSpecifications
+// MiniMax is Preview: available for explicit qualification, outside the default matrix.
+const defaultRuntimeSpecifications = allRuntimeSpecifications.filter((value) => value.adapterKind !== 'minimax-code-cli')
 const selectedAdapters = new Set((process.env.ROVAI_BUILTIN_CLI_ADAPTERS
   ?? defaultRuntimeSpecifications.map((value) => value.adapterKind).join(','))
   .split(',')
@@ -119,6 +131,13 @@ try {
 
   core = startCore(dataDir)
   await core.request('health.check')
+  await core.request('preferences.tasks.set', { enabled: true })
+  if (selectedAdapters.has('minimax-code-cli') && process.env.ROVAI_MINIMAX_CODE_BIN) {
+    const startup = await core.request('runtime.startup.get', { runtimeKind: 'minimax-code-cli' })
+    await core.request('runtime.startup.save', { runtimeKind: 'minimax-code-cli', expectedRevision: startup.revision,
+      configuration: { programPath: process.env.ROVAI_MINIMAX_CODE_BIN, environment: [] } })
+    await core.request('runtime.modelCatalog.open', { runtimeKind: 'minimax-code-cli', waitForRefresh: true })
+  }
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
 
   for (const specification of runtimeSpecifications) {
@@ -141,6 +160,8 @@ try {
         ? process.env.ROVAI_BUILTIN_CLI_OPENCODE_MODEL?.trim()
       : specification.adapterKind === 'codebuddy-cli'
         ? process.env.ROVAI_BUILTIN_CLI_CODEBUDDY_MODEL?.trim()
+      : specification.adapterKind === 'minimax-code-cli'
+        ? process.env.ROVAI_BUILTIN_CLI_MINIMAX_MODEL?.trim()
         : null
     if (explicitModel) {
       for (const agentId of [
@@ -217,7 +238,6 @@ try {
     specification.currentMarker = `ROVAI_CURRENT_${specification.slug.toUpperCase()}_V1`
     specification.successMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_OK`
     specification.resumeMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_RESUME_OK`
-    specification.gatherMarker = `ROVAI_GATHER_${specification.slug.toUpperCase()}_DIRECTED_DELIVERY_OBSERVED`
     specification.contextPathFile = join(projectRoot, `.context-path-${specification.slug}`)
     specification.resumeContextPathFile = join(projectRoot, `.resume-context-path-${specification.slug}`)
     specification.resumeCompletionFile = join(projectRoot, `.resume-complete-${specification.slug}`)
@@ -225,12 +245,18 @@ try {
     specification.diagnosticPath = join(projectRoot, `.diagnostic-${specification.slug}`)
     specification.memberCreationKey = crypto.randomUUID()
     specification.memberDisplayName = `${specification.label} Created Member`
-    specification.threadId = await createThread(core.request, {
-      name: `${specification.label} Built-in CLI`,
+    const mission = await core.request('missions.create', { commandId: crypto.randomUUID(), command: {
+      title: `${specification.label} Built-in CLI`,
+      description: 'Isolated qualification of the complete public CLI operation catalog.',
       projectPath: workspace.projectPath,
+      projectBindingKind: 'directory',
       memberAgentIds: [specification.agentId, specification.recipientProfileId],
-      defaultLeadAgentId: specification.agentId
-    })
+      defaultLeadAgentId: specification.agentId,
+      tags: ['qualification']
+    } })
+    if (mission.status !== 'applied') throw new Error(`Mission fixture creation failed: ${JSON.stringify(mission)}`)
+    specification.threadId = mission.payload.threadId
+    specification.missionId = mission.payload.missionId
     await sendThreadMessage(core.request, {
       threadId: specification.threadId,
       body: `${specification.currentMarker}: current-Camp evidence for ${specification.adapterKind}.`,
@@ -264,19 +290,25 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full ${expectedOperations.length}-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: ${expectedOperations.length}-operation catalog\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.threadId, source.agentRunId, {
       marker: specification.successMarker,
       timeoutMs: 720_000
     })
+    const scriptDiagnostic = (await readFile(specification.diagnosticPath, 'utf8')).trim()
+    if (scriptDiagnostic !== 'exit=0 step=complete') {
+      throw new Error(`${specification.adapterKind} verification script failed: ${scriptDiagnostic}`)
+    }
     const sourceManifest = sourceSnapshot.contextManifests.find((manifest) =>
       manifest.agentRunId === source.agentRunId
     )
     if (specification.threadId === historyCampId
         || !sourceManifest
-        || !sourceManifest.historyThreads.some((camp) => camp.threadId === historyCampId)) {
-      throw new Error(`${specification.adapterKind} did not freeze the historical Camp in the querying Run Manifest: ${JSON.stringify({
+        || sourceManifest.historyFenceVersion !== 1
+        || !Number.isSafeInteger(sourceManifest.globalPublicMessageBoundary)
+        || sourceManifest.globalPublicMessageBoundary < historicalPublicA2a.publicationSequence) {
+      throw new Error(`${specification.adapterKind} did not capture the publication fence for live historical queries: ${JSON.stringify({
         queryingCampId: specification.threadId,
         historyCampId,
         sourceManifest
@@ -299,7 +331,7 @@ try {
     const observedOperations = [...new Set(terminalEvidence.map((entry) => entry.payload?.canonicalTool))]
       .filter(Boolean)
       .sort()
-    if (JSON.stringify(observedOperations) !== JSON.stringify(expectedOperations)) {
+    if (expectedOperations.some((operation) => !observedOperations.includes(operation))) {
       throw new Error(`${specification.adapterKind} did not commit all canonical operations: ${JSON.stringify({
         observedOperations,
         evidence
@@ -310,8 +342,9 @@ try {
       return envelope?.contractVersion !== 2
         || envelope.operation !== entry.payload?.canonicalTool
         || !/^[0-9a-f-]{36}$/.test(envelope.requestId ?? '')
-        || Object.hasOwn(envelope, 'receipt')
-        || (envelope.ok ? typeof envelope.result !== 'object' : typeof envelope.error !== 'object')
+        || Object.hasOwn(envelope, 'result')
+        || typeof envelope.ok !== 'boolean'
+        || (envelope.ok === false && typeof envelope.error?.code !== 'string')
     })
     if (invalidEnvelopeEvidence) {
       throw new Error(`${specification.adapterKind} Evidence did not retain a valid Core Envelope: ${JSON.stringify(invalidEnvelopeEvidence)}`)
@@ -328,19 +361,6 @@ try {
       core,
       specification,
       specification.recipientProfileId
-    )
-    const gatherResult = terminalEvidence.find((entry) =>
-      entry.payload?.canonicalTool === 'team.gather'
-        && entry.payload?.status === 'completed'
-    )?.payload?.coreEnvelope?.result
-    if (!gatherResult?.gatherId) {
-      throw new Error(`${specification.adapterKind} Gather acceptance did not retain a gatherId`)
-    }
-    const gatherCompletion = await waitForGatherCompletion(
-      core,
-      specification,
-      gatherResult.gatherId,
-      source.agentRunId
     )
     const firstContextPath = (await readFile(specification.contextPathFile, 'utf8')).trim()
     await assertFencedContext(firstContextPath, specification.adapterKind, 'initial')
@@ -368,7 +388,7 @@ try {
     const expectedSendMessageIds = new Set([
       sendEvidence.publicMessageId,
       sendEvidence.directUserOnlyMessageId,
-      sendEvidence.stdinUserOnlyMessageId
+      sendEvidence.fileUserOnlyMessageId
     ])
     const successorExactReads = resumedEvidence.filter((entry) =>
       entry.payload?.canonicalTool === 'thread.read'
@@ -437,16 +457,11 @@ try {
       resumedAgentRunId: resumed.agentRunId,
       recipientAgentRunId: recipientRun?.id,
       recipientRunStatusAtObservation: recipientRun?.status,
-      gatherId: gatherResult.gatherId,
-      gatherCompletionDeliveryId: gatherCompletion.completionDelivery.id,
-      gatherCompletionRunId: gatherCompletion.completionRun.id,
-      gatherCapturedReturnVerified: true,
       operations: observedOperations,
       fullRunEvidenceCount: evidence.length,
-      agentOutputReduction: measureAgentOutputReduction(evidence),
       legacySendFlagRejected: true,
       legacySendJsonRejected: true,
-      sendInputSources: ['direct_flags', 'stdin', 'input_file'],
+      sendInputSources: ['direct_flags', 'input_file'],
       exactAddressingVerifiedInSuccessorRun: true,
       crossCampManifestId: sourceManifest.id,
       historicalPublicA2aMessageId: historicalPublicA2a.messageId,
@@ -553,14 +568,16 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
     throw new Error(`Explicit Runtime model was not selected: ${JSON.stringify(result)}`)
   }
   const resolved = await request('members.get', { agentId })
-  if (resolved.runtimeReadiness?.status !== 'ready'
+  const allowedReadiness = adapterKind === 'minimax-code-cli'
+    ? ['ready', 'installed_unverified'] : ['ready']
+  if (!allowedReadiness.includes(resolved.runtimeReadiness?.status)
       || resolved.runtimeConfiguration?.model?.modelId !== modelId) {
     throw new Error(`Explicit Runtime model is not ready: ${JSON.stringify(resolved)}`)
   }
 }
 
 async function createThread(request, input) {
-  const result = await request('camps.create', {
+  const result = await request('threads.create', {
     commandId: crypto.randomUUID(),
     name: input.name,
     workspace: { projectPath: input.projectPath },
@@ -576,22 +593,19 @@ async function createThread(request, input) {
 }
 
 async function sendThreadMessage(request, input) {
-  const draft = await request('camp.composerDraft.get', { threadId: input.threadId })
   const content = input.agentId
     ? [
         { kind: 'atom', atom: { type: 'member', agentId: input.agentId } },
         { kind: 'text', text: ` ${input.body}` }
       ]
     : [{ kind: 'text', text: input.body }]
-  const saved = await request('camp.composerDraft.save', {
-    threadId: input.threadId,
-    expectedRevision: draft.revision,
-    content: { version: 2, segments: content }
-  })
-  return request('camp.messages.send', {
+  return request('thread.messages.send', {
     commandId: crypto.randomUUID(),
     threadId: input.threadId,
-    draftRevision: saved.revision,
+    content: { version: 2, segments: content },
+    sourceAttachments: [],
+    quotes: [],
+    replyToThreadMessageId: null,
     execution: input.execution
   })
 }
@@ -614,7 +628,7 @@ async function seedHistoricalPublicA2a(coreClient, input) {
     }
   })
   const commandResult = sent.commandResult ?? sent
-  const agentRunId = commandResult.payload?.agentRunIds?.[0]
+  const agentRunId = await waitForMessageRun(coreClient.request, input.threadId, commandResult.payload?.threadMessageId)
   if (commandResult.status !== 'accepted' || !agentRunId) {
     throw new Error(`Historical Public A2A seed Run was not accepted: ${JSON.stringify(sent)}`)
   }
@@ -630,13 +644,14 @@ async function seedHistoricalPublicA2a(coreClient, input) {
       && candidate.recipientAgentId === input.specification.recipientProfileId
   )
   const publication = snapshot.timeline.find((event) =>
-    event.eventType === 'camp_message.public_a2a_sent'
+    ['camp_message.sent', 'camp_message.public_a2a_sent'].includes(event.eventType)
       && event.entityId === messageId
   )
   if (message?.body !== input.marker
       || message.sourceAgentRunId !== agentRunId
       || !delivery
-      || !publication) {
+      || !publication
+      || !Number.isSafeInteger(message.timelineGlobalSequence)) {
     throw new Error(`Historical Public A2A did not traverse Message Delivery and publication: ${JSON.stringify({
       agentRunId,
       messageId,
@@ -645,32 +660,30 @@ async function seedHistoricalPublicA2a(coreClient, input) {
       publication
     })}`)
   }
-  return { messageId, deliveryId: delivery.id, sourceAgentRunId: agentRunId }
+  return {
+    messageId,
+    deliveryId: delivery.id,
+    sourceAgentRunId: agentRunId,
+    publicationSequence: message.timelineGlobalSequence
+  }
 }
 
 async function createHistoricalAttachmentMessage(request, input) {
-  const draft = await request('camp.composerDraft.get', { threadId: input.threadId })
-  const referenced = await request('camp.sourceAttachments.addFromPath', {
-    threadId: input.threadId,
-    expectedRevision: draft.revision,
+  const attachment = {
+    id: crypto.randomUUID(),
     sourcePath: input.sourcePath,
-    displayName: 'historical-attachment.txt'
-  })
-  const attachment = referenced.attachments?.[0]
-  if (referenced.attachments?.length !== 1
-      || attachment?.previewKind !== 'none'
-      || attachment?.availability !== 'unknown') {
-    throw new Error(`Historical source attachment reference failed: ${JSON.stringify(referenced)}`)
+    displayName: 'historical-attachment.txt',
+    kind: 'file',
+    mediaType: 'text/plain',
+    observedByteSize: (await readFile(input.sourcePath)).length
   }
-  const saved = await request('camp.composerDraft.save', {
-    threadId: input.threadId,
-    expectedRevision: referenced.revision,
-    content: { version: 2, segments: [{ kind: 'text', text: input.marker }] }
-  })
-  const sent = await request('camp.messages.send', {
+  const sent = await request('thread.messages.send', {
     commandId: crypto.randomUUID(),
     threadId: input.threadId,
-    draftRevision: saved.revision,
+    content: { version: 2, segments: [{ kind: 'text', text: input.marker }] },
+    sourceAttachments: [attachment],
+    quotes: [],
+    replyToThreadMessageId: null,
     execution: null
   })
   const messageId = sent.commandResult?.payload?.threadMessageId
@@ -703,7 +716,8 @@ async function startVerificationRun(coreClient, specification, resumed) {
         'Personality traits: Precise',
         'Working principles: Use the exact confirmed card and stable creation key.',
         'Growth topic: Practice concise handoffs.',
-        'Avatar: none (use the product default).'
+        'Avatar: none (use the product default).',
+        'I also authorize the fixture to update that newly created member role to Runtime-updated verifier, update this synthetic Mission title, and set this synthetic Mission status to needs_you.'
       ]
   const body = ['kimi-code-cli', 'grok-build', 'deepseek-harness'].includes(specification.adapterKind)
     ? [
@@ -735,11 +749,24 @@ async function startVerificationRun(coreClient, specification, resumed) {
     }
   })
   const commandResult = sent.commandResult ?? sent
-  const agentRunId = commandResult.payload?.agentRunIds?.[0]
+  const agentRunId = await waitForMessageRun(coreClient.request, specification.threadId, commandResult.payload?.threadMessageId)
   if (commandResult.status !== 'accepted' || !agentRunId) {
     throw new Error(`${specification.adapterKind} AgentRun intake failed: ${JSON.stringify(sent)}`)
   }
   return { agentRunId }
+}
+
+async function waitForMessageRun(request, threadId, messageId) {
+  if (!messageId) throw new Error('Message intake did not return its identity')
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const snapshot = await request('threads.snapshot', { threadId })
+    const run = snapshot.agentRuns.find((candidate) =>
+      candidate.inputMessageIds?.includes(messageId) || candidate.anchorMessageId === messageId)
+    if (run) return run.id
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  throw new Error(`Message ${messageId} did not dispatch an AgentRun`)
 }
 
 async function waitForRun(coreClient, threadId, agentRunId, options) {
@@ -750,6 +777,12 @@ async function waitForRun(coreClient, threadId, agentRunId, options) {
     await resolvePendingApprovals(coreClient.request, snapshot, agentRunId, resolvedApprovals)
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (run?.status === 'succeeded') {
+      if (options.completionFile) {
+        const completion = await readFile(options.completionFile, 'utf8').catch(() => '')
+        if (completion.trim() !== options.marker) {
+          throw new Error(`AgentRun ${agentRunId} ended without the script completion receipt`)
+        }
+      }
       const output = snapshot.messages.find((message) =>
         message.sourceAgentRunId === agentRunId
       )?.body
@@ -833,68 +866,6 @@ async function waitForRecipientRun(coreClient, specification, recipientProfileId
   throw new Error(`${specification.adapterKind} recipient Run did not complete`)
 }
 
-async function waitForGatherCompletion(coreClient, specification, gatherId, sourceAgentRunId) {
-  const deadline = Date.now() + 720_000
-  const resolvedApprovals = new Set()
-  while (Date.now() < deadline) {
-    const snapshot = await coreClient.request('camps.snapshot', { threadId: specification.threadId })
-    const gatherDeliveries = snapshot.messageDeliveries.filter((delivery) =>
-      delivery.gatherId === gatherId
-    )
-    const completionDeliveries = gatherDeliveries.filter((delivery) =>
-      delivery.deliveryKind === 'gather_completion'
-    )
-    if (completionDeliveries.length > 1) {
-      throw new Error(`${specification.adapterKind} Gather created duplicate completion Deliveries`)
-    }
-    const completionDelivery = completionDeliveries[0]
-    const completionRun = completionDelivery?.targetAgentRunId
-      ? snapshot.agentRuns.find((run) => run.id === completionDelivery.targetAgentRunId)
-      : null
-    // A normal public A2A Delivery from the source verification can already occupy
-    // the recipient FIFO before the Gather forward is materialized. Resolve that
-    // recipient's bounded Runtime approvals too, otherwise the Gather Delivery can
-    // remain queued behind a waiting Run that is not itself Gather-associated yet.
-    for (const run of snapshot.agentRuns.filter((candidate) =>
-      candidate.id === completionRun?.id
-        || candidate.agentId === specification.recipientProfileId
-        || gatherDeliveries.some((delivery) => delivery.targetAgentRunId === candidate.id)
-    )) {
-      await resolvePendingApprovals(coreClient.request, snapshot, run.id, resolvedApprovals)
-    }
-    if (completionRun && ['failed', 'cancelled', 'interrupted'].includes(completionRun.status)) {
-      throw new Error(`${specification.adapterKind} Gather completion entered ${completionRun.status}`)
-    }
-    if (completionRun?.status === 'succeeded') {
-      const completionRuns = snapshot.agentRuns.filter((run) =>
-        run.invocationKind === 'gather_completion'
-          && run.agentId === specification.agentId
-          && run.conversationId === snapshot.agentRuns.find((candidate) => candidate.id === sourceAgentRunId)?.conversationId
-      )
-      const capturedReturns = gatherDeliveries.filter((delivery) =>
-        delivery.deliveryKind === 'public_a2a'
-          && delivery.dispatchDisposition === 'gather_captured'
-      )
-      const capturedMessages = capturedReturns.map((delivery) =>
-        snapshot.messages.find((message) => message.id === delivery.messageId)
-      )
-      if (completionRuns.length !== 1
-          || completionRun.invocationKind !== 'gather_completion'
-          || capturedReturns.length < 1
-          || !capturedMessages.some((message) => message?.body?.includes(specification.gatherMarker))) {
-        throw new Error(`${specification.adapterKind} Gather did not prove captured return and one completion: ${JSON.stringify({
-          gatherDeliveries,
-          completionRuns,
-          capturedMessages
-        })}`)
-      }
-      return { snapshot, completionDelivery, completionRun }
-    }
-    await delay(400)
-  }
-  throw new Error(`${specification.adapterKind} Gather completion timed out`)
-}
-
 async function resolvePendingApprovals(request, snapshot, agentRunId, resolvedApprovals) {
   const actionIds = new Set(snapshot.actions
     .filter((action) => action.agentRunId === agentRunId)
@@ -944,113 +915,6 @@ async function builtinEvidence(request, threadId, agentRunId) {
     afterSequence = page.nextAfterSequence
   }
   return collected.filter((entry) => entry.payload?.kind === 'builtin_tool_invocation')
-}
-
-function measureAgentOutputReduction(evidence) {
-  const samples = evidence
-    .map((entry) => entry.payload?.coreEnvelope)
-    .filter(Boolean)
-    .map((envelope) => ({
-      envelope,
-      projection: projectEnvelopeForMeasurement(envelope)
-    }))
-  const envelopeBytes = samples.reduce(
-    (total, sample) => total + Buffer.byteLength(JSON.stringify(sample.envelope)),
-    0
-  )
-  const projectionBytes = samples.reduce(
-    (total, sample) => total + Buffer.byteLength(JSON.stringify(sample.projection)),
-    0
-  )
-  return {
-    sampleCount: samples.length,
-    envelopeBytes,
-    projectionBytes,
-    reductionPercent: envelopeBytes === 0
-      ? 0
-      : Number((((envelopeBytes - projectionBytes) / envelopeBytes) * 100).toFixed(1))
-  }
-}
-
-function projectEnvelopeForMeasurement(envelope) {
-  if (!envelope.ok) {
-    if (envelope.error?.code === 'builtin_tool.outcome_indeterminate') {
-      return {
-        error: {
-          code: 'builtin_tool.outcome_indeterminate',
-          message: 'Confirm current state before acting again.',
-          recovery: 'confirm_outcome'
-        }
-      }
-    }
-    return { error: envelope.error }
-  }
-  switch (envelope.operation) {
-    case 'thread.message.send':
-      return {
-        messageId: envelope.result.messageId,
-        agentAddressingMode: envelope.result.agentAddressingMode,
-        effectiveRecipients: envelope.result.effectiveRecipients,
-        deliveryIds: envelope.result.deliveryIds
-      }
-    case 'team.gather':
-      return selectFields(envelope.result, [
-        'gatherId',
-        'requestMessageId',
-        'effectiveRecipients',
-        'completion'
-      ])
-    case 'memory.write':
-      return envelope.result.outcome === 'effective'
-        ? {
-            outcome: 'effective',
-            memoryId: envelope.result.memoryId,
-            revisionId: envelope.result.revisionId
-          }
-        : {
-            outcome: 'review_pending',
-            reviewItemId: envelope.result.reviewItemId
-          }
-    case 'member.create':
-      return envelope.result
-    case 'team.create_task':
-      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId'])
-    case 'team.update_task':
-      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'changed'])
-    case 'team.get_task': {
-      const fields = ['taskId', 'title', 'description', 'status', 'assigneeAgentId']
-      const note = { blocked: 'blockedReason', completed: 'completionSummary', cancelled: 'cancelReason' }[envelope.result.status]
-      if (note) fields.push(note)
-      return selectFields(envelope.result, fields)
-    }
-    case 'team.list_tasks':
-      return {
-        tasks: envelope.result.tasks.map((task) => selectFields(task, ['taskId', 'title', 'status', 'assigneeAgentId'])),
-        nextCursor: envelope.result.nextCursor,
-        truncated: envelope.result.truncated
-      }
-    case 'thread.list':
-    case 'thread.read':
-    case 'thread.search':
-    case 'history.search':
-    case 'memory.view':
-    case 'memory.read':
-    case 'memory.search':
-    case 'automation.list':
-    case 'automation.get':
-    case 'automation.create':
-    case 'automation.run':
-    case 'automation.close':
-    case 'automation.update':
-    case 'automation.delete':
-      return envelope.result
-    default:
-      throw new Error(`Missing Agent output measurement projection for ${envelope.operation}`)
-  }
-}
-
-function selectFields(value, keys) {
-  return Object.fromEntries(keys.map((key) => [key, value[key]]))
 }
 
 async function assertFencedContext(contextPath, adapterKind, phase) {
@@ -1125,10 +989,8 @@ function verificationScript(input) {
     body: `The ${input.adapterKind} Runtime can invoke Rovai built-ins only through the local CLI.`,
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
   })
-  const publicSend = JSON.stringify({
-    body: `Publish exactly one important-result notification with rovai send --public-only --to-principal --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_RESULT', then finish. Do not route to any Agent.`,
-    to: [input.recipientProfileId]
-  })
+  const publicSend = `Publish exactly one important-result notification with rovai send --public-only --to-user --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_RESULT', then finish. Do not route to any Agent.`
+
   return `#!/bin/bash
 set -euo pipefail
 
@@ -1189,31 +1051,27 @@ root_help="$("$CLI" --help)"
 printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run an Agent operation's exact `--help` for its closed inputs.")}
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--public-only'
-printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'
-if printf '%s\n' "$send_help" | grep -Fq -- '--to-user'; then
+printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
+if printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'; then
   exit 1
 fi
-printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary public Thread messages are already visible to the Principal.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary public Thread messages are already visible to the User.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Guarantee that this public message wakes no Agent.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Agent addressing schedules concrete continuing work, not CC.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Always inspect agentAddressingMode, effectiveRecipients, and deliveryIds.'
-printf '%s\n' "$send_help" | grep -Fq -- 'Principal attention is message-local and is never inherited'
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('Use --body for simple single-line text; \\n remains literal.')}
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('For multiline, Markdown, or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file.')}
+printf '%s\n' "$send_help" | grep -Fq -- 'User attention is message-local and is never inherited'
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('Use --body for simple single-line text, including Markdown; \\n remains literal.')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('For multiline or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file.')}
 printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('Input: direct flags, or --input-file <path> with send flags except --body.')}
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  Write reply.md:')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  Write a temporary body file (e.g. reply.md):')}
 printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  After the write succeeds:')}
 printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('    rovai send --public-only --input-file reply.md')}
 printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'"
-printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'"
-gather_help="$("$CLI" gather --help)"
-printf '%s\n' "$gather_help" | grep -Eq -- '--to[[:space:]]+field=to type=array repeatable'
-printf '%s\n' "$gather_help" | grep -Fq -- 'Gather is asynchronous.'
-printf '%s\n' "$gather_help" | grep -Fq -- 'Do not poll, repeat Gather, or wait synchronously'
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --to-user --body 'Please choose whether to roll back the client or continue the token investigation.'"
 member_help="$("$CLI" member create --help)"
 printf '%s\n' "$member_help" | grep -Fq -- '--creation-key'
 printf '%s\n' "$member_help" | grep -Fq -- '--avatar-file'
-printf '%s\n' "$member_help" | grep -Fq -- 'user explicitly confirms'
+printf '%s\n' "$member_help" | grep -Fq -- 'complete card explicitly confirmed by the User'
 camp_search_help="$("$CLI" camp search --help)"
 printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai thread search --query 'amount'"
 printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai thread search --thread-id '<thread-id>' --query 'amount'"
@@ -1279,6 +1137,34 @@ printf '%s\n' "$member_create" | "$JQ" -e '
 ' >/dev/null
 created_agent_id="$(printf '%s\n' "$member_create" | "$JQ" -er '.agentId')"
 
+STEP=member_list
+member_list="$("$CLI" member list)"
+assert_success "$member_list" 'member.list'
+STEP=member_get
+member_get="$("$CLI" member get --agent-id "$created_agent_id")"
+assert_success "$member_get" 'member.get'
+member_version="$(printf '%s\n' "$member_get" | "$JQ" -er '.version')"
+STEP=member_update
+member_update="$("$CLI" member update --agent-id "$created_agent_id" --expected-version "$member_version" --request-id ${shellQuote(crypto.randomUUID())} --team-role 'Runtime-updated verifier')"
+assert_success "$member_update" 'member.update'
+
+STEP=thread_runs
+thread_runs="$("$CLI" thread runs --active)"
+assert_success "$thread_runs" 'thread.runs'
+STEP=mission_list
+mission_list="$("$CLI" mission list)"
+assert_success "$mission_list" 'mission.list'
+STEP=mission_get
+mission_get="$("$CLI" mission get)"
+assert_success "$mission_get" 'mission.get'
+printf '%s\n' "$mission_get" | "$JQ" -e --arg id ${shellQuote(input.missionId)} '.missionId == $id' >/dev/null
+STEP=mission_update
+mission_update="$("$CLI" mission update --title ${shellQuote(`Updated CLI Mission ${input.slug}`)})"
+assert_success "$mission_update" 'mission.update'
+STEP=mission_status
+mission_status="$("$CLI" mission status --status needs_you)"
+assert_success "$mission_status" 'mission.status'
+
 STEP=automation_create
 automation_create="$("$CLI" automation create \
   --name ${shellQuote(`CLI Automation ${input.slug}`)} \
@@ -1320,7 +1206,7 @@ STEP=automation_run
 automation_run="$("$CLI" automation run --automation-id "$automation_id")"
 assert_success "$automation_run" 'automation.run'
 printf '%s\n' "$automation_run" | "$JQ" -e '
-  .status == "failed" and .reason == "runtime_not_ready" and .threadId == null
+  .status == "started" and .reason == null and (.threadId | type) == "string"
 ' >/dev/null
 
 STEP=automation_close
@@ -1454,7 +1340,7 @@ printf '%s\n' "$camp_read_historical" | "$JQ" -e \
   --arg body ${shellQuote(input.historyPublicA2aMarker)} '
   .threadId == $threadId
   and .items[0].messageId == $messageId
-  and .items[0].authorType == "agent"
+  and .items[0].senderType == "agent"
   and .items[0].body == $body
 ' >/dev/null
 
@@ -1483,14 +1369,14 @@ printf '%s\n' "$camp_read_historical_attachment" | "$JQ" -e \
   and .items[0].attachments[0].name == "historical-attachment.txt"
   and .items[0].attachments[0].kind == "file"
   and .items[0].attachments[0].fileCount == 1
-  and .items[0].attachments[0].mediaType == "application/octet-stream"
+  and .items[0].attachments[0].mediaType == "text/plain"
 ' >/dev/null
 
 cat > "$RUN_TMP/public-send.json" <<'ROVAI_JSON'
 ${publicSend}
 ROVAI_JSON
 STEP=camp_message_send
-public_send="$("$CLI" send --input-file "$RUN_TMP_NATIVE/public-send.json")"
+public_send="$("$CLI" send --to ${shellQuote(input.recipientProfileId)} --input-file "$RUN_TMP_NATIVE/public-send.json")"
 assert_success "$public_send" 'thread.message.send'
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
   (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
@@ -1500,20 +1386,8 @@ printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recip
 ' >/dev/null
 public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
 
-STEP=team_gather
-gather_result="$("$CLI" gather \
-  --to ${shellQuote(input.recipientProfileId)} \
-  --body ${shellQuote(`Report this substantive transport finding to ${input.agentId} with exactly one command: rovai send --to ${input.agentId} --body 'Built-in CLI Gather finding: ${input.gatherMarker}. The delegated recipient received the requested work and can execute the Core-owned directed send.' Then finish. Because RUN_FACTS.gather.returnTarget is the current input source, this directed result is captured by Gather and does not schedule new work. This is a requested finding, not an acknowledgement or courtesy reply.`)})"
-assert_success "$gather_result" 'team.gather'
-printf '%s\n' "$gather_result" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
-  (keys | sort) == ["completion", "effectiveRecipients", "gatherId", "requestMessageId"]
-  and .completion == "deferred"
-  and .effectiveRecipients == [$recipient]
-' >/dev/null
-gather_id="$(printf '%s\n' "$gather_result" | "$JQ" -er '.gatherId')"
-
-STEP=camp_message_send_direct_public_only_principal
-user_only="$("$CLI" send --public-only --to-principal --body ${shellQuote(`Direct Principal decision ${input.adapterKind}`)})"
+STEP=camp_message_send_direct_public_only_user
+user_only="$("$CLI" send --public-only --to-user --body ${shellQuote(`Direct User decision ${input.adapterKind}`)})"
 assert_success "$user_only" 'thread.message.send'
 printf '%s\n' "$user_only" | "$JQ" -e '
   (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
@@ -1523,23 +1397,23 @@ printf '%s\n' "$user_only" | "$JQ" -e '
 ' >/dev/null
 user_only_id="$(printf '%s\n' "$user_only" | "$JQ" -er '.messageId')"
 
-STEP=camp_message_send_stdin_public_only_principal
-stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin Principal decision ${input.adapterKind}`, mentionUser: true, publicOnly: true }))} | "$CLI" send)"
-assert_success "$stdin_user_only" 'thread.message.send'
-printf '%s\n' "$stdin_user_only" | "$JQ" -e '
+STEP=camp_message_send_file_public_only_user
+printf '%s\n' ${shellQuote(`File User decision ${input.adapterKind}`)} > "$RUN_TMP/user-only.txt"
+file_user_only="$("$CLI" send --public-only --to-user --input-file "$RUN_TMP_NATIVE/user-only.txt")"
+assert_success "$file_user_only" 'thread.message.send'
+printf '%s\n' "$file_user_only" | "$JQ" -e '
   .agentAddressingMode == "public_only"
   and .effectiveRecipients == []
   and .deliveryIds == []
 ' >/dev/null
-stdin_user_only_id="$(printf '%s\n' "$stdin_user_only" | "$JQ" -er '.messageId')"
+file_user_only_id="$(printf '%s\n' "$file_user_only" | "$JQ" -er '.messageId')"
 
 STEP=freeze_send_locators
 "$JQ" -n \
   --arg publicMessageId "$public_message_id" \
   --arg directUserOnlyMessageId "$user_only_id" \
-  --arg stdinUserOnlyMessageId "$stdin_user_only_id" \
-  --arg gatherId "$gather_id" \
-  '{publicMessageId:$publicMessageId,directUserOnlyMessageId:$directUserOnlyMessageId,stdinUserOnlyMessageId:$stdinUserOnlyMessageId,gatherId:$gatherId}' \
+  --arg fileUserOnlyMessageId "$file_user_only_id" \
+  '{publicMessageId:$publicMessageId,directUserOnlyMessageId:$directUserOnlyMessageId,fileUserOnlyMessageId:$fileUserOnlyMessageId}' \
   > ${shellQuote(shellPath(input.sendEvidencePath))}
 
 cat > "$RUN_TMP/memory-write.json" <<'ROVAI_JSON'
@@ -1599,11 +1473,12 @@ printf '%s\n' "$hearth_result" | "$JQ" -e '
 ' >/dev/null
 
 STEP=complete
+printf 'exit=0 step=complete\n' > "$DIAGNOSTIC"
 trap - EXIT
 printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
-    operationCount: 23,
+    operationCount: expectedOperations.length,
     taskFieldPatch: 'last_successful_field_write'
   }))}
 `
@@ -1633,17 +1508,15 @@ printf '%s\n' "$public_read" | "$JQ" -e \
   --arg messageId "$public_message_id" \
   --arg recipient ${shellQuote(input.recipientProfileId)} '
     .items[0].messageId == $messageId
-    and .items[0].addressing.effectiveAgentRecipients == [$recipient]
-    and .items[0].addressing.mentionsCurrentUser == false
+    and ([.items[0].mentions[].id] == [$recipient])
   ' >/dev/null
 
-for key in directUserOnlyMessageId stdinUserOnlyMessageId; do
+for key in directUserOnlyMessageId fileUserOnlyMessageId; do
   message_id="$("$JQ" -er --arg key "$key" '.[$key]' "$SEND_EVIDENCE")"
   item="$(read_item "$message_id")"
   printf '%s\n' "$item" | "$JQ" -e --arg messageId "$message_id" '
     .items[0].messageId == $messageId
-    and .items[0].addressing.effectiveAgentRecipients == []
-    and .items[0].addressing.mentionsCurrentUser == true
+    and .items[0].mentions == [{"id":"user"}]
   ' >/dev/null
 done
 

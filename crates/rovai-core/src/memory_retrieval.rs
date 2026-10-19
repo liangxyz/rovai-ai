@@ -224,7 +224,7 @@ impl MemoryRetrievalService {
                         "counterpartyAgentId": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Another present member of the current Camp."
+                            "description": "Another present member of the current Thread."
                         }
                     }
                 }

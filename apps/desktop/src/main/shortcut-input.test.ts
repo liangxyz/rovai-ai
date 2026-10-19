@@ -32,3 +32,20 @@ it('captures unbound side buttons only while recording and releases native menu 
 it('does not create a duplicate macOS app-command path', () => {
   expect(fixture('darwin').window.listenerCount('app-command')).toBe(0)
 })
+
+it('does not consume Task side buttons while unavailable and clears Host capability on navigation or renderer loss', () => {
+  const { window, webContents, preferences, input, event } = fixture()
+  preferences.mouse.side1 = 'tasks'
+  window.emit('app-command', event, 'browser-backward')
+  expect(event.preventDefault).not.toHaveBeenCalled()
+  input.setTasksEnabled(true); window.emit('app-command', event, 'browser-backward')
+  expect(event.preventDefault).toHaveBeenCalledTimes(1)
+  input.setTasksEnabled(false); window.emit('app-command', event, 'browser-backward')
+  expect(event.preventDefault).toHaveBeenCalledTimes(1)
+  for (const name of ['did-start-navigation', 'render-process-gone']) {
+    input.setTasksEnabled(true); webContents.emit(name)
+    window.emit('app-command', event, 'browser-backward')
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+  }
+  expect(preferences.mouse.side1).toBe('tasks')
+})

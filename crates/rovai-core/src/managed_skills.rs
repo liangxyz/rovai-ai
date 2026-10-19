@@ -244,8 +244,9 @@ impl ManagedSkills {
     }
 
     pub fn index_json(&self, entries: &[SkillIndexEntry]) -> Result<String> {
-        let root = self
-            .root
+        // Keep canonical storage identity, but expose a path native file tools
+        // accept instead of treating Windows verbatim prefixes as UNC shares.
+        let root = dunce::simplified(&self.root)
             .to_str()
             .context("managed Skills root is not UTF-8")?;
         Ok(serde_json::to_string(&SkillIndex {
@@ -508,6 +509,20 @@ mod tests {
             "第一行\nsecond \\\\ line\n"
         );
         assert!(read_frontmatter(&path, "review-duo").is_err());
+        let canonical = root.canonicalize().unwrap();
+        let managed = ManagedSkills::new(canonical.clone(), canonical.clone()).unwrap();
+        let entries = vec![SkillIndexEntry {
+            name: "campfire".to_owned(),
+            desc: read_frontmatter(&path, "campfire").unwrap(),
+        }];
+        let index: serde_json::Value =
+            serde_json::from_str(&managed.index_json(&entries).unwrap()).unwrap();
+        assert_eq!(
+            index["root"],
+            dunce::simplified(&canonical).to_string_lossy().as_ref()
+        );
+        assert_eq!(index["skills"][0]["desc"], entries[0].desc);
+        assert_eq!(managed.root(), canonical);
         fs::remove_dir_all(root).unwrap();
     }
 

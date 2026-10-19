@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { NotificationPreference } from '@contracts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import { NotificationPreferenceEditor } from './NotificationSettings'
 
 function preference(overrides: Partial<NotificationPreference> = {}): NotificationPreference {
@@ -88,4 +88,20 @@ describe('notification settings', () => {
     expect(failedMarkup).toContain('保存失败，已恢复之前的设置。')
     expect(failedMarkup).toContain('>重试</button>')
   })
+})
+
+const taskCapability = vi.hoisted(() => ({ enabled: true }))
+vi.mock('./TaskCapabilityProvider', () => ({ useTaskCapability: () => taskCapability }))
+afterEach(() => { taskCapability.enabled = true })
+
+it('omits Task settings while unavailable without changing the stored choices', () => {
+  taskCapability.enabled = false
+  const value = preference({ taskStatusHeadsUpEnabled: true })
+  const markup = renderPreferenceEditor(value)
+  expect(markup).not.toContain('notification-scenario-task')
+  expect(markup).not.toContain('任务状态变更')
+  expect(value.taskStatusHeadsUpEnabled).toBe(true)
+  expect(value.taskStatuses).toEqual(['completed', 'blocked', 'cancelled'])
+  taskCapability.enabled = true
+  expect(renderPreferenceEditor(value)).toContain('notification-scenario-task')
 })

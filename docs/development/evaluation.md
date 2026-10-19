@@ -96,9 +96,9 @@ rovai app eval gate --job-id gate-change-01 --plan /absolute/gate-plan.json --ou
 rovai app eval status --job-id gate-change-01
 ```
 
-定时任务 Prompt 使用当前 Camp 身份等待结果，例如：
+定时任务 Prompt 使用当前 Thread 身份等待结果，例如：
 
-> 宿主会为这次定时运行执行固定回归。在当前工作区执行 `node reports/wait-for-evaluation.mjs --camp-id <当前上下文中的 Camp ID>`，等待与当前 Camp 绑定的回执。completed 表示执行结束，不代表 Gate 通过；随后读取其 directory 中 report.json/report.html，总结结论、版本、独立 Case 数、计划重复数、失败、未知及证据链接。失败或超时如实报告，不使用上次报告，不执行评测 Runner，不修改实现、Case 或评分标准。
+> 宿主会为这次定时运行执行固定回归。在当前工作区执行 `node reports/wait-for-evaluation.mjs --thread-id <当前上下文中的 Thread ID>`，等待与当前 Thread 绑定的回执。completed 表示执行结束，不代表 Gate 通过；随后读取其 directory 中 report.json/report.html，总结结论、版本、独立 Case 数、计划重复数、失败、未知及证据链接。失败或超时如实报告，不使用上次报告，不执行评测 Runner，不修改实现、Case 或评分标准。
 
 周回归汇总使用根目录 `trend-data.json` 中与本次 week／attempt 对应的 `hardPass`、`hardFail`、`unknown`，它们包含硬性验收与专项规则。若另列原始 `hardOutcome` 数量，须注明它不包含专项规则；不能忽略 `rules[].status = indeterminate`，也不能让 LLM 重新猜测分母。
 
@@ -117,7 +117,7 @@ App 退出／休眠时沿用既有 Automation 补跑与并发策略，不另建�
 
 部署包含此功能的新 App 后，在普通终端依次执行上述 `eval configure`、`eval schedule`，核对 `eval status`
 中绑定的 `timeoutSeconds: null`，再在既有 Weekly 上点击“立即运行”。保持 App 运行和电脑唤醒；无需重新
-创建任务，也不手工生成回执。当前 Camp 的 receipt 到终态之后才分析报告。绑定一次用于后续定时触发；
+创建任务，也不手工生成回执。当前 Thread 的 receipt 到终态之后才分析报告。绑定一次用于后续定时触发；
 源码、Case、Judge 或标准改变后需要重新登记/冻结/绑定。
 
 ## 每日 Trace 与分析 Agent
@@ -133,13 +133,13 @@ rovai app trace schedules --json
 
 Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每天的 Automation 只执行：
 
-> 在指定仓库执行 `node scripts/eval-daily.mjs prepared --output /analysis-workspace/reports --timezone Asia/Shanghai`。输入必须是前一自然日的完整报告。根据 yesterday、comparableHistory、changes、versions、coverage 和样本解释变化、证据、可能原因及建议，区分事实与假设。将结构化 JSON 保存到命令给出的 analysisOutput，再执行 `node scripts/eval-daily.mjs analysis --report <directory> --input <analysisOutput>` 登记结果。引用指标路径或 evidenceId，在 Camp 提供本地报告入口。缺失或陈旧时报受阻，不从全部日志估算比例，不执行原任务或修复。
+> 在指定仓库执行 `node scripts/eval-daily.mjs prepared --output /analysis-workspace/reports --timezone Asia/Shanghai`。输入必须是前一自然日的完整报告。根据 yesterday、comparableHistory、changes、versions、coverage 和样本解释变化、证据、可能原因及建议，区分事实与假设。将结构化 JSON 保存到命令给出的 analysisOutput，再执行 `node scripts/eval-daily.mjs analysis --report <directory> --input <analysisOutput>` 登记结果。引用指标路径或 evidenceId，在 Thread 提供本地报告入口。缺失或陈旧时报受阻，不从全部日志估算比例，不执行原任务或修复。
 
 结构化分析包含 `schemaVersion: 1`、`reportId`、`inputDigest`、`model: { provider, snapshotId }` 和 `facts`／`hypotheses`／`recommendations` 数组。将 prepared 返回的 `analysisSchema` 用作模型结构化输出约束，并遵循 `analysisInput.instructions`；每项为 `{ text, metricPaths, evidenceIds }`，至少引用一个存在的路径或样本 ID。指标路径和样本 ID 从 schema 枚举中原样选择；报告 ID 不是样本 ID，日期引用 `coverage.window.date`。模型身份是提交者声明，不能伪造缺失的版本证据。登记器保留每次原始提交和成功／失败记录，只更新分析状态指针与 HTML，不改写统计 JSON，也不证明解释正确。
 
 在后续部署时设置实际时间，建议当地时间 08:00 给 Host 留出准备时间。Host 在 App 内每分钟检查，失败退避一小时；如果当天尚无完整输入，分析应诚实失败，不能把旧报告当成昨天。关闭对应 Automation 即停止准备。当前版本未提供外部后台常驻保证。
 
-离线演示可以使用已实际导出的文件：`eval:daily --config <json> --date YYYY-MM-DD --trace <trace.json>`；在线用户调用省略 `--trace`，配置还需指定 bundled `rovai` 可执行文件。配置为 `{ "timezone": "Asia/Shanghai", "output": "/private/daily", "cli": "/app/bin/rovai", "scope": { "campIds": [], "excludeCampIds": [], "excludeAutomationIds": [] } }`。手工导出入口是 `rovai app trace export`；完整口径见 [User Automation v6](../contracts/user-automation-v6.md)。
+离线演示可以使用已实际导出的文件：`eval:daily --config <json> --date YYYY-MM-DD --trace <trace.json>`；在线用户调用省略 `--trace`，配置还需指定 bundled `rovai` 可执行文件。配置为 `{ "timezone": "Asia/Shanghai", "output": "/private/daily", "cli": "/app/bin/rovai", "scope": { "threadIds": [], "excludeThreadIds": [], "excludeAutomationIds": [] } }`。手工导出入口是 `rovai app trace export`；完整口径见 [User Automation v6](../contracts/user-automation-v6.md)。
 
 ## 报告解读与维护
 

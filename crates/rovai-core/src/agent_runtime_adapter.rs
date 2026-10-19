@@ -32,8 +32,9 @@ use crate::{
         DSH_MACOS_X64_EVIDENCE_REVISION, DSH_WINDOWS_X64_EVIDENCE_REVISION,
         GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
         GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-        PI_MACOS_ARM64_EVIDENCE_REVISION, PI_MACOS_X64_EVIDENCE_REVISION,
-        PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
+        MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION, MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION,
+        MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION, PI_MACOS_ARM64_EVIDENCE_REVISION,
+        PI_MACOS_X64_EVIDENCE_REVISION, PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
         RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
         ZCODE_MACOS_ARM64_EVIDENCE_REVISION, ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
     },
@@ -122,7 +123,14 @@ pub fn executable_fingerprint(path: &Path) -> Result<String> {
     file_content_fingerprint(path)
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
+thread_local! {
+    pub(crate) static FULL_HASH_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn file_content_fingerprint(path: &Path) -> Result<String> {
+    #[cfg(all(test, feature = "extended-tests"))]
+    FULL_HASH_READS.with(|count| count.set(count.get() + 1));
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut file = File::open(&canonical)
         .with_context(|| format!("failed to open {}", canonical.display()))?;
@@ -386,6 +394,7 @@ pub enum SkillDeliveryGroupKey {
     Trae,
     Cursor,
     Kimi,
+    Minimax,
     Grok,
     Dsh,
     Cline,
@@ -394,7 +403,7 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
@@ -408,6 +417,7 @@ impl SkillDeliveryGroupKey {
         Self::Trae,
         Self::Cursor,
         Self::Kimi,
+        Self::Minimax,
         Self::Grok,
         Self::Dsh,
         Self::Cline,
@@ -430,6 +440,7 @@ impl SkillDeliveryGroupKey {
             Self::Trae => "trae",
             Self::Cursor => "cursor",
             Self::Kimi => "kimi",
+            Self::Minimax => "minimax",
             Self::Grok => "grok",
             Self::Dsh => "dsh",
             Self::Cline => "cline",
@@ -453,6 +464,7 @@ impl SkillDeliveryGroupKey {
             Self::Trae => Path::new(".trae/skills"),
             Self::Cursor => Path::new(".cursor/skills"),
             Self::Kimi => Path::new(".kimi-code/skills"),
+            Self::Minimax => Path::new(".minimax/skills"),
             Self::Grok => Path::new(".grok/skills"),
             Self::Dsh => Path::new(".dsh/skills"),
             Self::Cline => Path::new(".cline/skills"),
@@ -480,6 +492,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "trae" => Ok(Self::Trae),
             "cursor" => Ok(Self::Cursor),
             "kimi" => Ok(Self::Kimi),
+            "minimax" => Ok(Self::Minimax),
             "grok" => Ok(Self::Grok),
             "dsh" => Ok(Self::Dsh),
             "cline" => Ok(Self::Cline),
@@ -764,6 +777,30 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             )
         };
+        if kind == AdapterKind::MinimaxCodeCli {
+            return match platform {
+                HostPlatformKey::MacosArm64 => RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                ),
+                HostPlatformKey::MacosX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::LinuxX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION,
+                ),
+            };
+        }
         if kind == AdapterKind::DeepseekHarness {
             return match platform {
                 HostPlatformKey::MacosArm64 => RuntimePlatformAdmission::qualified(
@@ -936,6 +973,9 @@ impl AgentRuntimeAdapterRegistry {
                 "execution_mode": "agent",
                 "approval_policy": "force",
             }),
+            AdapterKind::MinimaxCodeCli => {
+                json!({"permission_mode": "bypassPermissions", "mode":"default"})
+            }
             AdapterKind::KimiCodeCli => json!({
                 "permission_mode": "yolo",
             }),
@@ -969,6 +1009,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::TraeCnCli
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
+            | AdapterKind::MinimaxCodeCli
             | AdapterKind::GrokBuild
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
@@ -1028,6 +1069,10 @@ impl AgentRuntimeAdapterRegistry {
                 [SkillDeliveryGroupKey::Cursor],
                 SkillDiscoveryVerification::DocumentationOnly,
             ),
+            AdapterKind::MinimaxCodeCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Minimax],
+                SkillDiscoveryVerification::Verified,
+            ),
             AdapterKind::KimiCodeCli => native_skill_discovery(
                 [SkillDeliveryGroupKey::Kimi],
                 SkillDiscoveryVerification::Verified,
@@ -1053,6 +1098,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli
+            | AdapterKind::MinimaxCodeCli
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::ClineCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
@@ -1112,6 +1158,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => {
                 acp_capability_snapshot(observation, kimi_permission_options())
             }
+            AdapterKind::MinimaxCodeCli => {
+                acp_capability_snapshot(observation, minimax_permission_options())
+            }
             AdapterKind::ZcodeApp => {
                 acp_capability_snapshot(observation, zcode_permission_options())
             }
@@ -1138,6 +1187,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::TraeCnCli => trae_static_permission_options(),
             AdapterKind::CursorAgent => cursor_permission_options(),
             AdapterKind::KimiCodeCli => kimi_permission_options(),
+            AdapterKind::MinimaxCodeCli => minimax_permission_options(),
             AdapterKind::GrokBuild => grok_permission_options(),
             AdapterKind::DeepseekHarness => dsh_permission_options(),
             AdapterKind::ClineCli => cline_permission_options(),
@@ -2468,6 +2518,18 @@ fn acp_capability_snapshot(
                 "context.charter.managed_system_prompt",
                 "context.compaction.native_system_prompt_preserved",
             ]
+        } else if adapter_kind == AdapterKind::MinimaxCodeCli {
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "session.set_config_option",
+                "structured_permission_request",
+                "context.charter.native_append",
+                "context.compaction.native_system_prompt_preserved",
+            ]
         } else if adapter_kind == AdapterKind::GrokBuild {
             &[
                 "acp.initialize",
@@ -2729,6 +2791,31 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
+    if adapter_kind == AdapterKind::MinimaxCodeCli {
+        let current = acp_runtime_model_id_from_session(session_result);
+        let effort = session_result["configOptions"]
+            .as_array()
+            .and_then(|options| {
+                options
+                    .iter()
+                    .find(|option| option["id"] == "thinkingEffort")
+            })
+            .and_then(acp_model_option);
+        for model in &mut models {
+            // MiniMax advertises effort for the selected model only.
+            model.options = if let Some(options) = session_result
+                .pointer("/_meta/rovaiMinimaxModelOptions")
+                .and_then(|all| all.get(&model.id))
+            {
+                serde_json::from_value(options.clone())?
+            } else if current.as_deref() == Some(model.id.as_str()) {
+                effort.clone().into_iter().collect()
+            } else {
+                Vec::new()
+            };
+        }
+    }
+
     if matches!(
         adapter_kind,
         AdapterKind::CommandCodeCli | AdapterKind::ClineCli
@@ -3186,6 +3273,43 @@ fn cursor_permission_options() -> Vec<PermissionOptionDescriptor> {
             recommended_value: json!("default"),
             scope: RuntimeOptionScope::Host,
             risk: "dangerous".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+    ]
+}
+
+fn minimax_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![
+        PermissionOptionDescriptor {
+            key: "permission_mode".to_string(),
+            label: "Permission mode".to_string(),
+            description: "MiniMax Code native process permission policy.".to_string(),
+            value_type: "enum".to_string(),
+            choices: ["default", "auto", "bypassPermissions"]
+                .into_iter()
+                .map(|value| choice(value, value))
+                .collect(),
+            recommended_value: json!("default"),
+            scope: RuntimeOptionScope::Host,
+            risk: "elevated".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+        PermissionOptionDescriptor {
+            key: "mode".into(),
+            label: "Session mode".into(),
+            description: "MiniMax Code native default or plan mode.".into(),
+            value_type: "enum".into(),
+            choices: ["default", "plan"]
+                .into_iter()
+                .map(|value| choice(value, value))
+                .collect(),
+            recommended_value: json!("default"),
+            scope: RuntimeOptionScope::Run,
+            risk: "normal".into(),
             supported: true,
             required: true,
             unsupported_reason: None,
@@ -3799,6 +3923,10 @@ mod tests {
             ),
             (AdapterKind::KimiCodeCli, json!({"permission_mode": "yolo"})),
             (
+                AdapterKind::MinimaxCodeCli,
+                json!({"permission_mode":"bypassPermissions", "mode":"default"}),
+            ),
+            (
                 AdapterKind::GrokBuild,
                 json!({"permission_mode": "bypassPermissions"}),
             ),
@@ -3830,6 +3958,25 @@ mod tests {
 
     #[test]
     fn grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs() {
+        let mini = json!({"configOptions":[
+            {"id":"model","type":"select","currentValue":"m:provider:model:u","options":[{"value":"m:provider:model:u","name":"Model"},{"value":"m:provider:other:v:fast","name":"Other"}]},
+            {"id":"thinkingEffort","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
+        ]});
+        let models = acp_model_catalog_for_adapter(AdapterKind::MinimaxCodeCli, &mini).unwrap();
+        assert_eq!(models[0].id, "m:provider:model:u");
+        assert_eq!(models[0].options[0].key, "thinkingEffort");
+        assert!(
+            models[1].options.is_empty(),
+            "effort must not leak across models"
+        );
+        assert!(
+            validate_live_model_selection(
+                &models,
+                &models[0].id,
+                &json!({"thinkingEffort":"ultra"})
+            )
+            .is_err()
+        );
         let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
         assert_eq!(command[0].id, "command-code-cli://runtime-default");
@@ -5286,6 +5433,11 @@ mod tests {
                 SkillDiscoveryVerification::DocumentationOnly,
             ),
             (
+                AdapterKind::MinimaxCodeCli,
+                &[SkillDeliveryGroupKey::Minimax],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
                 AdapterKind::KimiCodeCli,
                 &[SkillDeliveryGroupKey::Kimi],
                 SkillDiscoveryVerification::Verified,
@@ -5333,6 +5485,7 @@ mod tests {
             AdapterKind::QwenCode,
             AdapterKind::TraeCnCli,
             AdapterKind::KimiCodeCli,
+            AdapterKind::MinimaxCodeCli,
             AdapterKind::GrokBuild,
             AdapterKind::DeepseekHarness,
         ] {

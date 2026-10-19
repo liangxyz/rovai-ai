@@ -115,6 +115,11 @@ async fn run() -> Result<u8> {
         );
         return Ok(0);
     }
+    let tasks_enabled = discover_tasks_enabled();
+    if args.first().is_some_and(|value| value == "task") && !tasks_enabled {
+        println!("{}", rovai_core::task_capability::unavailable_result());
+        return Ok(2);
+    }
     if args.as_slice() == ["--help"] || args.is_empty() {
         print_root_help();
         return Ok(0);
@@ -123,7 +128,7 @@ async fn run() -> Result<u8> {
         print!("{}", task_family_help_text());
         return Ok(0);
     }
-    if let Some(description) = operation_help(&args)? {
+    if let Some(description) = operation_help(&args, tasks_enabled)? {
         print_operation_help(&description);
         return Ok(0);
     }
@@ -140,7 +145,7 @@ async fn run() -> Result<u8> {
         [command, rest @ ..] if command == "send" => {
             let identity = builtin_tool_identity_by_command(command, "")
                 .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
-            let description = builtin_tool_description(identity.operation)?;
+            let description = builtin_tool_description(identity.operation, tasks_enabled)?;
             let input = match parse_and_validate_operation_input(&description, rest) {
                 Ok(input) => input,
                 Err(failure) => {
@@ -153,7 +158,7 @@ async fn run() -> Result<u8> {
         [group, action, rest @ ..] => {
             let identity = builtin_tool_identity_by_command(group, action)
                 .with_context(|| format!("unknown Rovai command: rovai {group} {action}"))?;
-            let description = builtin_tool_description(identity.operation)?;
+            let description = builtin_tool_description(identity.operation, tasks_enabled)?;
             let input = match parse_and_validate_operation_input(&description, rest) {
                 Ok(input) => input,
                 Err(failure) => {
@@ -423,6 +428,12 @@ fn envelope_exit_code(
     } else if envelope
         .error
         .as_ref()
+        .is_some_and(|error| error.code == rovai_core::task_capability::DISABLED_CODE)
+    {
+        2
+    } else if envelope
+        .error
+        .as_ref()
         .is_some_and(|error| error.code == "builtin_tool.outcome_indeterminate")
     {
         3
@@ -431,7 +442,7 @@ fn envelope_exit_code(
     }
 }
 
-fn operation_help(args: &[String]) -> Result<Option<BuiltinToolDescription>> {
+fn operation_help(args: &[String], tasks_enabled: bool) -> Result<Option<BuiltinToolDescription>> {
     let identity = match args {
         [command, help] if help == "--help" => builtin_tool_identity_by_command(command, ""),
         [group, action, help] if help == "--help" => {
@@ -440,7 +451,7 @@ fn operation_help(args: &[String]) -> Result<Option<BuiltinToolDescription>> {
         _ => None,
     };
     identity
-        .map(|identity| builtin_tool_description(identity.operation))
+        .map(|identity| builtin_tool_description(identity.operation, tasks_enabled))
         .transpose()
 }
 
@@ -454,6 +465,15 @@ fn invocation_identity(args: &[String]) -> Option<BuiltinToolCliIdentity> {
 
 fn is_family_help(args: &[String]) -> bool {
     matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "thread" | "camp" | "history" | "memory" | "single-chat" | "automation" | "mission"))
+}
+
+fn discover_tasks_enabled() -> bool {
+    load_context().is_ok_and(|context| {
+        context.contract_version == BUILTIN_TOOL_CONTRACT_VERSION
+            && context.ipc_protocol_version == BUILTIN_TOOL_IPC_PROTOCOL_VERSION
+            && context.lease.is_some()
+            && context.tasks_enabled
+    })
 }
 
 fn load_context() -> Result<BuiltinToolCliContext> {
@@ -594,10 +614,21 @@ fn parse_and_validate_operation_input(
             message: rovai_core::agent_profile::PROFESSIONAL_RESPONSIBILITIES_TOO_LONG.to_owned(),
             details: None,
         })?;
-    if validate_schema(&input, &description.input_schema).is_err() {
+    if validate_cli_input_schema(description, &input).is_err() {
         return Err(explain_input_validation_failure(description, &input));
     }
     Ok(input)
+}
+
+fn validate_cli_input_schema(description: &BuiltinToolDescription, input: &Value) -> Result<()> {
+    if description.name == "thread.message.send" {
+        // Legacy taskId is accepted without adding it back to public discovery.
+        return rovai_core::team_tool_catalog::validate_builtin_tool_input(
+            &description.name,
+            input,
+        );
+    }
+    validate_schema(input, &description.input_schema)
 }
 
 fn discriminated_input_variants(
@@ -1182,6 +1213,24 @@ fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) 
         let (flag, inline_value) = raw
             .split_once('=')
             .map_or((raw.as_str(), None), |(flag, value)| (flag, Some(value)));
+        if description.name == "thread.message.send" && flag == "--task-id" {
+            let value = match inline_value {
+                Some(value) => value,
+                None => {
+                    index += 1;
+                    args.get(index).context("--task-id requires a value")?
+                }
+            };
+            anyhow::ensure!(
+                !value.trim().is_empty() && !value.starts_with("--"),
+                "--task-id requires a value"
+            );
+            // Retain the legacy input for receipt identity and source-conflict
+            // checks. Core ignores it when routing or admitting a new Send.
+            direct.insert("taskId".to_string(), Value::String(value.to_string()));
+            index += 1;
+            continue;
+        }
         let canonical_flag = rovai_core::thread_compat::canonical_flag(&description.name, flag);
         if let Some(previous) = used_flags.insert(canonical_flag.to_string(), flag.to_string())
             && previous != flag
@@ -1258,7 +1307,7 @@ fn parse_send_file_input(
         .and_then(|value| {
             rovai_core::thread_compat::normalize_builtin_input(&description.name, value).ok()
         })
-        .filter(|value| validate_schema(value, &description.input_schema).is_ok());
+        .filter(|value| validate_cli_input_schema(description, value).is_ok());
     if let Some(request) = request {
         if !direct.is_empty() {
             return Err(CliInputFailure::send_request_file_conflict().into());
@@ -1454,12 +1503,18 @@ enum BuiltinToolIpcFailure {
 fn print_root_help() {
     print!(
         "{}",
-        root_help_text(!user_automation_available_in_current_process())
+        root_help_text(
+            !user_automation_available_in_current_process(),
+            discover_tasks_enabled()
+        )
     );
 }
 
-fn root_help_text(managed_runtime: bool) -> String {
+fn root_help_text(managed_runtime: bool, tasks_enabled: bool) -> String {
     let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs.\n".to_string();
+    if !tasks_enabled {
+        text = text.replace("  rovai task create|get|list|update\n", "");
+    }
     if !managed_runtime {
         text.push_str("\nUser Automation:\n  rovai app --help\n\nAgent operations keep their process-private transport. `rovai app` uses the running Desktop App's separate User Automation transport.\n");
     }
@@ -1467,7 +1522,7 @@ fn root_help_text(managed_runtime: bool) -> String {
 }
 
 fn task_family_help_text() -> &'static str {
-    "rovai task\n\n  create  Create a durable task.\n  get     Read task details.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
+    "rovai task\n\nUse Tasks for responsibility that spans Runs and needs independent handoff or acceptance.\nUse messages for one-time coordination. Update Task state before a required handoff, request or result.\n\n  create  Create a durable task.\n  get     Read task details.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
 }
 
 fn user_automation_available_in_current_process() -> bool {
@@ -2130,8 +2185,8 @@ mod tests {
 
     #[test]
     fn managed_runtime_cli_surface_does_not_advertise_or_admit_user_automation() {
-        assert!(!root_help_text(true).contains("rovai app"));
-        assert!(root_help_text(false).contains("rovai app --help"));
+        assert!(!root_help_text(true, true).contains("rovai app"));
+        assert!(root_help_text(false, true).contains("rovai app --help"));
         for (context, run_tmp, available) in [
             (None, None, true),
             (Some("context"), None, false),
@@ -2149,7 +2204,7 @@ mod tests {
 
     #[test]
     fn direct_flags_use_canonical_fields_and_repeated_arrays() {
-        let description = builtin_tool_description("memory.read").unwrap();
+        let description = builtin_tool_description("memory.read", true).unwrap();
         let mut direct = Map::new();
         let argument = description
             .arguments
@@ -2159,7 +2214,7 @@ mod tests {
         insert_direct_value(&mut direct, argument, Value::String("m1".to_string())).unwrap();
         insert_direct_value(&mut direct, argument, Value::String("m2".to_string())).unwrap();
         assert_eq!(direct["memoryIds"], json!(["m1", "m2"]));
-        let read = builtin_tool_description("thread.read").unwrap();
+        let read = builtin_tool_description("thread.read", true).unwrap();
         for flags in [
             ["--thread-id", "scope", "--reply-chain", "message"],
             ["--camp-id", "scope", "--thread", "message"],
@@ -2175,7 +2230,7 @@ mod tests {
         ] {
             assert!(parse_operation_input(&read, &flags.map(str::to_string)).is_err());
         }
-        let history = builtin_tool_description("history.search").unwrap();
+        let history = builtin_tool_description("history.search", true).unwrap();
         assert!(
             parse_operation_input(
                 &history,
@@ -2187,7 +2242,7 @@ mod tests {
 
     #[test]
     fn memory_view_direct_flags_form_the_exact_relationship_input() {
-        let description = builtin_tool_description("memory.view").unwrap();
+        let description = builtin_tool_description("memory.view", true).unwrap();
         let input = parse_operation_input(
             &description,
             &[
@@ -2209,11 +2264,14 @@ mod tests {
 
     #[test]
     fn mission_status_help_and_direct_flags_keep_source_message_optional() {
-        let description = operation_help(&[
-            "mission".to_string(),
-            "status".to_string(),
-            "--help".to_string(),
-        ])
+        let description = operation_help(
+            &[
+                "mission".to_string(),
+                "status".to_string(),
+                "--help".to_string(),
+            ],
+            false,
+        )
         .unwrap()
         .unwrap();
         let source_message = description
@@ -2241,7 +2299,7 @@ mod tests {
 
     #[test]
     fn single_chat_history_direct_flags_are_bounded_and_id_free() {
-        let description = builtin_tool_description("single_chat.history").unwrap();
+        let description = builtin_tool_description("single_chat.history", true).unwrap();
         let input = parse_and_validate_operation_input(
             &description,
             &[
@@ -2268,7 +2326,7 @@ mod tests {
 
     #[test]
     fn direct_flags_and_input_file_are_mutually_exclusive() {
-        let description = builtin_tool_description("team.create_task").unwrap();
+        let description = builtin_tool_description("team.create_task", true).unwrap();
         assert!(
             parse_operation_input(
                 &description,
@@ -2281,7 +2339,7 @@ mod tests {
             )
             .is_err()
         );
-        let update = builtin_tool_description("member.update").unwrap();
+        let update = builtin_tool_description("member.update", true).unwrap();
         let direct = parse_and_validate_operation_input(
             &update,
             &[
@@ -2328,7 +2386,7 @@ mod tests {
             )
             .is_err()
         );
-        let create = builtin_tool_description("member.create").unwrap();
+        let create = builtin_tool_description("member.create", true).unwrap();
         let create_input = parse_and_validate_operation_input(
             &create,
             &[
@@ -2390,15 +2448,15 @@ mod tests {
             "automation",
         ] {
             let args = [family.to_string(), "--help".to_string()];
-            assert!(operation_help(&args).unwrap().is_none());
+            assert!(operation_help(&args, true).unwrap().is_none());
             assert!(is_family_help(&args));
         }
         let task_help = ["task".to_string(), "--help".to_string()];
-        assert!(operation_help(&task_help).unwrap().is_none());
+        assert!(operation_help(&task_help, false).unwrap().is_none());
         assert!(!is_family_help(&task_help));
         assert_eq!(
             task_family_help_text(),
-            "rovai task\n\n  create  Create a durable task.\n  get     Read task details.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
+            "rovai task\n\nUse Tasks for responsibility that spans Runs and needs independent handoff or acceptance.\nUse messages for one-time coordination. Update Task state before a required handoff, request or result.\n\n  create  Create a durable task.\n  get     Read task details.\n  list    List task summaries.\n  update  Update an existing task.\n\nUse rovai task <command> --help for arguments.\n"
         );
     }
 
@@ -2442,9 +2500,14 @@ mod tests {
                 .map(|value| (*value).to_string())
                 .collect::<Vec<_>>();
             assert!(
-                operation_help(&args).unwrap().is_some(),
+                operation_help(&args, true).unwrap().is_some(),
                 "missing exact help for {path:?}"
             );
+            if path[0] == "task" {
+                assert!(operation_help(&args, false).is_err());
+            } else {
+                assert!(operation_help(&args, false).unwrap().is_some());
+            }
         }
         for family in [
             "member",
@@ -2455,12 +2518,12 @@ mod tests {
             "automation",
         ] {
             let args = vec![family.to_string(), "--help".to_string()];
-            assert!(operation_help(&args).unwrap().is_none());
+            assert!(operation_help(&args, true).unwrap().is_none());
             assert!(is_family_help(&args));
         }
         assert!(!is_family_help(&["task".to_string(), "--help".to_string()]));
         for operation in ["member.create", "member.update"] {
-            let description = builtin_tool_description(operation).unwrap();
+            let description = builtin_tool_description(operation, true).unwrap();
             assert!(
                 operation_help_text(&description)
                     .contains("10,000 Unicode scalar values after trimming")
@@ -2492,7 +2555,7 @@ mod tests {
                 10_000
             );
         }
-        let view = builtin_tool_description("memory.view").unwrap();
+        let view = builtin_tool_description("memory.view", true).unwrap();
         let help = operation_help_text(&view);
         assert!(help.contains("One of: hearth, companion, relationship."));
         assert!(help.contains("Required only when --scope relationship"));
@@ -2500,7 +2563,7 @@ mod tests {
 
     #[test]
     fn camp_help_teaches_default_and_explicit_single_camp_targets() {
-        let search = builtin_tool_description("thread.search").unwrap();
+        let search = builtin_tool_description("thread.search", true).unwrap();
         let search_help = operation_help_text(&search);
         assert!(search_help.contains("Omit for the current Thread"));
         assert!(search_help.contains("any extant public Thread ID"));
@@ -2523,7 +2586,7 @@ mod tests {
             ]
         );
 
-        let read = builtin_tool_description("thread.read").unwrap();
+        let read = builtin_tool_description("thread.read", true).unwrap();
         let read_help = operation_help_text(&read);
         for flag in ["--limit", "--before", "--message-id", "--reply-chain"] {
             assert!(read_help.contains(flag), "missing {flag} from help");
@@ -2631,7 +2694,7 @@ mod tests {
 
     #[test]
     fn send_file_input_preserves_text_and_complete_schema_requests() {
-        let description = builtin_tool_description("thread.message.send").unwrap();
+        let description = builtin_tool_description("thread.message.send", true).unwrap();
         let path = env::temp_dir().join(format!("rovai-send-{}", Uuid::new_v4()));
         let file_args = vec!["--input-file".into(), path.to_string_lossy().into_owned()];
         let texts = [
@@ -2674,6 +2737,7 @@ mod tests {
         let requests = [
             json!({}),
             json!({"publicOnly": true}),
+            json!({"body": "retired relation", "publicOnly": true, "taskId": null}),
             json!({"files": ["report.pdf"]}),
             json!({"body": "完成\n🌸\\n", "publicOnly": true, "mentionUser": true}),
             json!({"body": "continue", "to": ["agent_5", "agent_7"], "taskId": "task-1", "files": ["report.pdf"]}),
@@ -2808,7 +2872,7 @@ mod tests {
 
     #[test]
     fn public_send_help_has_no_agent_supplied_camp_scope() {
-        let description = operation_help(&["send".to_string(), "--help".to_string()])
+        let description = operation_help(&["send".to_string(), "--help".to_string()], false)
             .unwrap()
             .unwrap();
         assert!(description.arguments.iter().all(|argument| {
@@ -2994,17 +3058,12 @@ mod tests {
 
     #[test]
     fn task_create_help_is_lead_facing_and_requires_an_explicit_owner() {
-        let description = operation_help(&[
-            "task".to_string(),
-            "create".to_string(),
-            "--help".to_string(),
-        ])
-        .unwrap()
-        .unwrap();
+        let description = builtin_tool_description("team.create_task", true).unwrap();
         assert_eq!(
             description.summary,
-            "Create an independently owned task that persists across runs or handoffs.\nPrefer existing tasks; do not create tasks for one-off collaboration or local steps.\nUser/Default Lead only. Put scope and requirements in description.\nDoes not notify or start work; use rovai send --task-id."
+            rovai_core::team_tool::TASK_CREATE_DESCRIPTION
         );
+        assert!(builtin_tool_description("team.create_task", false).is_err());
         let assignee = description
             .arguments
             .iter()

@@ -76,30 +76,32 @@ impl Core {
         // cannot be overwritten by this older capture.
         let search = self.read_runtime_check_environment(interactive).await?;
         let _update = self.runtime_search_update.lock().await;
-        let generation = self
-            .runtime_search_environment
-            .read()
-            .await
-            .generation()
-            .checked_add(1)
-            .context("Runtime search generation exhausted")?;
+        let current = self.runtime_search_environment.read().await.clone();
         let configurations = rovai_core::runtime_startup::load_all(&*self.database.lock().await)?;
-        let search = Arc::new(
-            search
-                .with_generation(generation)
-                .with_startup_configurations(configurations),
-        );
+        let search = search.with_startup_configurations(configurations);
+        let changed = !current.same_inputs(&search);
+        let generation = if changed {
+            current
+                .generation()
+                .checked_add(1)
+                .context("Runtime search generation exhausted")?
+        } else {
+            current.generation()
+        };
+        let search = Arc::new(search.with_generation(generation));
         let summary = search.summary();
-        self.database
-            .lock()
-            .await
-            .record_runtime_search_environment_generation(
-                summary.generation,
-                &summary.created_at,
-            )?;
-        search.activate_for_runtime_commands();
+        if changed {
+            self.database
+                .lock()
+                .await
+                .record_runtime_search_environment_generation(
+                    summary.generation,
+                    &summary.created_at,
+                )?;
+            search.activate_for_runtime_commands();
+            self.native_skill_discovery.invalidate_cache();
+        }
         *self.runtime_search_environment.write().await = search.clone();
-        self.native_skill_discovery.invalidate_cache();
         Ok(search)
     }
 

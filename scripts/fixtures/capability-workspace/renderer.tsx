@@ -1,16 +1,14 @@
 import { Activity, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { SkillSettings } from '../../../apps/desktop/src/renderer/src/SkillSettings'
+import { NativeSkillsSettings, ToolboxSettings } from '../../../apps/desktop/src/renderer/src/RebuiltSkillsSettings'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
 import { maskMcpJson } from '../../../apps/desktop/src/renderer/src/McpJsonEditor'
 import { McpSettings } from '../../../apps/desktop/src/renderer/src/McpSettings'
-import { agent, server, skillFixture } from './data'
+import { agent, server } from './data'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const members = Array.from({ length: 12 }, (_, i) => agent(i))
 const requests: { method: string; params: any }[] = []
-let folderSelections = 0
-let folderResult: string | null = '/fixture/skill-folder'
 let conflict = false
 let configReadFailure = false
 let remountMcp: () => void = () => {}
@@ -39,8 +37,7 @@ const privateHeader = JSON.stringify({
     }
   }
 })
-let toggleWait: Promise<void> | null = null
-let releaseToggle: (() => void) | undefined
+let failToolboxSave = false
 let deleteWait: Promise<void> | null = null
 let releaseDelete: (() => void) | undefined
 let failDelete = false
@@ -52,39 +49,12 @@ const previewPaths = [
   'references/large.md', 'notes/guide.md', longPreviewPath,
   ...Array.from({ length: 4 }, (_, index) => `references/check-${index + 1}.md`)
 ]
-const groups = [
-  'claude_compatible',
-  'codex',
-  'copilot',
-  'opencode',
-  'kiro',
-  'qoder',
-  'codebuddy',
-  'qwen',
-  'trae',
-  'cursor',
-  'kimi',
-  'grok',
-  'antigravity',
-  'pi'
-].map((key, i) => ({
-  key,
-  label: ['Claude 兼容', 'Codex', 'Copilot', 'OpenCode'][i] ?? key,
-  members: i < 4 ? members.slice(i, i + 3) : [],
-  relativePath: '.fixture/skills',
-  adapterKinds: [],
-  verification: 'verified'
+const nativeSkills = ['ui-ux-pro-max', 'design-review'].map((name, index) => ({
+  id: `native-${index + 1}`, name, description: '本机原生 Skill',
+  entryPath: `/fixture/native/${name}/SKILL.md`, canonicalPath: `/fixture/native/${name}/SKILL.md`,
+  sourceScope: 'user' as const, adapterKind: 'codex-cli' as const
 }))
-let skills = ['ui-ux-pro-max', 'design-review', 'local-skill', 'code-review'].map((name, i) => ({
-  ...skillFixture(i !== 2),
-  id: `skill-${i + 1}`,
-  name,
-  origin: i === 2 ? ('imported' as const) : ('official' as const),
-  groupAssignments: groups.map((group) => ({
-    groupKey: group.key,
-    revisionId: 'revision-1'
-  }))
-}))
+let toolbox = [{ name: 'member-studio', description: '创建队员', memberIds: ['agent_0'], version: '1', sourceError: null }]
 let config = {
   configDigest: 'digest-1',
   servers: [
@@ -99,28 +69,14 @@ let config = {
     })
   ]
 }
-const candidate = {
-  name: 'new-folder-skill',
-  description: '本地文件夹中的说明与参考文件',
-  fileCount: 2,
-  totalBytes: 100,
-  contentDigest: 'digest',
-  importAction: 'create',
-  existingSkillId: null,
-  existingSkillVersion: null
-}
 const text =
-  '---\nname: ui-ux-pro-max\ndescription: UI design guidance\n---\n\n# 界面设计与实现\n\n从已有界面出发，让每个操作清晰、直接。\n\n## 使用方式\n\n1. 理解当前页面的主要任务。\n2. 保留熟悉的视觉风格和交互。\n3. 检查键盘操作、窄窗口和深色模式。\n\n## 设计原则\n\n- 主要内容优先，低频信息按需展开。\n- 选择整行即可切换投递范围。\n- 配置、导入与预览在当前页面完成。'
+  '---\nname: ui-ux-pro-max\ndescription: UI design guidance\n---\n\n# 界面设计与实现\n\n从已有界面出发，让每个操作清晰、直接。\n\n## 使用方式\n\n1. 理解当前页面的主要任务。\n2. 保留熟悉的视觉风格和交互。\n3. 检查键盘操作、窄窗口和深色模式。\n\n## 设计原则\n\n- 主要内容优先，低频信息按需展开。\n- 原生 Skills 保持只读。\n- 工具箱按队员配置。'
 Object.assign(window, {
   rovai: {
     onEvent: () => () => {},
-    selectSkillImportDirectory: async () => {
-      folderSelections++
-      return folderResult
-    },
     request: async (method: string, params: any = {}) => {
       requests.push({ method, params })
-      if (method === 'skills.delete' || method === 'mcp.servers.delete') {
+      if (method === 'mcp.servers.delete') {
         if (deleteWait) {
           await deleteWait
           deleteWait = null
@@ -130,18 +86,15 @@ Object.assign(window, {
           throw new Error('删除失败，请重试。')
         }
       }
-      if (method === 'skills.list') return structuredClone(skills)
-      if (method === 'skills.deliveryGroups.list') return groups
-      if (method === 'skills.content.read') {
-        const paths = params.source === 'import'
-          ? ['SKILL.md', 'references/guide.md']
-          : params.skillId === 'skill-2' ? ['SKILL.md'] : previewPaths
+      if (method === 'nativeSkills.list') return { skills: structuredClone(nativeSkills), errors: [] }
+      if (method === 'nativeSkills.read') {
+        const paths = params.skillId === 'native-2' ? ['SKILL.md'] : previewPaths
         const status = params.path === 'assets/icon.png' ? 'binary'
           : params.path === 'references/large.md' ? 'too_large' : 'text'
         const result = {
           path: params.path,
           status,
-          content: status !== 'text' ? null : params.skillId === 'skill-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
+          content: status !== 'text' ? null : params.skillId === 'native-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
             params.path === 'SKILL.md'
               ? text +
                 '\n\n' +
@@ -159,60 +112,16 @@ Object.assign(window, {
         }
         return result
       }
-      if (method === 'skills.import.inspect' || method === 'skills.import.github.inspect')
-        return {
-          stagingToken: 'stage-1',
-          candidates:
-            method === 'skills.import.github.inspect'
-              ? [
-                  { ...candidate, name: 'github-skill-one' },
-                  { ...candidate, name: 'github-skill-two' }
-                ]
-              : [candidate],
-          rejectedCandidates: []
-        }
-      if (method === 'skills.import.commit') {
-        const id = 'new-' + params.command.candidateName
-        skills = [
-          ...skills,
-          {
-            ...skills[0],
-            id,
-            name: params.command.candidateName,
-            origin: 'imported',
-            enabled: true
-          }
-        ]
-        return { status: 'applied', payload: { skillId: id } }
+      if (method === 'toolbox.list') return structuredClone(toolbox)
+      if (method === 'toolbox.read') return { content: '# 创建队员\n\n先确认身份卡，再创建队员。' }
+      if (method === 'toolbox.setMembers') {
+        if (failToolboxSave) { failToolboxSave = false; throw new Error('暂时无法保存队员配置。') }
+        const skill = toolbox.find(item => item.name === params.command.skillName)!
+        if (skill.version !== params.command.expectedVersion) return { status: 'rejected', code: 'toolbox.members.conflict', payload: {} }
+        skill.memberIds = params.command.memberIds
+        skill.version = String(Number(skill.version) + 1)
+        return { status: 'applied', payload: { version: skill.version } }
       }
-      if (method === 'skills.delete') {
-        skills = skills.filter((s) => s.id !== params.command.skillId)
-        return { status: 'applied', payload: {} }
-      }
-      if (method === 'skills.setEnabled') {
-        if (toggleWait) {
-          await toggleWait
-          toggleWait = null
-        }
-        const item = skills.find((s) => s.id === params.command.skillId)!
-        item.enabled = params.command.enabled
-        item.version++
-        return {
-          status: 'applied',
-          payload: { enabled: item.enabled, version: item.version }
-        }
-      }
-      if (method === 'skills.setGroupAssignments') {
-        const item = skills.find((s) => s.id === params.command.skillId)!
-        item.groupAssignments = params.command.groupKeys.map((groupKey: string) => ({
-          groupKey,
-          revisionId: 'revision-1'
-        }))
-        item.version++
-        return { status: 'applied', payload: {} }
-      }
-      if (method === 'skills.get')
-        return structuredClone(skills.find((s) => s.id === params.skillId))
       if (method === 'mcp.servers.reveal') {
         if (revealWait) {
           await revealWait
@@ -346,7 +255,7 @@ Object.assign(window, {
   }
 })
 function Fixture() {
-  const [page, setPage] = useState<'mcp' | 'skills'>('skills')
+  const [page, setPage] = useState<'mcp' | 'skills' | 'toolbox'>('skills')
   const [mcpEpoch, setMcpEpoch] = useState(0)
   remountMcp = () => setMcpEpoch(value => value + 1)
   return (
@@ -365,6 +274,7 @@ function Fixture() {
           <button className="quiet-button" id="nav-skills" onClick={() => setPage('skills')}>
             Skills
           </button>
+          <button className="quiet-button" id="nav-toolbox" onClick={() => setPage('toolbox')}>工具箱</button>
           <button className="quiet-button" id="nav-mcp" onClick={() => setPage('mcp')}>
             MCP
           </button>
@@ -374,8 +284,9 @@ function Fixture() {
         <div className="settings-workbench">
           <div className={`settings-panel settings-panel-${page}`}>
             <Activity mode={page === 'skills' ? 'visible' : 'hidden'}>
-              <SkillSettings />
+              <NativeSkillsSettings />
             </Activity>
+            <Activity mode={page === 'toolbox' ? 'visible' : 'hidden'}><ToolboxSettings agents={members} /></Activity>
             <Activity mode={page === 'mcp' ? 'visible' : 'hidden'}>
               <McpSettings key={mcpEpoch} agents={members} />
             </Activity>
@@ -411,12 +322,7 @@ Object.assign(window, {
       })
     },
     releaseReveal: () => releaseReveal?.(),
-    holdToggle: () => {
-      toggleWait = new Promise((resolve) => {
-        releaseToggle = resolve
-      })
-    },
-    releaseToggle: () => releaseToggle?.(),
+    failToolboxSave: () => { failToolboxSave = true },
     holdDelete: (fail = false) => {
       failDelete = fail
       deleteWait = new Promise(resolve => { releaseDelete = resolve })
@@ -427,15 +333,11 @@ Object.assign(window, {
       config.configDigest += '-external'
       window.dispatchEvent(new Event('focus'))
     },
-    folderSelections: () => folderSelections,
-    cancelFolder: () => {
-      folderResult = null
-    },
     conflict: () => {
       conflict = true
     },
     snapshot: () => {
-      const root = Array.from(document.querySelectorAll<HTMLElement>('.capability-workspace')).find(
+      const root = Array.from(document.querySelectorAll<HTMLElement>('.capability-workspace,.rebuilt-skills-columns')).find(
         (n) => n.getBoundingClientRect().width > 0
       )!
       const rect = (selector: string) => {
@@ -444,8 +346,8 @@ Object.assign(window, {
       }
       return {
         width: root.getBoundingClientRect().width,
-        list: rect('.capability-library'),
-        detail: rect('.capability-detail'),
+        list: rect('.capability-library,.rebuilt-skills-list'),
+        detail: rect('.capability-detail,.rebuilt-skills-detail'),
         compact: root.dataset.compact,
         text: root.innerText,
         overflow: document.documentElement.scrollWidth > window.innerWidth,

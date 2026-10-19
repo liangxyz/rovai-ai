@@ -1,12 +1,12 @@
 ---
 document_type: development-guide
 authority: standalone-server-preview-operation
-last_updated: 2026-10-17
+last_updated: 2026-10-19
 ---
 
 # 原生 Server 安装与开发验收
 
-Server 0.4.12 已与 Desktop 一起公开发布于 [`v0.4.12`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.12)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
+Server 0.4.13 已与 Desktop 一起公开发布于 [`v0.4.13`](https://github.com/murray17/rovai-ai/releases/tag/v0.4.13)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
 
 2026-09-29 的 macOS arm64 **0.4.0** 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。0.4.1 桥接包补齐归档资源与快捷命令路径，包内 Skill 读取和 0.4.0 数据升级已在隔离环境验收；尚不能把旧截图记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
 
@@ -80,7 +80,7 @@ Unix 默认配置 `.profile`、`.bashrc`、`.bash_profile`、`.zshrc` 的去重 
 `rovai-server-<版本>-<target>.tar.gz`（Unix）或 `.zip`（Windows），`SHA256SUMS` 每个资产恰好一项。
 安装器先完整下载、校验 SHA-256，检查归档路径/类型和包内版本/目标，再切换入口；下载/校验失败保留旧安装。
 0.4.0 已安装程序继续读 `scripts/server-channel.txt`，该旧指针在桥接版发布后固定为 `0.4.1`。
-0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.4.12` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
+0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.4.13` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
 表示新通道尚未晋升。只有实际发布相应资产并晋升指针后，才能把网络安装命令描述为可用。
 没有独立域名或下载服务。
 
@@ -226,3 +226,51 @@ node scripts/build-server.mjs --target-key macos-arm64 --output-dir /absolute/ne
 ```
 
 `--output-dir` 必须尚不存在；归档放在同级 `<目录>-release` 中。该命令只构建，不停止或替换运行中的 Server。
+
+## 文件传输与反向代理
+
+当前源码的 [Host Web v8](../contracts/host-web-v8.md) 将浏览器上传限制为单文件 30 MiB
+（31,457,280 字节），预览独立保留 20 MiB；下载不复用这两个预算。需要限制已有成果下载时，在启动 Host 的
+环境设置 `ROVAI_WEB_DOWNLOAD_MAX_BYTES`，单位字节；未设置时不限大小，`0` 只允许空文件。
+Desktop 托管 Web 使用相同能力。部署后以登录/capabilities 的 `fileTransfers` 判断版本能力，不能由前端版本推断。
+
+代理必须沿整条链路关闭文件响应缓冲、请求整包缓冲、缓存、自动压缩和错误页替换；正文额度要额外留出 multipart
+空间。Host 返回 `no-store, no-transform` 和 `X-Accel-Buffering: no`，但不能替代代理配置和实际慢连接验收。
+上传/下载路由不得重定向，必须保留 Host、Origin、Authorization 与上传操作 ID。以下 Nginx 片段合入既有 HTTPS
+server 块，域名/TLS 配置仍由部署者拥有：
+
+```nginx
+location = /api/v1/uploads {
+    client_max_body_size 31m;
+    proxy_pass http://127.0.0.1:8767;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_intercept_errors off;
+    proxy_read_timeout 75s;
+    proxy_send_timeout 75s;
+}
+location ^~ /api/v1/downloads/ {
+    proxy_pass http://127.0.0.1:8767;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_intercept_errors off;
+    gzip off;
+    proxy_read_timeout 75s;
+    proxy_send_timeout 75s;
+    access_log off;
+    # Nginx error logs can also include the credential-bearing request URI.
+    error_log /dev/null;
+}
+```
+
+外围 CDN/WAF/APM 同样排除该凭证路径；需要观测时仅保留不含 URI 的状态、长度和非凭证操作标识。
+超时是无进展窗口，不是固定下载总时长；正常传输可以超过票据两分钟的准入期限。
+使用 Caddy 的全站 `encode` 时也排除 `/api/v1/downloads/*`，不要启用该路由的 URI 访问日志。
+配置依据：[Nginx request buffering](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering)、
+[response buffering](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)、
+[Caddy encode](https://caddyserver.com/docs/caddyfile/directives/encode)。代理规则仍须在实际部署链路验证。

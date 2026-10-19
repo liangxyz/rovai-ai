@@ -115,6 +115,13 @@ the drawer or producing a Run from its Composer does not automatically select a 
 explicit execution entry remains available. Full Mission presentation and other execution placements keep their
 shared Camp workspace behavior.
 
+Mission descriptions keep their literal text and structured member references. HTTP(S) URLs reuse the message
+link presentation, including one decorative 14px globe and the existing open/selection behavior; local file
+syntax and Markdown formatting remain literal. Create/edit descriptions keep plain URL editing, with the same
+globe in the link actions. These actions portal into the owning dialog so pointer, keyboard and scroll behavior
+stay within its boundary; Escape closes the link actions before the Mission editor. Opening or copying a URL
+does not change the description or save it.
+
 The timeline begins with a read-only 使命 card: title, description clamped to three lines with overflow
 expansion, current source attachments, roster, tags and read-only status. Attachments reuse the same Composer
 cards and focusable no-wrap strip, including file/directory typing, hidden visual scrollbar and

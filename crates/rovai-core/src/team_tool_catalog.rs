@@ -42,7 +42,20 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         .iter()
         .find(|definition| definition["name"].as_str() == Some(canonical_name))
         .ok_or_else(|| anyhow::anyhow!("unknown built-in operation: {canonical_name}"))?;
-    validate_schema(input, &definition["inputSchema"])
+    // The retired association is accepted only at the compatibility boundary.
+    // Keep the original request for digest/replay; validate the current public shape.
+    let mut public_input = input.clone();
+    if canonical_name == CAMP_MESSAGE_SEND_TOOL_NAME {
+        if let Some(object) = public_input.as_object_mut() {
+            if let Some(task_id) = object.remove("taskId") {
+                anyhow::ensure!(
+                    task_id.is_null() || task_id.as_str().is_some_and(|value| !value.is_empty()),
+                    "legacy taskId must be null or a nonempty string"
+                );
+            }
+        }
+    }
+    validate_schema(&public_input, &definition["inputSchema"])
         .map_err(|_| anyhow::anyhow!("{canonical_name} input does not match its schema"))?;
     if canonical_name == crate::thread_runs::THREAD_RUNS_TOOL_NAME {
         return serde_json::from_value::<crate::thread_runs::ThreadRunsInput>(input.clone())?
@@ -1049,7 +1062,7 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": AUTOMATION_LIST_TOOL_NAME,
             "title": "List scheduled Automations",
-            "description": "List a bounded page of the local user's scheduled Automations. Filter by enabled state, name or prompt text, and stable project reference. This read does not run or modify a task.",
+            "description": "List a bounded page of the local user's scheduled Automations. Filter by enabled state, name or prompt text, and stable project reference. This read does not run or modify an Automation.",
             "inputSchema": {
                 "type": "object", "additionalProperties": false,
                 "properties": {
@@ -1215,7 +1228,7 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": TEAM_CREATE_TASK_TOOL_NAME,
             "title": "Create a durable Task",
-            "description": "Create an independently owned task that persists across runs or handoffs.\nPrefer existing tasks; do not create tasks for one-off collaboration or local steps.\nUser/Default Lead only. Put scope and requirements in description.\nDoes not notify or start work; use rovai send --task-id.",
+            "description": crate::team_tool::TASK_CREATE_DESCRIPTION,
             "inputSchema": TeamToolService::create_task_input_schema(),
             "outputSchema": task_detail_success_schema(false)
         }),
@@ -1243,7 +1256,7 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_LIST_TOOL_NAME,
             "title": "Discover other Threads",
-            "description": "Return a bounded Top-K of other public Threads frozen into this AgentRun. Target-Thread membership is not a read permission. Search only frozen Thread names; omit query for recent Threads. This tool never searches messages and never paginates.",
+            "description": "List a bounded Top-K of other public Threads, using current names and latest visible message activity. Target-Thread membership is not a read permission. Query filters Thread names, not messages; omit it for recent Threads. Older Runs may retain a frozen directory. This tool never paginates, and listing a Thread does not advance the historical message search boundary.",
             "inputSchema": ThreadHistoryService::camp_list_input_schema(),
             "outputSchema": camp_list_success_schema()
         }),

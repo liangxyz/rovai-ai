@@ -13,7 +13,10 @@ import { FilePreviewTabs } from './FilePreviewTabs'
 import { changeInterfaceLanguage } from './interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
-vi.mock('./FilePreviewContext', () => ({ useFilePreview: vi.fn(), useFilePreviewApi: () => ({}) }))
+vi.mock('./FilePreviewContext', async () => ({
+  canDownloadFile: (await import('./file-preview-controller')).canDownloadFile,
+  useFilePreview: vi.fn(), useFilePreviewApi: () => ({})
+}))
 
 function tab(id: string): FilePreviewTabModel {
   const file = {
@@ -105,6 +108,7 @@ beforeEach(() => {
     close: vi.fn(),
     closeMany: vi.fn(),
     download: vi.fn(),
+    clearDownloadFeedback: vi.fn(),
     openInSystem: vi.fn(),
     revealInFolder: vi.fn(),
     copyPath: vi.fn(),

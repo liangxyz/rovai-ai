@@ -4,6 +4,7 @@ import { MemberAvatar } from './MemberAvatar'
 import { useMissionPeople } from './MissionControls'
 import { missionDescriptionContent } from './mission-description'
 import { uiAttribute } from './interface-language'
+import { FileReferenceText } from './FileReferenceLink'
 
 function MissionMemberReference({ agentId, member, active }: { agentId: string; member?: AgentProfile; active: boolean }) {
   const available = active && member && member.presence !== 'removed'
@@ -27,6 +28,6 @@ function MissionMemberReference({ agentId, member, active }: { agentId: string; 
 export function MissionDescription({ mission }: { mission: MissionRecord }) {
   const agents = useMissionPeople()
   return <>{missionDescriptionContent(mission.description, mission.descriptionContent).map((segment, index) => segment.kind === 'text'
-    ? segment.text
+    ? <FileReferenceText key={index} text={segment.text}/>
     : <MissionMemberReference key={index} agentId={segment.agentId} member={agents.find(agent => agent.agentId === segment.agentId)} active={mission.memberAgentIds.includes(segment.agentId)}/>)}</>
 }

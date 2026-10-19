@@ -36,11 +36,22 @@ lines.on('line', (line) => {
           required: ['text'],
           additionalProperties: false
         }
-      }]
+      }, ...(process.env.ROVAI_MCP_SMOKE_HOLD_READY ? [{
+        name: 'hold', description: 'Wait before a controlled fixture mutation.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      }] : [])]
     })
     return
   }
   if (message.method === 'tools/call') {
+    if (message.params?.name === 'hold' && process.env.ROVAI_MCP_SMOKE_HOLD_READY) {
+      writeFileSync(process.env.ROVAI_MCP_SMOKE_HOLD_READY, String(process.pid), { mode: 0o600 })
+      setTimeout(() => {
+        writeFileSync(process.env.ROVAI_MCP_SMOKE_HOLD_EFFECT, 'late effect', { mode: 0o600 })
+        reply(message.id, { content: [{ type: 'text', text: 'HOLD_COMPLETED' }] })
+      }, 35_000)
+      return
+    }
     if (process.env.ROVAI_MCP_SMOKE_CALL_MARKER) appendFileSync(process.env.ROVAI_MCP_SMOKE_CALL_MARKER, 'called\n', { mode: 0o600 })
     reply(message.id, {
       content: [{

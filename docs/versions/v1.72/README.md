@@ -6,10 +6,100 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-16
+last_updated: 2026-10-18
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 文件预览自动刷新（2026-10-18）
+
+当前可见文件默认随保存自动更新；后台文件重新显示时按需更新，分页以可见行号恢复，失败保留旧内容并停止通知重试。
+调度集中在既有共享控制器与资源管理中，沿用候选替换、HTML 就绪条件与 Desktop/Web 通知接线。
+当前合同为 [File Preview v23](../../contracts/file-preview-v23.md)，实现与验证见
+[实施记录](implementation-plan.md#文件预览自动刷新2026-10-18)。无协议、持久化配置、依赖或设置页变化。
+
+## 文件预览读取复用（2026-10-18）
+
+按 User 确认的三项优化，Desktop 只复用句柄内最近一次行号定位；Web 候选完整分析一次，后续分页和定位按需读取；
+自动刷新确认同版本后跳过正文和 HTML 准备。Web 接受同候选等大小、等修改时间改写可能无法识别的取舍，
+其他读取的摘要校验保持。规范为 [File Preview v23](../../contracts/file-preview-v23.md) 与
+[Host Web v8](../../contracts/host-web-v8.md)，计数与验收见[实施记录](implementation-plan.md#文件预览读取复用2026-10-18)。
+更新现有 Contracts、Architecture、UI 和测试约定；局部可逆实现无需新增 Version Decision，其他领域和模型输入不变。
+
+## 浏览器文件传输（2026-10-17）
+
+按 User 确认方案实施单文件 30 MiB 上传、进度/取消与原结果核对，及独立授权的原生流式下载。
+预览预算与下载分离，下载保留申请来源授权、准入 Session 校验和资源约束，不增加附件资产或保存期限。
+2026-10-18 按 User seq27 收敛为准入后直接流式发送，取消持续重验及下载所见版本/尾块检查；不新增严格模式。
+当前规范为 [Host Web v8](../../contracts/host-web-v8.md)，取舍见 [D52](decisions.md#v1-72-d52)。
+实施及验收状态见[下载链路收尾记录](implementation-plan.md#文件下载准入后直接传输2026-10-18)。
+
+本项保持 v1.72 生命周期；Contracts、Architecture、UI、Decisions、用户/部署文档及导航已更新。
+Runtime Activity、Runtime compatibility 与 Root README 无需调整：没有模型输入、运行时资格或产品定位变更。
+
+## 旧概念残留收口（2026-10-18）
+
+按 User“开启 wt 统一修改”的要求，在 `rovai/legacy-concepts` 隔离分支收口当前入口的残留：
+Benchmark 导入读取当前 Thread 结果，CLI 目录帮助与实时目录一致，新错误提示和操作指南使用 Thread/User，
+当前文档修正历史读取、Automation 返回值与评测命令；退役未挂载的 Skill Library 页面，将 Electron 验收迁到
+生产原生 Skills 和工具箱页面。实施范围、兼容边界与验证见[实施记录](implementation-plan.md#旧概念残留收口2026-10-18)。
+
+本项沿用当前命名、History 和 Skills 合同，不新增 Version Decision 或数据库迁移。
+旧输入别名、SQL/路径、`rvcamp_` ID、冻结上下文／Case 证据和历史 Library 恢复保持。
+未改变 Bootstrap/Dynamic Context 模板、选择规则或版本；CLI help 仅纠正已实现的目录语义。
+
+## 单聊固定事实精简（2026-10-18）
+
+User 已确认 [R1](model-context-change-single-chat-facts.md)，删除新单聊的 `RUN_FACTS.singleChat`。
+non-batch 使用 Formatter/Manifest 42、Facts 13，Profile 16 保持；Migration 208 / schema 158 保留旧冻结输入。
+当前合同为 [Single Chat v9](../../contracts/single-chat-v9.md)，验证和交付记录追加在 R1。
+同时记录官方 Skill 适用范围、公屏历史按需读取及重复 Guidance 的优化候选；这些候选不进入 R1 实施范围。
+
+## 会话 Task 能力开关
+
+R4 已按 User 确认在独立 worktree 实施。范围、完整模型输入前后对照、兼容和 worktree 记录见
+[独立变更说明](model-context-change-task-capability.md)，界面依据见
+[设计稿](../../research/task-capability-ui.md)。默认关闭实例级 Task 能力；Send 与会话执行解耦，
+界面入口采用执行／队员／单聊／任务，数字快捷键一次性迁移为 1–4。
+功能、隔离 App 验证与回归结果见[实施与验证记录](task-capability-implementation.md)。Task 草稿已补齐提交生命周期，关闭重开保留未决状态，原样重试复用命令身份，成功只清除对应输入版本。上一轮已修正普通 CLI 入口并完成同一真实 Run 中的切换与发送验证；固定候选的完整 Rust 扩展 workspace 为 1064 通过、0 失败、8 项既有原生人工检查忽略。原 campaign 两次尝试均在 Runtime 预检受阻；虽已修正预检误判并恢复 CLI Judge 无工具诊断，正式 Gate 仍为证据不足。
+
+## MiniMax Code ACP（2026-10-16）
+
+新增 `minimax-code-cli`，复用 ACP Host/Fleet、精确 Session、现有 Bootstrap、Steer、权限、
+Skills/MCP、Built-in CLI 与数值 Usage。macOS arm64 为 Preview；2026-10-18 按 User seq43 的
+[验收确认](../../../qualification/runtime-platform/macos-x64-minimax-code-v1.json)将 macOS Intel 提升为
+Qualified；本次平台确认未重跑 Intel 模型会话。同日完成 Windows x64 的
+[十四轴/九流程实测](../../research/minimax-code-runtime/windows-qualification-2026-10-18.md)，
+修复私有 Bootstrap ACL、Usage cwd 匹配及 Skill 链接路径，Windows 单独绑定
+[目标机证据](../../../qualification/runtime-platform/windows-x64-minimax-code-v1.json)进入 Qualified。
+Linux x64 按下方独立记录晋升 Qualified；无 Fast。各平台证据不互相外推。
+Migration 205 从 schema 154 升至 **155**，保留业务行、索引、触发器和既有 migration receipts。
+当前行为由[Runtime 边界](../../architecture/runtime-catalog-boundaries.md#minimax-code-acp-实施边界)拥有；
+[接入矩阵](../../research/minimax-code-runtime/README.md)分别记录脚本模型、真实模型与未验范围，
+实现交付不等同 Checklist 的 First-Class 资格。没有更换 current_version 或宣布本版本完成。
+
+User seq35/37 确认问卷采用取消、不代答。沿用现有原生 dismiss 与审批防代答，新增准确的
+`runtime_questionnaire_unsupported` 公开提示，非空结束文字或已发送消息不掩盖未承接问卷。
+不改原生配置、Host/Session 身份或模型上下文；后继新指令按原路径继续。
+
+Linux 目标主机按维护者要求完成 14 轴验收，见[独立报告](../../research/minimax-code-runtime/linux-qualification-2026-10-18.md)
+与[不可变证据](../../../qualification/runtime-platform/linux-x64-minimax-code-v1.json)。覆盖真实 Provider、
+官方 CLI 控制服务、生产 20 Host/30 分钟 TTL、全部 30 个当前 CLI 操作及 Linux 浏览器；各类证据不混算。
+修复纯工具调用和压缩换代的 Usage 漏采，沿用非阻塞、稀疏、部分统计，当前规则为
+[Usage v11](../../contracts/runtime-usage-monitoring-v11.md)。macOS arm64 Preview 保持，Windows 的独立资格不由本轮继承，
+Linux Server 三发行版 OS/ABI gate 独立。原生管理命令取消、相同请求重试及 plan/bypass 限制详列报告。
+本项不增加 Migration、模型上下文字节或新的 current_version；当前 Architecture、Contract、兼容性、
+Development Checklist 和文档导航同步，UI/Runtime Activity/Root README 规则不变，无新增高成本取舍决定。
+
+## Web 断线统一恢复（2026-10-17）
+
+按 User 确认的中性主题全屏遮罩实现 Web 断线恢复：页面与草稿保持挂载，统一暂停操作，
+单一按钮核对并使用原 ID／原 payload 重试未知提交，明确失败结算原 Promise。
+规则见 [Host Web v4](../../contracts/host-web-v4.md#web-断线恢复)与
+[连接恢复 UI](../../ui/host-web-connection-recovery.md)，验证范围见[实施记录](implementation-plan.md#web-断线统一恢复2026-10-17)。
+本项保持 v1.72，无新 Version Decision；Architecture、Contract、UI 与文档路由同步，
+补齐 Core 核对入口的 Thread/Camp 名称兼容及刷新后公共草稿结算；无 wire shape、Runtime、模型上下文、
+迁移或 Root README 变更。
 
 ## Send 文件引用与三渠道提示（2026-10-16）
 
@@ -32,6 +122,13 @@ UI、Runtime Activity、Root README 无需更新；Runtime compatibility 保持�
 详情仅保留正文和原消息入口；Core 保存来源指针和稳定顺序，回执从原投递记录投影，模型输入保持。
 当前合同见 [Delivery v18](../../contracts/message-delivery-v18.md#执行窗口中的输入标记)，界面见
 [Run Card 插话](../../ui/components/conversation-workspace.md#run-card-中的插话)。
+
+## 撤回智能体检测简化（2026-10-18）
+
+按 User 要求整项撤回 PR #797，恢复原有“检查状态”文案、状态呈现及检测流程。
+相关 Runtime、刷新和启动顺序改动一起撤回；后续其他功能保留。当前 Architecture、Contract、UI 和
+设置页 brief 同步恢复，未新增表、迁移或替代机制。范围及测试退役依据见
+[撤回记录](implementation-plan.md#撤回智能体检测简化2026-10-18)。
 
 ## 智能体已知版本保留（2026-10-15）
 
@@ -230,8 +327,11 @@ Memory 入口改用完整 CLI 和按需读取教学。Charter revision 22 保持
 独立执行行补齐头像／姓名卡片入口与可点击模型摘要，复用消息交互。Run 与公开消息共用冻结模型、
 强度投影，不使用队员当前配置替代运行记录；同 Run 连续回复仍省略重复身份。
 同日修正：新执行初始位置使用已冻结的启动公开消息边界；任何执行行都不拆开回复与附属产物组。
-当前边界见 [Run Process Detail Surface v54](../../contracts/run-process-detail-surface-v54.md)，验证与交付见
-[实施记录](implementation-plan.md#会话内队员占位)及[启动状态修正](implementation-plan.md#执行行误回到启动状态2026-10-13)。
+2026-10-18 增补：执行行使用 Run 输入 ID 显示原消息引用与批量来源，支持按需定位较早输入和返回执行位置。
+复用现有引用及 Footer／动作样式，保持草稿、精确 Run 控制和迟到读取隔离；不新增 Core 数据或后台读取。
+当前边界见 [Run Process Detail Surface v55](../../contracts/run-process-detail-surface-v55.md)，验证与交付见
+[实施记录](implementation-plan.md#会话内队员占位)、[启动状态修正](implementation-plan.md#执行行误回到启动状态2026-10-13)
+及[原消息引用](implementation-plan.md#执行行原消息引用2026-10-18)。
 
 ## Windows Web 凭据可用性（2026-10-11）
 
@@ -801,7 +901,7 @@ User 于 2026-10-09 确认[完整方案及补充边界 r1](model-context-change-
 正文定稿和 Usage 不再作为业务命令或 Run 终态的同步前置。Migration 194 发布 schema 144，保留
 终态后的短期 Usage checkpoint。停止／继续复用既有授权与清理流程，不增加强制放行或自动重试。
 范围、测试归属与验收状态见[实施记录](async-run-finalization.md)；当前统计合同为
-[Usage v9](../../contracts/runtime-usage-monitoring-v9.md)。
+[Usage v10](../../contracts/runtime-usage-monitoring-v10.md)。
 
 ## 同类 CLI 优先恢复原生会话（2026-10-12）
 
@@ -830,3 +930,12 @@ User 于 2026-10-09 确认[完整方案及补充边界 r1](model-context-change-
 
 2026-10-15 继续精简新操作内部重复 diff、限定预览总量，并将进度摘要从结果正文中分离；旧格式原样兼容。
 定向回归和同负载测量见[后续实施记录](implementation-plan.md#执行记录存储精简新操作正文与进度写入2026-10-15)。
+
+## 2026-10-17 MiniMax 批复修复
+
+共享 ACP 区分原生正常结束、有效公开发送和非空 final；问卷 permission fallback 在执行审批前取消。
+MiniMax Usage 增加本轮消息身份限定的后台尾读，仍保持部分观测。字段与失败边界见
+[Missing-Send v3](../../contracts/missing-send-recovery-publication-v3.md)和
+[Usage v10](../../contracts/runtime-usage-monitoring-v10.md)。
+0.6.12 官方 ACP 局部关闭 ask_user 的入口仍缺，未修改原生全局配置，不声称默认隐藏已交付。
+Preview 的平台、CLI 子集、Skills/MCP 和并发资格边界不变。

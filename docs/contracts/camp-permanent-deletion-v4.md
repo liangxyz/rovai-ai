@@ -5,7 +5,7 @@ authority: camp-deletion-asynchronous-acceptance-and-handoff
 status: accepted
 version: 4
 source_version: v1.65
-last_updated: 2026-09-22
+last_updated: 2026-10-18
 ---
 
 # Camp Permanent Deletion v4
@@ -99,6 +99,12 @@ Deletion Intent accepted
 - 保留首个 accepted receipt；
 - 产生唯一 `camp.deleted` 并把 operation checkpoint 交给 journal。
 
+Automation 产生的 Camp 同样适用：业务聚合删除必须先删除 `camp_id` 指向该 Camp 的 occurrence，再删除它引用的
+消息和 Delivery；对应 `automation_notification_delivery` 同事务级联清除。删除失败必须回滚 occurrence、通知记录和
+业务聚合，并允许原 operation 重试到 `camp.deletion_completed`。Automation 定义、其他 occurrence/Camp、启用状态和
+`nextRunAt` 保持不变；删除历史不重跑任务，也不承诺撤回外部渠道已经收到的消息。历史列表和 `lastRun` 从剩余记录推导，
+与删除 Automation 定义时保留历史的规则分开适用。
+
 Camp 不需要存活到所有文件清理结束。Camp 删除后，journal 幂等清理 Camp Authority 附件根、默认输出目录和 legacy
 Published View；`workspaceDisposition='cleanup'` 时既有 Mission cleanup owner 继续 Worktree/受管分支双检查点，journal
 等待其完成。retain 时 Worktree、分支和项目目录不属于删除范围。
@@ -164,6 +170,8 @@ Camp 行消失的 p95 不超过 250ms；后台完成时长不计入该门槛，�
 - absent、Warm、Starting、Running、Stopping 与异常 Runtime 均快速 accepted；
 - 同 command replay、不同 command 重复点击和响应丢失返回同一 operation；
 - accepted receipt 在 Camp 聚合删除后仍可 replay；
+- 已完成的定时 Automation Camp 删除失败进入 attention 后，retry 继续同一 operation 至清理完成；自身 occurrence 与
+  通知记录清除，其他运行与定义的未来计划保留，业务删除事务失败不提前丢失历史；
 - Starting 竞争、旧 lease/callback、渠道输入和所有统一准入入口不能恢复业务写入；
 - Runtime 停止失败不能进入数据库阶段；各 checkpoint 崩溃重启可幂等续跑；
 - cleanup 与 Mission Git 失败自动恢复，耗尽后一次提醒，用户 retry 继续原 operation；

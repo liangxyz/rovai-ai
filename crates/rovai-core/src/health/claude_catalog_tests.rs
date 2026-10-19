@@ -168,7 +168,7 @@ while IFS= read -r request; do printf '%s\n' "$request" >> "$root/requests"; don
 async fn claude_catalog_real_runtime_smoke() {
     let executable =
         find_adapter(AdapterKind::ClaudeCodeCli).expect("Claude Code must be installed");
-    let probe = claude_code_capability_probe_at(&executable).await;
+    let probe = claude_code_capability_probe_at(&executable, None).await;
     assert_eq!(
         probe.result.status,
         AgentRuntimeProbeStatus::Ready,

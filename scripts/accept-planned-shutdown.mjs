@@ -73,6 +73,8 @@ try {
   await setTheme(firstApp.cdp, 'day')
   const request = (method, params = {}) => appRequest(firstApp.cdp, method, params)
   const workspace = await request('workspaces.inspect', { path: projectRoot })
+  await evaluate(firstApp.cdp,
+    `window.rovai.navigationPreferences.registerProjects([${JSON.stringify(workspace.projectPath)}])`, true)
   const installation = await configureProductRuntime(request, runtimeKind, [agentId])
   let textAcceptance = null
   if (['1', 'text-and-partial'].includes(textAcceptanceMode)) {
@@ -106,12 +108,17 @@ try {
     purpose: 'Keep one real Runtime turn active while Rovai performs a controlled shutdown.'
   })
   const threadId = sent.payload?.threadId
-  const agentRunId = sent.payload?.agentRunIds?.[0]
-  assert(sent.status === 'accepted' && threadId && agentRunId,
+  assert(sent.status === 'accepted' && threadId,
     `Real Runtime AgentRun was not accepted: ${JSON.stringify(sent)}`)
+  // Current delivery queues accept the message before allocating its AgentRun.
+  // This fixture creates a new Thread, so its first Run is the sent request.
+  const agentRunId = sent.payload?.agentRunIds?.[0] ?? await waitFor(async () => {
+    const snapshot = await request('threads.snapshot', { threadId })
+    return snapshot.agentRuns[0]?.id ?? null
+  }, 'accepted delivery creates its AgentRun', 180_000, 40)
 
   await waitFor(async () => {
-    const snapshot = await request('camps.snapshot', { threadId })
+    const snapshot = await request('threads.snapshot', { threadId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     if (['succeeded', 'failed', 'cancelled'].includes(run?.status)) {
       throw new Error(`Real Runtime completed before shutdown could begin: ${JSON.stringify(run)}`)
@@ -126,7 +133,7 @@ try {
   await openCamp(firstApp.cdp, threadId)
   await appendComposerText(firstApp.cdp, quitDraftSavedPrefix, quitDraftSavedPrefix)
   const savedDraftBeforeQuit = await waitFor(async () => {
-    const draft = await request('camp.composerDraft.get', { threadId })
+    const draft = await readComposerDraft(firstApp.cdp, threadId)
     return draft.body === quitDraftSavedPrefix ? draft : null
   }, 'initial Composer Draft autosave', 10_000, 40)
 
@@ -137,7 +144,7 @@ try {
   await appendComposerText(firstApp.cdp, quitDraftLatestSuffix, quitDraftExpectedBody)
   const acceptedText = ['1', 'partial-only', 'text-and-partial'].includes(textAcceptanceMode)
     ? await waitFor(async () => {
-      const snapshot = await request('camps.snapshot', { threadId })
+      const snapshot = await request('threads.snapshot', { threadId })
       const text = snapshot.executionEvidence.find((item) => item.agentRunId === agentRunId
         && item.eventType === 'agent.text.block' && item.payload.status === 'streaming'
         && item.payload.text?.length >= 512)
@@ -146,7 +153,7 @@ try {
     : null
   // Delivery can advance from prepared to accepted while the Composer is being
   // exercised. Assert against the boundary just before quit, not the first poll.
-  const beforeQuitSnapshot = await request('camps.snapshot', { threadId })
+  const beforeQuitSnapshot = await request('threads.snapshot', { threadId })
   const inputStatusBeforeShutdown = beforeQuitSnapshot.contextManifests
     .find((manifest) => manifest.agentRunId === agentRunId)?.delivery?.status ?? null
   const shutdownStartedAt = Date.now()
@@ -191,10 +198,8 @@ try {
     ? 'delivery_unknown'
     : 'accepted'),
     `Controlled shutdown recorded the wrong input-delivery boundary: ${JSON.stringify(afterShutdown.delivery)}`)
-  assert(afterShutdown.turn?.cancel_requested_at === null
-    && afterShutdown.turn?.status === 'failed'
-    && afterShutdown.turn?.aggregate_reason_code === 'required_run_incomplete',
-  `Planned shutdown leaked into CampTurn cancellation: ${JSON.stringify(afterShutdown.turn)}`)
+  assert(afterShutdown.turn === null,
+    `Current delivery-owned execution must not create a legacy CampTurn: ${JSON.stringify(afterShutdown.turn)}`)
 
   recoveredApp = await launchApp(await availablePort(), 1040, 700)
   const recoveredRequest = (method, params = {}) => appRequest(recoveredApp.cdp, method, params)
@@ -204,7 +209,7 @@ try {
       && recoveredText.payload?.text?.startsWith(acceptedText.text),
     'Normal App quit lost accepted partial text or marked it successfully completed')
   }
-  const recoveredDraft = await recoveredRequest('camp.composerDraft.get', { threadId })
+  const recoveredDraft = await readComposerDraft(recoveredApp.cdp, threadId)
   assert(recoveredDraft.body === quitDraftExpectedBody
     && recoveredDraft.revision > savedDraftBeforeQuit.revision,
   `Normal App quit did not persist the latest Composer Draft: ${JSON.stringify({
@@ -212,7 +217,7 @@ try {
     recovered: recoveredDraft
   })}`)
   const recoveredSnapshot = await waitFor(async () => {
-    const snapshot = await recoveredRequest('camps.snapshot', { threadId })
+    const snapshot = await recoveredRequest('threads.snapshot', { threadId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     return run?.status === 'cancelled'
       && run.hasUnsettledExternalEffects === false
@@ -392,6 +397,11 @@ try {
     failed = false
   }
 } finally {
+  if (failed && firstApp?.cdp) {
+    await capture(firstApp.cdp, join(outputDir, 'failure-window.png')).catch(() => {})
+    const visible = await evaluate(firstApp.cdp, 'document.body.innerText').catch(() => null)
+    await writeFile(join(outputDir, 'failure-window.txt'), visible ?? 'Window unavailable')
+  }
   if (failed && firstApp?.stderr.length) {
     await writeFile(join(outputDir, 'first-app-stderr.log'), firstApp.stderr.join(''))
   }
@@ -504,9 +514,13 @@ function parseShutdownResult(stderr) {
 async function appRequest(cdp, method, params = {}) {
   return evaluate(
     cdp,
-    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`,
+    `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)}).catch(error => { throw new Error(JSON.stringify(error)) })`,
     true
   )
+}
+
+async function readComposerDraft(cdp, threadId) {
+  return evaluate(cdp, `JSON.parse(localStorage.getItem(${JSON.stringify('rovai.camp-composer-draft.v1:' + threadId)})) ?? { body: '', revision: 0 }`)
 }
 
 async function setTheme(cdp, preference) {
@@ -527,12 +541,12 @@ function trace(message) {
 
 async function openCamp(cdp, threadId) {
   await waitForExpression(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${threadId}`)}
+    const target = ${JSON.stringify(`thread:${threadId}`)}
     return [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .some((element) => element.dataset.sidebarMenuTarget === target)
   })()`, 30_000)
   const opened = await evaluate(cdp, `(() => {
-    const target = ${JSON.stringify(`camp:${threadId}`)}
+    const target = ${JSON.stringify(`thread:${threadId}`)}
     const menu = [...document.querySelectorAll('[data-sidebar-menu-target]')]
       .find((element) => element.dataset.sidebarMenuTarget === target)
     const button = menu?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')

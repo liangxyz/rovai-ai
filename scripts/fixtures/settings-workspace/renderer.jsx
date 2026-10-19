@@ -42,6 +42,7 @@ function aboutSnapshot() {
 const channelListeners = new Set(), webListeners = new Set()
 let pendingChannelAction = null
 let pendingStartupInspection = null
+const pendingRuntimeChecks = new Map()
 const emitChannels = () => channelListeners.forEach(fn => fn(clone(state.channels)))
 async function channelAction(action, kind) {
   await request(`channels.${action}`, { kind })
@@ -145,7 +146,10 @@ Object.assign(window, { rovai: {
         executablePath: params.configuration.programPath ?? '/sample/bin/codex', reportedVersion: state.previewVersion ?? '0.153.4'
       }
     }
-    if (method === 'runtime.product.check') return { ready: false, outcome: state.checkOutcome ?? 'stable_failure' }
+    if (method === 'runtime.product.check') {
+      if (state.holdRuntimeKind === params.runtimeKind) return new Promise(resolve => pendingRuntimeChecks.set(params.runtimeKind, resolve))
+      return { ready: false, outcome: state.checkOutcome ?? 'stable_failure' }
+    }
     if (method === 'notifications.preference.get') return clone(state.notifications)
     if (method === 'notifications.preference.update') {
       state.notifications = { ...state.notifications, ...params.command, version: state.notifications.version + 1 }
@@ -170,7 +174,11 @@ function Fixture() {
   const [roster, setRoster] = useState(fixture.largeRoster)
   const [appearance, setAppearance] = useState(fixture.appearance)
   const [updateError, setUpdateError] = useState(null)
+  const [runtimeHealth, setRuntimeHealth] = useState(fixture.healthSnapshot)
   Object.assign(window.settingsTest, {
+    setRuntimeChecking: (runtimeKind, checking) => setRuntimeHealth(health => ({
+      ...health, runtimeAvailability: health.runtimeAvailability.map(item => item.runtimeKind === runtimeKind ? { ...item, checking, status: checking ? 'checking' : 'ready' } : item)
+    })),
     navigate: (value, scenario = 'normal') => {
       state.scenario = scenario; setPage(value); setGeneration(n => n + 1)
     },
@@ -193,7 +201,7 @@ function Fixture() {
         {page === 'remote' && <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
-        {page === 'runtime' && <RuntimeInstallationsPanel health={fixture.healthSnapshot()} installations={[]} onReload={async () => {}} />}
+        {page === 'runtime' && <RuntimeInstallationsPanel health={runtimeHealth} installations={[]} onReload={async () => { await request('runtime.reload') }} />}
         {page === 'channels' && <ChannelSettings agents={fixture.agents} />}
         {page === 'monitoring' && <RuntimeMonitoring />}
         {page === 'diagnostics' && <DiagnosticsCenter onNavigate={setPage} />}
@@ -204,6 +212,7 @@ function Fixture() {
   </div>
 }
 window.settingsTest = {
+  finishRuntimeCheck: (kind, result) => { pendingRuntimeChecks.get(kind)(result); pendingRuntimeChecks.delete(kind) },
   requests, state,
   releaseHostStatus: () => releaseHostStatus?.(),
   updateChannel: (kind, patch) => {

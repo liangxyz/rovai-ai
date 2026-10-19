@@ -158,7 +158,7 @@ app.whenReady().then(async () => {
   await historyFrame.executeJavaScript(`window.fixtureKept=73;document.querySelector('#navigate').click()`)
   const routed=await historyFrame.executeJavaScript(`({query:location.search,title:document.querySelector('#rendered').textContent})`)
   cases.push({name:'author History navigation',ok:routed.query==='?tab=all' && routed.title==='启动设置',evidence:routed})
-  await run(`Array.from(document.querySelectorAll('.file-preview-tab-panel:not([hidden]) .file-preview-html-source-toggle')).find(button=>button.textContent==='源码').click()`)
+  await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="查看源码"]').click()`)
   let sourceText=''
   for(let count=0;count<100;count++) {
     sourceText=await run(`Array.from(document.querySelectorAll('.file-preview-tab-panel:not([hidden]) .cm-line')).map(line=>line.textContent).join('\\n')`)
@@ -166,7 +166,7 @@ app.whenReady().then(async () => {
     await new Promise(resolve=>setTimeout(resolve,50))
   }
   const rawSource=await readFile(join(root,'history.html'),'utf8')
-  await run(`Array.from(document.querySelectorAll('.file-preview-tab-panel:not([hidden]) .file-preview-html-source-toggle')).find(button=>button.textContent==='交互预览').click()`)
+  await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="交互预览"]').click()`)
   const retained=await historyFrame.executeJavaScript('window.fixtureKept')
   cases.push({name:'author source and preserved interactive document',ok:sourceText.trim()===rawSource.trim() && !sourceText.includes('data-rovai-preview-diagnostic') && retained===73,evidence:{exactSource:sourceText.trim()===rawSource.trim(),retained}})
   cases.push(...await feedbackAcceptance(window, userData, root))

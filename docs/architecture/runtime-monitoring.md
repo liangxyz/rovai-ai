@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-metering-and-read-boundaries
 status: accepted
-last_updated: 2026-10-12
+last_updated: 2026-10-18
 ---
 
 # Runtime Monitoring 架构
 
-精确字段与方法见 [Runtime Usage Monitoring v9](../contracts/runtime-usage-monitoring-v9.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)。长期最小化、
+精确字段与方法见 [Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)。长期最小化、
 稀疏语义、clean break 与 Cost grain 由
 [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)拥有。本架构只说明 Usage Transport、内存归一化、
 Projection/Rollup、Read Side 和 Renderer 如何组合。
@@ -81,10 +81,15 @@ OpenCode V2 停用 V1 reader，使用本轮终态 usage，缺响应时保持缺�
 Run 结算不等待 Flush，也不进行 400ms 尾读。跨越完成边界的原生日志读取结果丢弃，避免后继用量
 归到旧 Run。本地 journal 贡献显示部分统计。原生磁盘读取不持有 Core Database Mutex。部分行等待完整换行；文件换代、缺口、超限停止采集且不重扫历史。
 
+MiniMax 的终态补采另冻结本轮显示消息 ID 与工具调用 ID，只接纳显式 canonical/turn 映射或精确
+结构化 toolCall 身份。压缩可以替换 active history；终态 reader 验证同一根 Session 后，在既有时间
+预算内读取 active 和原生 catalog 列出的有界 snapshot，保留 baseline 与跨文件身份去重。
+普通 cursor 仍在换代后停止；无本轮身份不重扫。具体预算和拒绝条件由 [Usage v11](../contracts/runtime-usage-monitoring-v11.md)拥有。
+
 这些 reader 只保留有界调用身份、offset、文件身份和必要数值。JSONL 的非 Usage 字段由封闭 DTO 跳过，
 SQLite 不读取 part／正文；原始行只在本次解析缓冲中存在，不进入 Evidence、Blob、日志或 Renderer。
 选定本地 Token 来源后不再混加 ACP Token；Gauge 和 Cost 独立处理。最新版本与字段语义由
-[Usage v9](../contracts/runtime-usage-monitoring-v9.md)及其继承的原生来源合同拥有。
+[Usage v11](../contracts/runtime-usage-monitoring-v11.md)及其继承的原生来源合同拥有。
 
 Antigravity 在当前根 DONE step 进入 buffer 前，只读对应原生 SQLite 的同调用数值，
 交叉核对 stream 与本地身份/计数后替换稀疏观测；Context 读取同一 generator 的原生窗口估计。
@@ -130,7 +135,7 @@ cost 缺少安全的跨 Run baseline，按现有 OpenCode 边界保持 Run 费�
 Codex Run summary 可记录实际 service tier；费用投影先用原生观察、再用冻结/发送时请求档位。未知不套
 Standard 价，实际回退 Standard 不按请求 Fast 计价；失去档位依据时撤回旧目录估价。这个小型 metadata
 写入不新增计费系统，也不替代 Claude 等 Runtime 的原生 reported cost。精确行为由
-[Runtime Usage Monitoring v9](../contracts/runtime-usage-monitoring-v9.md) 拥有。
+[Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md) 拥有。
 
 ```text
 visible Settings page
@@ -168,7 +173,7 @@ epoch、Database contract `v0.99` 与 projection schema `47`。不存在回填�
 ## References
 
 - [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)
-- [Runtime Usage Monitoring v9](../contracts/runtime-usage-monitoring-v9.md)
+- [Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md)
 - [v0.99 implementation plan](../versions/v0.99/implementation-plan.md)
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)

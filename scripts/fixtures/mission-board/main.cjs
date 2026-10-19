@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
   const pointFor = async selector => window.webContents.executeJavaScript(`(() => {
     const element = document.querySelector(${JSON.stringify(selector)})
     if (!element) return null
-    const bounds = element.getBoundingClientRect()
+    const bounds = element.getClientRects()[0] ?? element.getBoundingClientRect()
     return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) }
   })()`, true)
   const click = async (selector, button = 'left') => {
@@ -44,6 +44,18 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 1000 })
   }
   const settle = () => window.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 250))', true)
+  if (mode === 'web-links') {
+    try {
+      await require('./web-links.cjs')({ window, userData, waitFor, click, settle })
+    } catch (error) {
+      writeFileSync(join(dirname(userData), 'mission-web-links-failure.png'), (await window.webContents.capturePage()).toPNG())
+      console.error(await window.webContents.executeJavaScript('JSON.stringify({errors:window.missionQA.errors,description:document.querySelector(".mission-description")?.outerHTML,body:document.body.innerText.slice(-1600),calls:window.missionQA.calls.slice(-4)})'))
+      throw error
+    }
+    console.log(JSON.stringify({ ok: true, cases: ['Mission URLs preserve references and drafts across display, create, edit, copy, open, Escape and save'] }))
+    app.exit(0)
+    return
+  }
   if (mode === 'mention-pointer') {
     await require('./mention-pointer.cjs')({ window, userData, waitFor, click, wheel, settle })
     console.log(JSON.stringify({ ok: true, cases: ['Mission mention candidates are visible and selectable with native input'] }))

@@ -93,6 +93,7 @@ export function AttachmentCard({
   const [imageAction, setImageAction] = useState<ImageAction | null>(null)
   const [imageNotice, setImageNotice] = useState<string | null>(null)
   const imageActionPending = useRef(false)
+  const attachmentActionPending = useRef(false)
   const attachmentButtonRef = useRef<HTMLButtonElement>(null)
   const locatorRef = useRef(locator)
   locatorRef.current = locator
@@ -196,8 +197,10 @@ export function AttachmentCard({
     action: 'open' | 'reveal',
     forceSystem = false
   ): Promise<void> => {
-    if (!primaryActionAvailable || disabled || attachmentAction) return
+    if (!primaryActionAvailable || disabled || attachmentActionPending.current) return
+    attachmentActionPending.current = true
     setAttachmentAction(action)
+    if (action === 'open' && forceSystem && client.attachments.kind === 'download') onNotify(uiAttribute('准备下载…'))
     try {
       if (action === 'open') {
         if (!forceSystem && attachment.kind === 'file' && filePreview) {
@@ -218,6 +221,7 @@ export function AttachmentCard({
           ? await client.attachments.download(locator)
           : await client.attachments.open(locator)
         setAvailability(result.availability)
+        if (!result.error && client.attachments.kind === 'download') onNotify(uiAttribute('已交给浏览器下载。'))
         if (result.error === 'target_unavailable') onNotify(uiAttribute('此附件当前不可用'))
         else if (result.error) onNotify(client.attachments.kind === 'download' ?uiAttribute("下载附件失败") :uiAttribute("无法使用系统应用打开此附件"))
       } else if (client.attachments.kind === 'native') {
@@ -232,11 +236,13 @@ export function AttachmentCard({
               :uiAttribute("无法显示此附件所在位置"))
         }
       }
-    } catch {
+    } catch (error) {
+      if (client.attachments.kind === 'download' && error instanceof Error) { onNotify(error.message); return }
       onNotify(action === 'open'
         ? (client.attachments.kind === 'download' ?uiAttribute("下载附件失败") :uiAttribute("无法使用系统应用打开此附件"))
         :uiAttribute("无法显示此附件所在位置"))
     } finally {
+      attachmentActionPending.current = false
       setAttachmentAction(null)
     }
   }
@@ -245,7 +251,6 @@ export function AttachmentCard({
   const systemOpenLabel = client.attachments.kind === 'download' ? uiAttribute('下载文件') : attachment.kind === 'directory'
     ? uiAttribute('打开文件夹')
     : uiAttribute('使用系统应用打开')
-  const downloadButtonAvailable = client.attachments.kind === 'download' && timeline && attachment.kind === 'file' && primaryActionAvailable
   const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null && !previewFailed
   const showAttachmentContextMenu = (x: number, y: number): void => {
     fileLocation.inspect()
@@ -268,7 +273,7 @@ export function AttachmentCard({
   const detailLabel = availabilityLabel ?? (agentPresentation
     ? attachment.kind === 'directory'
       ? `${attachment.fileCount === null ? uiAttribute('文件数未知') : uiAttribute("{0} 个文件", String(attachment.fileCount))} · ${attachment.byteSize === null ? uiAttribute('大小未知') : formatByteSize(attachment.byteSize)}`
-      : `${attachmentTypeLabel(attachment.mediaType)} · ${attachment.byteSize === null ? uiAttribute('大小未知') : formatByteSize(attachment.byteSize)}`
+      : `${formatLabel} · ${attachment.byteSize === null ? uiAttribute('大小未知') : formatByteSize(attachment.byteSize)}`
     : null)
 
   const content = composerImage
@@ -294,19 +299,11 @@ export function AttachmentCard({
           <span className="attachment-copy">
             <span className="attachment-title-line">
               <strong title={fileLocation.label ?? attachment.displayName}>{baseName}</strong>
-              <FileExtensionLabel>{formatLabel}</FileExtensionLabel>
+              {!agentPresentation && <FileExtensionLabel>{formatLabel}</FileExtensionLabel>}
             </span>
             {detailLabel && <small>{detailLabel}</small>}
           </span>
-          {agentPresentation && (
-            <span className="agent-file-open-cue" aria-hidden="true">
-              <svg viewBox="0 0 18 18">
-                <path d="M10.3 3.3h4.4v4.4M14.5 3.5 8.6 9.4" />
-                <path d="M13.5 9.5v4.3H3.8v-9.7h4.3" />
-              </svg>
-              <span><UiText zh={"打开"} /></span>
-            </span>
-          )}
+
         </>
       )
 
@@ -388,14 +385,14 @@ export function AttachmentCard({
                         <small>{attachment.kind === 'directory' ? uiAttribute("文件夹") : attachmentTypeLabel(attachment.mediaType)}</small>
                       </DropdownMenu.Label>
                       <AttachmentLocationItems path={fileLocation.location?.path} label={fileLocation.label} onNotify={onNotify} />
-                      <DropdownMenu.Item
+                      {client.attachments.kind === 'native' && <DropdownMenu.Item
                         className="attachment-context-menu-item"
                         disabled={disabled || attachmentAction !== null}
                         onSelect={() => void runAttachmentAction('open', true)}
                       >
                         <AttachmentOpenGlyph kind={attachment.kind} />
                         <span>{systemOpenLabel}</span>
-                      </DropdownMenu.Item>
+                      </DropdownMenu.Item>}
                       {client.attachments.kind === 'native' && <>
                       <DropdownMenu.Separator className="attachment-context-menu-separator" />
                       <DropdownMenu.Item
@@ -430,22 +427,7 @@ export function AttachmentCard({
               </button>
             )
           : <div className="attachment-open">{content}</div>}
-      {downloadButtonAvailable && (
-        <button
-          className="attachment-download"
-          type="button"
-          aria-label={`${uiAttribute('下载文件')} ${attachment.displayName}`}
-          title={uiAttribute('下载文件')}
-          aria-busy={attachmentAction !== null || undefined}
-          disabled={disabled || attachmentAction !== null}
-          onClick={() => void runAttachmentAction('open', true)}
-        >
-          <svg viewBox="0 0 18 18" aria-hidden="true">
-            <path d="M9 2.8v8.2M5.6 7.9 9 11.3l3.4-3.4M3.4 14.6h11.2" />
-          </svg>
-          <span><UiText zh={"下载"} /></span>
-        </button>
-      )}
+
       {!previewOpen && imageContextMenu}
       {imageNotice && createPortal(<div className="image-action-notice" role="status" aria-hidden={previewOpen || undefined}>{imageNotice}</div>, document.body)}
       {hasImagePreview && (

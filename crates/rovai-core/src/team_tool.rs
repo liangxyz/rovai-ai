@@ -45,6 +45,8 @@ use crate::{
     single_chat::SINGLE_CHAT_HISTORY_TOOL_NAME,
 };
 
+pub const TASK_CREATE_DESCRIPTION: &str = "Create an independently owned task that persists across runs or handoffs.\nPrefer existing tasks; do not create tasks for one-off collaboration or local steps.\nUser/Default Lead only. Put scope and requirements in description.\nDoes not notify or start work; use rovai send --to <assignee>.";
+
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
@@ -554,11 +556,6 @@ impl TeamToolService {
                     "default": false,
                     "description": CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION
                 },
-                "taskId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Optional current Task link; exactly one effective recipient is required."
-                },
                 "files": {
                     "type": "array",
                     "default": [],
@@ -575,7 +572,7 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "description": "Create an independently owned task that persists across runs or handoffs.\nPrefer existing tasks; do not create tasks for one-off collaboration or local steps.\nUser/Default Lead only. Put scope and requirements in description.\nDoes not notify or start work; use rovai send --task-id.",
+            "description": TASK_CREATE_DESCRIPTION,
             "required": ["title", "assigneeAgentId"],
             "properties": {
                 "title": {
@@ -1474,17 +1471,6 @@ fn validate_public_send_invocation(invocation: &ThreadMessageSendInvocation) -> 
             "The explicit recipient input exceeds the absolute fanout limit of 16",
         ));
     }
-    if invocation
-        .input
-        .task_id
-        .as_deref()
-        .is_some_and(|value| value.trim().is_empty())
-    {
-        return Err(invocation_error(
-            "message.invalid_input",
-            "taskId must not be empty when supplied",
-        ));
-    }
     if invocation.input.files.len() > MAX_PREPARED_ATTACHMENTS
         || invocation
             .input
@@ -1714,7 +1700,7 @@ fn load_recorded_team_command_identity(
         anyhow::bail!("recorded Team Tool command actor is not an Agent");
     }
     Ok(Some(RecordedTeamCommandIdentity {
-        camp_id: camp_id.context("recorded Team Tool command has no Camp")?,
+        camp_id: camp_id.context("recorded Team Tool command has no Thread")?,
         agent_id,
         source_agent_run_id: source_agent_run_id
             .context("recorded Team Tool command has no source AgentRun")?,
@@ -1884,6 +1870,7 @@ mod tests {
                     )
                     .expect("member should be added");
             }
+            crate::task_capability::set(database.connection(), true).unwrap();
             let task = collaboration
                 .create_task(
                     &mut database,
@@ -4153,7 +4140,7 @@ mod tests {
             json!({
                 "message": "--public-only cannot be combined with Agent-routing inputs.",
                 "details": {
-                    "conflictingFields": ["to", "taskId"],
+                    "conflictingFields": ["to"],
                     "newRequestIdRequired": true,
                 }
             })
@@ -4184,6 +4171,8 @@ mod tests {
         );
         invocation.input.public_only = true;
         invocation.input.mention_user = true;
+        invocation.input.task_id = Some("retired-task-reference".into());
+        crate::task_capability::set(fixture.database.connection(), false).unwrap();
         let sent = service
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
@@ -4631,12 +4620,12 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn task_linkage_ignores_current_user_attention_for_recipient_cardinality() {
+    fn legacy_task_link_is_ignored_without_changing_explicit_recipients() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let mut ambiguous = fixture.public_send_invocation(
             "task-user-only-is-ambiguous",
-            "This must not be accepted",
+            "Notify the User without a task relation",
             &[],
         );
         ambiguous.input.mention_user = true;
@@ -4644,23 +4633,23 @@ mod tests {
         let rejected = service
             .send_public_message(&mut fixture.database, &ambiguous)
             .unwrap();
-        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(rejected.result.code, "message.task_recipient_ambiguous");
+        assert_eq!(rejected.result.status, CommandResultStatus::Accepted);
+        assert_eq!(rejected.result.code, "camp_message.send_accepted");
         let rejected_effects: (i64, i64) = fixture
             .database
             .connection()
             .query_row(
                 r#"
                 SELECT
-                    (SELECT COUNT(*) FROM camp_message WHERE body LIKE '%must not be accepted%'),
+                    (SELECT COUNT(*) FROM camp_message WHERE id = ?1),
                     (SELECT COUNT(*) FROM notification_occurrence
                      WHERE semantic = 'user_mention')
                 "#,
-                [],
+                [rejected.result.payload["messageId"].as_str().unwrap()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(rejected_effects, (0, 0));
+        assert_eq!(rejected_effects, (1, 1));
 
         let target_task = CollaborationService::default()
             .create_task(
@@ -4688,6 +4677,7 @@ mod tests {
         );
         accepted.input.mention_user = true;
         accepted.input.task_id = Some(target_task_id);
+        crate::task_capability::set(fixture.database.connection(), false).unwrap();
         let sent = service
             .send_public_message(&mut fixture.database, &accepted)
             .unwrap();
@@ -4696,6 +4686,11 @@ mod tests {
             sent.result.payload["effectiveRecipients"],
             json!(["agent_2"])
         );
+        let replay = service
+            .send_public_message(&mut fixture.database, &accepted)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result.payload, sent.result.payload);
     }
 
     #[test]
@@ -5375,6 +5370,82 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn accepted_recipient_free_send_suppresses_missing_send_recovery() {
+        // A send receipt can satisfy output only for its exact Run/epoch. This
+        // is a terminal admission rule, separate from recovery suppression.
+        {
+            let mut fixture = Fixture::new();
+            let runtime = ExecutionRuntimeService::default();
+            let id = fixture.source_run_id.clone();
+            let epoch = fixture.source_epoch;
+            assert!(
+                !runtime
+                    .has_current_run_public_send(&fixture.database, &id, epoch)
+                    .unwrap()
+            );
+            let execution = runtime
+                .load_agent_run_execution(&fixture.database, &id, epoch)
+                .unwrap()
+                .unwrap();
+            let rejected = runtime
+                .succeed_agent_run(
+                    &mut fixture.database,
+                    &CommandEnvelope {
+                        command_id: "empty-without-send".into(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:codex-cli".into(),
+                        },
+                        camp_id: Some(fixture.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SucceedAgentRunCommand {
+                            agent_run_id: id.clone(),
+                            expected_version: execution.version,
+                            execution_epoch: epoch,
+                            native_turn_id: "native-empty".into(),
+                            final_output: String::new(),
+                            missing_send_recovery_candidate: None,
+                            ending_git_observation: None,
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(rejected.result.code, "agent_run.missing_final_output");
+            let invocation =
+                fixture.public_send_invocation("empty-final-send", "Published once", &[]);
+            TeamToolService::default()
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap();
+            assert!(
+                runtime
+                    .has_current_run_public_send(&fixture.database, &id, epoch)
+                    .unwrap()
+            );
+            assert!(
+                !runtime
+                    .has_current_run_public_send(&fixture.database, &id, epoch + 1)
+                    .unwrap()
+            );
+            assert!(
+                !runtime
+                    .has_current_run_public_send(&fixture.database, "different-run", epoch)
+                    .unwrap()
+            );
+            let completed = fixture.succeed_run_with_candidate(&id, epoch, "", None);
+            assert!(completed.result.payload["finalOutputDigest"].is_null());
+            let count: i64 = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id=?1",
+                    [&id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                count, 1,
+                "empty final does not publish or recover a duplicate"
+            );
+        }
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let body = "The exact answer is already public.";
@@ -8625,8 +8696,8 @@ mod tests {
             super::current_user_text_lookalikes_do_not_create_attention();
         }
         #[test]
-        fn task_linkage_ignores_current_user_attention_for_recipient_cardinality() {
-            super::task_linkage_ignores_current_user_attention_for_recipient_cardinality();
+        fn legacy_task_link_is_ignored_without_changing_explicit_recipients() {
+            super::legacy_task_link_is_ignored_without_changing_explicit_recipients();
         }
         #[test]
         fn agent_send_rejects_a_tombstoned_frozen_reply_anchor() {

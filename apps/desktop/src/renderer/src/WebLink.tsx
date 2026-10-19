@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { AppToast } from './AppToast'
 import { uiAttribute } from './interface-language'
 import { isWebUrl } from '../../web-url'
+import { ResourceReferenceIcon } from './FilePreviewTabIcon'
 
 export const WEB_LINK_OPEN_FAILED = '无法打开链接，请重试或复制地址。'
 export const WEB_LINK_COPY_FAILED = '复制失败，请重试。'
@@ -48,6 +49,9 @@ export function WebLink({ target, children, className = 'message-web-reference' 
           || range.compareBoundaryPoints(Range.END_TO_END, previous) !== 0) return
       }
       openWebLink(target, setError)
-    }}>{children}</a>
+    }}>
+      <ResourceReferenceIcon kind="web" className="resource-reference-icon web-reference-icon" />
+      {children}
+    </a>
     <WebLinkFeedback message={error} onClose={() => setError(null)} /></>
 }

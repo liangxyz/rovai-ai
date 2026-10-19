@@ -2,7 +2,7 @@
 document_type: architecture
 authority: scheduled-automation-architecture
 status: accepted
-last_updated: 2026-10-08
+last_updated: 2026-10-18
 ---
 
 # Scheduled Automation Architecture
@@ -46,6 +46,17 @@ MCP 权限。
 
 通知与执行分离：settlement 冻结 provider-scoped delivery，实际发送重验当前 Bot/Owner；通知失败只更新 outbox，不改变
 occurrence、消息、Run 或重跑模型。定义删除保留已有 Camp、occurrence 和投递证据。
+
+## Thread 永久删除与历史
+
+User 永久删除一次运行产生的 Thread 时，该 occurrence 及其内部 Owner notification delivery 记录属于同一删除范围。
+Core 在 Thread 业务删除事务中先移除 occurrence，再删除其引用的消息和 Delivery；通知记录由 occurrence 级联清除。
+任一步失败时整笔事务回滚，原删除 operation 可以继续重试，不能留下仅清掉运行历史的半完成状态。
+
+此操作保留 Automation 定义、其他 occurrence 及其 Thread，不改变定义的启用状态或 `nextRunAt`，也不重派已删除的运行。
+历史列表只展示剩余 occurrence，`lastRun` 因而可能回退到上一条或为空。已经发往外部渠道的消息不承诺撤回。
+这与“删除 Automation 定义仍保留既有历史”是两个独立入口，不能互相推导删除范围。删除阶段与恢复由
+[Thread 永久删除合同](../contracts/camp-permanent-deletion-v4.md#3-后台状态与安全顺序)拥有。
 
 ## Host 与时间
 

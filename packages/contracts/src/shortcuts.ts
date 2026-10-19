@@ -5,7 +5,7 @@ export type ShortcutActionId =
 export type ShortcutMouseSide = 'side1' | 'side2'
 export type ComposerSendMode = 'enter' | 'primary-enter'
 export interface ShortcutPreferences {
-  schemaVersion: 1
+  schemaVersion: 2
   bindings: Record<ShortcutActionId, string | null>
   mouse: Record<ShortcutMouseSide, ShortcutActionId | null>
   sendMode: ComposerSendMode
@@ -14,6 +14,7 @@ export interface ShortcutPreferencesSnapshot {
   revision: number
   preferences: ShortcutPreferences
   degraded: boolean
+  migrationPending?: boolean
 }
 /** Local Desktop preference; never a Core command or an OS-wide shortcut registration. */
 export interface ShortcutPreferencesApi {
@@ -21,5 +22,6 @@ export interface ShortcutPreferencesApi {
   save(input: { expectedRevision: number; preferences: ShortcutPreferences }): Promise<ShortcutPreferencesSnapshot>
   onChanged(listener: (snapshot: ShortcutPreferencesSnapshot) => void): () => void
   setRecording(recording: boolean): Promise<void>
+  setTasksEnabled?(enabled: boolean): Promise<void>
   onMouseSide(listener: (side: ShortcutMouseSide) => void): () => void
 }

@@ -1,21 +1,23 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-10-16
+last_updated: 2026-10-18
 ---
 
 # 当前规范与决定理由导航
 
+会话 Task 能力：[Task v6](../contracts/durable-task-v6.md)、[Manifest v40/v42](../contracts/context-manifest-evidence-v42.md)、[Shortcuts v2](../contracts/desktop-shortcuts-v2.md)；理由见 [V1.72-D51](../versions/v1.72/decisions.md#v1-72-d51)。
+
 队员单文件头像当前规范：[Member Avatar v4](../contracts/member-avatar-v4.md)、[队员身份 UI](../ui/components/member-identity.md)；取舍见 [V1.72-D42](../versions/v1.72/decisions.md#v1-72-d42)。
 
 成员路由与职责扩容当前规范：[Collaboration State v4](../contracts/collaboration-state-v4.md)、
-[Built-in Transport v41](../contracts/builtin-tool-transport-v41.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
+[Built-in Transport v42](../contracts/builtin-tool-transport-v42.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
 分层与保持 resume 的取舍见 [V1.72-D40](../versions/v1.72/decisions.md#v1-72-d40)。
 
 
-内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v41](../contracts/builtin-tool-transport-v41.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
+内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v42](../contracts/builtin-tool-transport-v42.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
 
-Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v41](../contracts/builtin-tool-transport-v41.md)和
+Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v42](../contracts/builtin-tool-transport-v42.md)和
 [Built-in 运输不变量](../architecture/foundational-invariants.md#skills-builtin-transport)；单入口与精简教学的取舍见
 [V1.72-D33](../versions/v1.72/decisions.md#v1-72-d33)。
 
@@ -32,7 +34,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 ## Public Camp 消息与多输入 AgentRun
 
 - Claude 受管执行回执与启动期待插话：[Delivery v18](../contracts/message-delivery-v18.md)；取舍见 [V1.72-D49](../versions/v1.72/decisions.md#v1-72-d49)。
-- 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v14](../contracts/camp-history-v14.md)、[Manifest v39](../contracts/context-manifest-evidence-v39.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
+- 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v14](../contracts/camp-history-v14.md)、[Manifest v42](../contracts/context-manifest-evidence-v42.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
 - 模型 Mention 统一：[Message Mentions v1](../contracts/message-mentions-v1.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)、[Camp History v14](../contracts/camp-history-v14.md)；仅合并两处元数据、按 Run 冻结的取舍见 [V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)。
 
 - 当前主链：[Public Camp Message/Delivery 架构](../architecture/public-a2a-message-delivery.md)、
@@ -55,7 +57,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 - Channel/Automation 复用普通消息：[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)、
   [Scheduled Automation v3](../contracts/scheduled-automation-v3.md)；理由：
   [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)。
-- Delivery-first 终态注意力：[Notification Episode v9](../contracts/notification-episode-v9.md)、
+- Delivery-first 终态注意力：[Notification Episode v10](../contracts/notification-episode-v10.md)、
   [Current User Attention v8](../contracts/current-user-attention-v8.md)；理由：
   [V1.60-D09](../versions/v1.60/decisions.md#v1-60-d09)、[V1.71-D01](../versions/v1.71/decisions.md#v1-71-d01)。
 
@@ -73,29 +75,29 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 - 工具分类与图片迁移汇合：[原位升级](../architecture/availability-first-runtime.md#migration-switch)、[Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)；理由：[V1.53-D03](../versions/v1.53/decisions.md#v1-53-d03)。
 
-- Execution Evidence 生命周期、独立变更水位、私有思考边界与普通输出预算当前规范：[Run Process Detail Surface v54](../contracts/run-process-detail-surface-v54.md)、[Camp Open Projection v29](../contracts/camp-open-projection-v29.md)、[Single Chat v8](../contracts/single-chat-v8.md)与[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；统一记录与变更游标理由：[V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)，分离内容引用和定向回收理由：[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)，永久有界输出理由：[V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。主线块与组内游标理由见 [V1.72-D10](../versions/v1.72/decisions.md#v1-72-d10)，读取职责见 [Camp Open Read Path](../architecture/camp-open-read-path.md#run-主线与展开组读取)。历史正文块选择见 [V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)，既有维护降频见 [V1.62-D05](../versions/v1.62/decisions.md#v1-62-d05)。
+- Execution Evidence 生命周期、独立变更水位、私有思考边界与普通输出预算当前规范：[Run Process Detail Surface v55](../contracts/run-process-detail-surface-v55.md)、[Camp Open Projection v30](../contracts/camp-open-projection-v30.md)、[Single Chat v9](../contracts/single-chat-v9.md)与[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；统一记录与变更游标理由：[V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)，分离内容引用和定向回收理由：[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)，永久有界输出理由：[V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。主线块与组内游标理由见 [V1.72-D10](../versions/v1.72/decisions.md#v1-72-d10)，读取职责见 [Camp Open Read Path](../architecture/camp-open-read-path.md#run-主线与展开组读取)。历史正文块选择见 [V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)，既有维护降频见 [V1.62-D05](../versions/v1.62/decisions.md#v1-62-d05)。
 
-- Camp 队员 Fast 当前规范：[Camp Member Fast v3](../contracts/camp-member-fast-v3.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)、[Usage v9](../contracts/runtime-usage-monitoring-v9.md)；理由：[V1.72-D13](../versions/v1.72/decisions.md#v1-72-d13)。
+- Camp 队员 Fast 当前规范：[Camp Member Fast v3](../contracts/camp-member-fast-v3.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)、[Usage v11](../contracts/runtime-usage-monitoring-v11.md)；理由：[V1.72-D13](../versions/v1.72/decisions.md#v1-72-d13)。
 
 - 启动分层补充规范：[可选功能门禁](../contracts/desktop-runtime-availability-v2.md#7-authority-ready-and-optional-subsystem-gates)、[Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v2.md#8-windows-pre-ready-bootstrap-assessment)；理由：[V1.31-D05](../versions/v1.31/decisions.md#v1-31-d05)、[V1.31-D06](../versions/v1.31/decisions.md#v1-31-d06)。
 - 渠道/main 数据迁移汇合：[Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)、[原位升级与旧 switch 恢复](../architecture/availability-first-runtime.md#migration-switch)；理由：[V1.36-D06](../versions/v1.36/decisions.md#v1-36-d06)、[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 - 普通升级去整库复制、逐事务恢复与启动重试：[Desktop Runtime Availability v2](../contracts/desktop-runtime-availability-v2.md#4-migration-and-recovery)；理由：[V1.36-D07](../versions/v1.36/decisions.md#v1-36-d07)。
 
-- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v3](../contracts/desktop-runtime-availability-v3.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v9](../contracts/notification-episode-v9.md)。
+- 当前规范：[Desktop 可用性与权威准入](../architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Desktop Runtime Availability v3](../contracts/desktop-runtime-availability-v3.md)、[基础 Core 不变量](../architecture/foundational-invariants.md#core-command-transaction)、[通知架构](../architecture/notification-episodes.md)、[Notification Episode v10](../contracts/notification-episode-v10.md)。
 - 理由来源：[v0.02](../versions/v0.02/decisions.md)、[v0.06](../versions/v0.06/decisions.md)、[v0.28](../versions/v0.28/decisions.md)、[v0.71](../versions/v0.71/decisions.md)、[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D02](../versions/v1.31/decisions.md#v1-31-d02)、[V1.31-D03](../versions/v1.31/decisions.md#v1-31-d03)。
 
 ## Camp、Workspace 与 Attachments
 
 - 普通一键草稿恢复当前规范：[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Composer Draft v16](../contracts/camp-composer-draft-v16.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)；本机内容与 Core presence 的取舍见 [V1.72-D11](../versions/v1.72/decisions.md#v1-72-d11)。
 
-- Runtime 图片当前规范：[Runtime 图片架构](../architecture/runtime-images.md)、[Runtime Images v5](../contracts/runtime-images-v5.md)、[Camp Open Projection v29](../contracts/camp-open-projection-v29.md)、[统一图片展示](../ui/components/conversation-workspace.md#runtime-图片与消息图片)；原生生图闭合集与历史 fail-closed 理由：[V1.53-D01](../versions/v1.53/decisions.md#v1-53-d01)，混合生命周期与不自动发布的理由：[V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。
+- Runtime 图片当前规范：[Runtime 图片架构](../architecture/runtime-images.md)、[Runtime Images v5](../contracts/runtime-images-v5.md)、[Camp Open Projection v30](../contracts/camp-open-projection-v30.md)、[统一图片展示](../ui/components/conversation-workspace.md#runtime-图片与消息图片)；原生生图闭合集与历史 fail-closed 理由：[V1.53-D01](../versions/v1.53/decisions.md#v1-53-d01)，混合生命周期与不自动发布的理由：[V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。
 
-- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v3](../contracts/camp-membership-v3.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Public Camp Composer](../architecture/camp-composer-draft.md)、[Camp Composer Draft v16](../contracts/camp-composer-draft-v16.md)、[结构化 Mention 与 Atom](../ui/components/structured-mentions.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v29](../contracts/camp-open-projection-v29.md)、[Camp Attachments](../architecture/camp-published-attachment-view.md)、[Camp Attachment v10](../contracts/camp-attachment-v10.md)、[Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)、[Camp 永久删除](../architecture/camp-deletion.md)、[Camp Permanent Deletion v4](../contracts/camp-permanent-deletion-v4.md)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v6](../contracts/first-run-onboarding-v6.md)。Files Changed 来源水位与重算理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
+- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v3](../contracts/camp-membership-v3.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Public Camp Composer](../architecture/camp-composer-draft.md)、[Camp Composer Draft v16](../contracts/camp-composer-draft-v16.md)、[结构化 Mention 与 Atom](../ui/components/structured-mentions.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v30](../contracts/camp-open-projection-v30.md)、[Camp Attachments](../architecture/camp-published-attachment-view.md)、[Camp Attachment v10](../contracts/camp-attachment-v10.md)、[Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)、[Camp 永久删除](../architecture/camp-deletion.md)、[Camp Permanent Deletion v4](../contracts/camp-permanent-deletion-v4.md)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v6](../contracts/first-run-onboarding-v6.md)。Files Changed 来源水位与重算理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.16-D01](../versions/v1.16/decisions.md#v1-16-d01)、[V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)、[V1.27-D08](../versions/v1.27/decisions.md#v1-27-d08)、[V1.28-D10](../versions/v1.28/decisions.md#v1-28-d10)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D04](../versions/v1.29/decisions.md#v1-29-d04)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.31-D04](../versions/v1.31/decisions.md#v1-31-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)、[V1.43-D02](../versions/v1.43/decisions.md#v1-43-d02)、[V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)、[V1.65-D01](../versions/v1.65/decisions.md#v1-65-d01)及[V1.65-D02](../versions/v1.65/decisions.md#v1-65-d02)。
 
 ## Camp 文件预览
 
-- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v21](../contracts/file-preview-v21.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
+- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v23](../contracts/file-preview-v23.md)、[Camp 文件预览区](../ui/components/file-preview.md)及[Camp 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 窗口保留与刷新取舍：[V1.59-D07](../versions/v1.59/decisions.md#v1-59-d07)。
 - HTML 运行环境理由：[V1.58-D07](../versions/v1.58/decisions.md#v1-58-d07)。
 - 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.42-D01](../versions/v1.42/decisions.md#v1-42-d01)、[V1.51-D01](../versions/v1.51/decisions.md#v1-51-d01)、[V1.51-D02](../versions/v1.51/decisions.md#v1-51-d02)、[V1.52-D01](../versions/v1.52/decisions.md#v1-52-d01)及[V1.55-D01](../versions/v1.55/decisions.md#v1-55-d01)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案与 [V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05) 的 inline-code 存在性探测已被替代。
@@ -119,9 +121,9 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 - 文件引用、临时正文与三渠道提示：[Send v27](../contracts/camp-message-send-v27.md#agent-文件引用与发送教学)与[已确认 R3](../versions/v1.72/model-context-change-send-file-guidance.md)；沿用旧 Binding 的冻结 Bootstrap，无新增 Version Decision。
 
-- User Steer：[公开投递架构](../architecture/public-a2a-message-delivery.md#用户运行中插话)、[Send v27](../contracts/camp-message-send-v27.md)、[Delivery v18](../contracts/message-delivery-v18.md)、[Manifest 39](../contracts/context-manifest-evidence-v39.md) 和 [Profile 14](../contracts/context-delivery-profile-v14.md)；复用取舍见 [V1.72-D48](../versions/v1.72/decisions.md#v1-72-d48)。
+- User Steer：[公开投递架构](../architecture/public-a2a-message-delivery.md#用户运行中插话)、[Send v28](../contracts/camp-message-send-v28.md)、[Delivery v18](../contracts/message-delivery-v18.md)、[Manifest v42](../contracts/context-manifest-evidence-v42.md) 和 [Profile 15/16](../contracts/context-delivery-profile-v15.md)；复用取舍见 [V1.72-D48](../versions/v1.72/decisions.md#v1-72-d48)。
 
-- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public Camp Message/Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Task v5](../contracts/durable-task-v5.md)、[Camp Message Send v23](../contracts/camp-message-send-v23.md)、[Message Delivery v15](../contracts/message-delivery-v15.md)和[Camp History v10](../contracts/camp-history-v10.md)。主动查询与撤回边界理由见 [V1.69-D01](../versions/v1.69/decisions.md#v1-69-d01)；Task 去版本化与模型投影清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)；正文收敛理由见 [V1.63-D01](../versions/v1.63/decisions.md#v1-63-d01)，协议 clean break 见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。Gather 只保留[历史解释](../architecture/durable-gather-barrier.md)。
+- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Camp 队员关系](../architecture/dynamic-camp-membership.md)、[Public Camp Message/Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Task v6](../contracts/durable-task-v6.md)、[Camp Message Send v23](../contracts/camp-message-send-v23.md)、[Message Delivery v15](../contracts/message-delivery-v15.md)和[Camp History v10](../contracts/camp-history-v10.md)。主动查询与撤回边界理由见 [V1.69-D01](../versions/v1.69/decisions.md#v1-69-d01)；Task 去版本化与模型投影清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)；正文收敛理由见 [V1.63-D01](../versions/v1.63/decisions.md#v1-63-d01)，协议 clean break 见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。Gather 只保留[历史解释](../architecture/durable-gather-barrier.md)。
 - 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)、[V1.29-D05](../versions/v1.29/decisions.md#v1-29-d05)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)及[V1.37-D03](../versions/v1.37/decisions.md#v1-37-d03)。
 
 ## Windows Web 凭据可用性
@@ -138,7 +140,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Single Chat
 
-- 当前规范：[Single Chat Architecture](../architecture/single-chat.md)、[Single Chat v8](../contracts/single-chat-v8.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)和[Camp 内单聊 UI](../ui/components/conversation-workspace.md#camp-内单聊)。
+- 当前规范：[Single Chat Architecture](../architecture/single-chat.md)、[Single Chat v9](../contracts/single-chat-v9.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)和[Camp 内单聊 UI](../ui/components/conversation-workspace.md#camp-内单聊)。
 - 复用现有执行体系、固定私有路由与封闭 Built-in policy 的理由：[V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)。
 - 重启取消当前回复、显式结束和无 successor cleanup fence 的理由：[V1.50-D02](../versions/v1.50/decisions.md#v1-50-d02)。
 - 复用公共弱持久 Source Ref、不维护 Single Chat 附件内容仓库的理由：[V1.50-D03](../versions/v1.50/decisions.md#v1-50-d03)；Run 前宿主重检后原路径投影的当前理由：[V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)。
@@ -172,9 +174,9 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Session、Context 与 Bootstrap
 
-- claim 快照与完整预算的当前规范：[Profile 14](../contracts/context-delivery-profile-v14.md)、[Manifest 39](../contracts/context-manifest-evidence-v39.md)；取舍见 [V1.72-D41](../versions/v1.72/decisions.md#v1-72-d41)。
+- claim 快照与完整预算的当前规范：[Profile 15/16](../contracts/context-delivery-profile-v15.md)、[Manifest v42](../contracts/context-manifest-evidence-v42.md)；取舍见 [V1.72-D41](../versions/v1.72/decisions.md#v1-72-d41)。
 
-- 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Skills 来源与链接](../architecture/skills.md)、[ContextManifest Evidence v30](../contracts/context-manifest-evidence-v30.md)、[Context Delivery Profile v11](../contracts/context-delivery-profile-v11.md)、[Run Facts v7](../contracts/run-facts-v7.md)和[Skills Rebuild v1](../contracts/skills-rebuild-v1.md)；Single Chat 使用 Formatter/Manifest 26、Profile 6、[非 batch Run Facts v5](../contracts/run-facts-nonbatch-v5.md) 与 Skill Links v1；投影技术字段清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)，公开历史按需读取理由见 [V1.68-D01](../versions/v1.68/decisions.md#v1-68-d01)。
+- 当前规范：[Context 基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Skills 来源与链接](../architecture/skills.md)、[ContextManifest Evidence v42](../contracts/context-manifest-evidence-v42.md)、[Context Delivery Profile v15/16](../contracts/context-delivery-profile-v15.md)、[Run Facts v10](../contracts/run-facts-v10.md)和[Skills Rebuild v2](../contracts/skills-rebuild-v2.md)；Single Chat 使用 Formatter/Manifest 42、Profile 16、[Run Facts v10](../contracts/run-facts-v10.md) 定义的 Facts 13 与现有 Skill Links；投影技术字段清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)，公开历史按需读取理由见 [V1.68-D01](../versions/v1.68/decisions.md#v1-68-d01)。
 - 理由来源：[v0.21](../versions/v0.21/decisions.md)、[v0.35](../versions/v0.35/decisions.md)、[v0.44](../versions/v0.44/decisions.md)、[v0.48](../versions/v0.48/decisions.md)、[v0.50](../versions/v0.50/decisions.md)、[v0.52](../versions/v0.52/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v0.94](../versions/v0.94/decisions.md)、[v0.98](../versions/v0.98/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[V1.15-D03](../versions/v1.15/decisions.md#v1-15-d03)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.28-D05](../versions/v1.28/decisions.md#v1-28-d05)。
 - Pi managed system prompt 与 `native_system_prompt_preserved` 的初始理由见 [V1.39-D03](../versions/v1.39/decisions.md#v1-39-d03)、[V1.39-D10](../versions/v1.39/decisions.md#v1-39-d10)及已确认的[模型上下文 revision 3](../versions/v1.39/model-context-change-pi-managed-system-prompt.md)；其中 Receipt 准入已由 [V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01) 退役。普通 Prompt 不解释 Slash、图片走独立结构化通道的当前边界见[模型上下文 revision 1](../versions/v1.44/model-context-change-pi-native-prompt.md)。
 
@@ -204,8 +206,8 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Evidence、Runtime Activity 与 Usage
 
-- 业务与辅助收尾边界：[统一 Rust Host](../architecture/unified-rust-host.md#组件和唯一权威)、[Usage v9](../contracts/runtime-usage-monitoring-v9.md)；理由：[V1.72-D36](../versions/v1.72/decisions.md#v1-72-d36)。
-- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v7](../contracts/runtime-file-change-observation-v7.md)、[Run Process Detail Surface v54](../contracts/run-process-detail-surface-v54.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v9](../contracts/runtime-usage-monitoring-v9.md)、[Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。生命周期、Blob 与文件投影理由分别见 [V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)、[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)与 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)；补丁片段的来源区别见 [V1.72-D24](../versions/v1.72/decisions.md#v1-72-d24)；普通输出永久有界理由见 [V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。
+- 业务与辅助收尾边界：[统一 Rust Host](../architecture/unified-rust-host.md#组件和唯一权威)、[Usage v11](../contracts/runtime-usage-monitoring-v11.md)；理由：[V1.72-D36](../versions/v1.72/decisions.md#v1-72-d36)。
+- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v8](../contracts/runtime-file-change-observation-v8.md)、[Run Process Detail Surface v55](../contracts/run-process-detail-surface-v55.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md)、[Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。生命周期、Blob 与文件投影理由分别见 [V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)、[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)与 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)；补丁片段的来源区别见 [V1.72-D24](../versions/v1.72/decisions.md#v1-72-d24)；普通输出永久有界理由见 [V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。
 - Pi 成功 edit 的 path-bound 原生 patch、activity-v4 cutover、Migration 147 与历史 classifier 冻结理由：[V1.55-D02](../versions/v1.55/decisions.md#v1-55-d02)。
 - 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)。
 - Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v63](../contracts/runtime-launch-and-verification-v63.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
@@ -217,7 +219,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Product 与 Renderer
 
-- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-execution-surface)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Bootstrap Shell](../ui/components/bootstrap-shell.md)、[Desktop Navigation Refresh](../architecture/desktop-navigation-refresh.md)、[UI 规范](../ui/README.md)、[Camp 会话工作区](../ui/components/conversation-workspace.md)、[Run Process Detail Surface v54](../contracts/run-process-detail-surface-v54.md)、[Desktop App Updates](../architecture/desktop-app-updates.md)和[App Update v7](../contracts/app-update-v7.md)。
+- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-execution-surface)、[Availability-first Runtime](../architecture/availability-first-runtime.md)、[Bootstrap Shell](../ui/components/bootstrap-shell.md)、[Desktop Navigation Refresh](../architecture/desktop-navigation-refresh.md)、[UI 规范](../ui/README.md)、[Camp 会话工作区](../ui/components/conversation-workspace.md)、[Run Process Detail Surface v55](../contracts/run-process-detail-surface-v55.md)、[Desktop App Updates](../architecture/desktop-app-updates.md)和[App Update v7](../contracts/app-update-v7.md)。
 - 理由来源：[v0.11](../versions/v0.11/decisions.md)、[v0.24](../versions/v0.24/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.84](../versions/v0.84/decisions.md)、[v1.12](../versions/v1.12/decisions.md)、[v1.13](../versions/v1.13/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D02](../versions/v1.15/decisions.md#v1-15-d02)、[V1.15-D05](../versions/v1.15/decisions.md#v1-15-d05)、[V1.18-D01](../versions/v1.18/decisions.md#v1-18-d01)、[V1.20-D02](../versions/v1.20/decisions.md#v1-20-d02)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.28-D13](../versions/v1.28/decisions.md#v1-28-d13)、[V1.29-D10](../versions/v1.29/decisions.md#v1-29-d10)、[V1.29-D12](../versions/v1.29/decisions.md#v1-29-d12)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)、[V1.31-D01](../versions/v1.31/decisions.md#v1-31-d01)、[V1.31-D04](../versions/v1.31/decisions.md#v1-31-d04)、[V1.41-D01](../versions/v1.41/decisions.md#v1-41-d01)。
 
 ## 文档治理
@@ -245,7 +247,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## 官方 ZCode 接入
 
-- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v63](../contracts/runtime-launch-and-verification-v63.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v7](../contracts/runtime-file-change-observation-v7.md)。
+- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v63](../contracts/runtime-launch-and-verification-v63.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v8](../contracts/runtime-file-change-observation-v8.md)。
 - 理由：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)、[V1.57-D02](../versions/v1.57/decisions.md#v1-57-d02)。
 
 ## 双轨执行评测
@@ -255,7 +257,8 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## 统一 Host 与 Web
 
-- 当前规范：[统一 Rust Host](../architecture/unified-rust-host.md)、[原生 Server 数据与分发](../architecture/unified-rust-host.md#原生-server-数据与分发)、[Host Lifecycle v2](../contracts/host-lifecycle-v2.md)、[Host Web v5](../contracts/host-web-v5.md)与[Server 开发预览](../development/server-preview.md)。Task 旧 payload reconciliation clean break 理由见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。
+- 当前规范：[统一 Rust Host](../architecture/unified-rust-host.md)、[原生 Server 数据与分发](../architecture/unified-rust-host.md#原生-server-数据与分发)、[Host Lifecycle v2](../contracts/host-lifecycle-v2.md)、[Host Web v8](../contracts/host-web-v8.md)与[Server 开发预览](../development/server-preview.md)。Task 旧 payload reconciliation clean break 理由见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。
+- 浏览器文件传输：[Host Web v8](../contracts/host-web-v8.md)、[统一 Host 用户文件](../architecture/unified-rust-host.md#草稿与用户文件)；采用独立短期能力、准入后直接流式发送与浏览器下载管理器的取舍见 [V1.72-D52](../versions/v1.72/decisions.md#v1-72-d52)。
 - 理由来源：[V1.59-D01](../versions/v1.59/decisions.md#v1-59-d01)、[V1.59-D02](../versions/v1.59/decisions.md#v1-59-d02)。
 
 - 新对话默认队伍归属：[Host Web v2](../contracts/host-web-v2.md#shared-creation-preferences)、[Camp Activation](../architecture/camp-activation-lifecycle.md#component-authority)；理由见 [V1.59-D03](../versions/v1.59/decisions.md#v1-59-d03)。
@@ -304,7 +307,7 @@ Cline 唯一官方 ACP 与 Native Hub 退役见 [V1.72-D30](../versions/v1.72/de
 
 ## 用户主动继续执行
 
-- 当前规范：[AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md)、[Camp Message Send v25](../contracts/camp-message-send-v25.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Run Process Detail Surface v54](../contracts/run-process-detail-surface-v54.md)。
+- 当前规范：[AgentRun Continuation v4](../contracts/agent-run-continuation-v4.md)、[Camp Message Send v25](../contracts/camp-message-send-v25.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Run Process Detail Surface v55](../contracts/run-process-detail-surface-v55.md)。
 - 理由：[V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)：新授权接入唯一 lane，原业务输入复用与旧投递不重放分开，允许同一来源多次独立执行。
 
 Cline 认证交还原生、撤销 D25 后续的专属认证独占与强制 cold：
@@ -327,4 +330,8 @@ v62 移除原生会话重建提示和展示查询，保留恢复及审计行为�
 - 新操作与活动统一保存的理由见 [V1.72-D45](../versions/v1.72/decisions.md#v1-72-d45)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
 - 新操作预览预算与结果摘要分离的理由见 [V1.72-D46](../versions/v1.72/decisions.md#v1-72-d46)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
 
-- Steer 合并、版本资格与碰撞迁移：[Manifest v39](../contracts/context-manifest-evidence-v39.md)、[Delivery v18](../contracts/message-delivery-v18.md)；理由见 [V1.72-D47](../versions/v1.72/decisions.md#v1-72-d47)。
+- Steer 合并、版本资格与碰撞迁移：[Manifest v42](../contracts/context-manifest-evidence-v42.md)、[Delivery v18](../contracts/message-delivery-v18.md)；理由见 [V1.72-D47](../versions/v1.72/decisions.md#v1-72-d47)。
+
+
+MiniMax Code 的 ACP、Host 与精确恢复边界由[当前架构](../architecture/runtime-catalog-boundaries.md#minimax-code-acp-实施边界)
+拥有；启动系统提示与开发 Preview 的取舍见 [V1.72-D50](../versions/v1.72/decisions.md#v1-72-d50)。

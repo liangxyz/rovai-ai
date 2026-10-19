@@ -83,7 +83,7 @@ export function AppHeader({
             </button>
           )}
         </div>
-        <div className="camp-detail-entry-host" ref={detailEntryHostRef} />
+        <div className="camp-detail-entry-host" ref={detailEntryHostRef}><div className="camp-detail-entry-slot" data-detail-slot="primary" /><div className="camp-detail-entry-slot" data-detail-slot="single-chat" /><div className="camp-detail-entry-slot" data-detail-slot="tasks" /></div>
         {conversationActions}
         {previewTabsInPane && previewControls}
       </div>

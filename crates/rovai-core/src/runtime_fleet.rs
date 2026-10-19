@@ -2060,7 +2060,9 @@ impl AgentRuntimeFleetManager {
                     entry.state,
                     FleetProcessState::IdleWarm | FleetProcessState::Stopping
                 ) {
-                    bail!("camp_attachment_view_busy: Camp Runtime Host is not reliably quiescent");
+                    bail!(
+                        "camp_attachment_view_busy: Thread Runtime Host is not reliably quiescent"
+                    );
                 }
                 process_ids.push(process_id.clone());
             }
@@ -2075,7 +2077,7 @@ impl AgentRuntimeFleetManager {
             .collect::<Vec<_>>();
         for wait in waits {
             if !wait.wait().await {
-                bail!("camp_attachment_view_busy: Camp Runtime Host could not be fenced");
+                bail!("camp_attachment_view_busy: Thread Runtime Host could not be fenced");
             }
         }
         let retained = self
@@ -2086,7 +2088,7 @@ impl AgentRuntimeFleetManager {
             .values()
             .any(|entry| entry.compatibility.belongs_to_camp(camp_id));
         if retained {
-            bail!("camp_attachment_view_busy: Camp Runtime Host remains resident");
+            bail!("camp_attachment_view_busy: Thread Runtime Host remains resident");
         }
         Ok(())
     }
@@ -2114,7 +2116,7 @@ impl AgentRuntimeFleetManager {
         let deadline = Instant::now() + self.config.stop_timeout;
         for wait in waits {
             if !timeout_at(deadline, wait.wait()).await.unwrap_or(false) {
-                bail!("camp_attachment_view_busy: Camp Runtime startup could not be fenced");
+                bail!("camp_attachment_view_busy: Thread Runtime startup could not be fenced");
             }
         }
         if self
@@ -2125,7 +2127,7 @@ impl AgentRuntimeFleetManager {
             .values()
             .any(|entry| entry.compatibility.belongs_to_camp(camp_id))
         {
-            bail!("camp_attachment_view_busy: Camp Runtime Host remains resident");
+            bail!("camp_attachment_view_busy: Thread Runtime Host remains resident");
         }
         Ok(())
     }

@@ -21,6 +21,7 @@ legible on Rovai's required white Runtime logo surface.
 | `deepseek-color.svg` | `FORMAT_ONLY_TRAILING_NEWLINE` |
 | `grok.svg` | `BYTE_IDENTICAL` |
 | `kiro-color.svg` | `BYTE_IDENTICAL` |
+| `minimax-color.svg` | `BYTE_IDENTICAL` |
 | `kimi.svg` | `MATERIAL_FILL_ADAPTATION_FROM_kimi-color.svg` |
 | `opencode.svg` | `BYTE_IDENTICAL` |
 | `qoder-color.svg` | `BYTE_IDENTICAL` |

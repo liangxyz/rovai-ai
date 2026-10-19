@@ -32,7 +32,7 @@ A shared collaboration aggregate containing participants, public discussion, pri
 _Avoid_: Public Conversation, Task, Project, Archived Thread
 
 **Thread Deletion Intent**:
-The durable, irrevocable intent stored on a Thread when `camps.delete` is accepted. It closes new business admission, correlates retries through the first accepted command ID, and remains the pre-aggregate recovery authority until Runtime isolation and the Cleanup Handoff are safe. Its `operationId` is a correlation identity shared by the receipt, Thread marker and cleanup journal; it is not a Task, a user-managed workflow, a separate aggregate or a requirement for a dedicated deletion table.
+The durable, irrevocable intent stored on a Thread when `threads.delete` is accepted. It closes new business admission, correlates retries through the first accepted command ID, and remains the pre-aggregate recovery authority until Runtime isolation and the Cleanup Handoff are safe. Its `operationId` is a correlation identity shared by the receipt, Thread marker and cleanup journal; it is not a Task, a user-managed workflow, a separate aggregate or a requirement for a dedicated deletion table.
 _Avoid_: archive state, cancellable delete, in-memory job, deletion Task, operation aggregate
 
 **Thread Cleanup Handoff**:
@@ -1150,7 +1150,7 @@ _Avoid_: authored Member Mention, literal @ text, route authority, current Defau
 The immutable Core evidence that freezes one AgentRun's ordered input-message references, anchor, previous/current public
 tails, visibility fence, execution configuration, context-delivery profile, Bootstrap reference, formatter versions,
 Collaboration/Task/Shared/Run Fact/Workspace/Skill selection and exact rendered Dynamic Context. Recovery reuses the
-payload byte-for-byte. It does not bound later live camp.read and never proves transport acceptance or model understanding.
+payload byte-for-byte. It does not bound later live thread.read and never proves transport acceptance or model understanding.
 _Avoid_: audit projection, Runtime Input Delivery, complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Runtime Input Delivery**:
@@ -1189,7 +1189,7 @@ not fit. A message may also appear in RUN_INPUT; only RUN_INPUT creates processi
 _Avoid_: summary, private Conversation, unread receipt, current-input replacement, Native Session-local watermark
 
 **Run Fact**:
-A typed, compact model-facing fact already determined by authoritative Core state and directly relevant to the current AgentRun. Public Run Facts schema v5 provides `attachmentOutputRoot` plus optional Mission, Task, Session continuity and real external-effect facts. Gather, delegation budget and conversationMode are absent; Single Chat retains its v4 shape. Optional facts are omitted when absent, but the section itself is mandatory. A fact guides current decisions but is not an authorization token, mutable source snapshot or prose warning.
+A typed, compact model-facing fact already determined by authoritative Core state and directly relevant to the current AgentRun. Public Run Facts schema 11 provides `attachmentOutputRoot` and `historyHint` plus optional Mission, Session continuity and real external-effect facts. Single Chat schema 13 provides the attachment output root and optional unsettled external effect, without the former fixed `singleChat` object. Stable Single Chat rules remain in its Charter and Guidance. Optional facts are omitted when absent, but the section itself is mandatory. A fact guides current decisions but is not an authorization token, mutable source snapshot or prose warning.
 _Avoid_: Run Notice, Control Signal, Work Brief, inferred warning, operation authorization, Task snapshot
 
 **Current Input**:
@@ -1208,7 +1208,7 @@ _Avoid_: one trigger, additionalMessages, source-type branch, Shared Conversatio
 The monotonic public ThreadMessage sequence boundary maintained for each `(ThreadId, AgentId)`. It records the claim tail
 frozen by the latest exact AgentRun input accepted on the correct binding/generation and survives Native Session
 replacement. Prepared, rejected, unknown, claim-only and stale acknowledgements do not advance it. It selects the next
-automatic incremental window but never limits live `camp.read` or proves model understanding.
+automatic incremental window but never limits live `thread.read` or proves model understanding.
 _Avoid_: Native Session-local state, proof of reading, unread-message set, retrieval cursor, model-visible boundary
 
 **Accepted Collaboration Projection Digest**:
@@ -1228,12 +1228,12 @@ _Avoid_: current context field, batch root, mandatory ancestor
 
 **Public Reference Context Closure**:
 The retired automatic ancestor-expansion container. Current Shared Conversation exposes `anchorMessageId` but does not
-inject anchor ancestors; an Agent can use live `camp.read` when earlier context is required.
+inject anchor ancestors; an Agent can use live `thread.read` when earlier context is required.
 _Avoid_: current context field, implicit private context, routing source, full reply graph
 
 **Omitted Public Messages Envelope**:
 A paired model-visible `omittedCount + historyReadCursor` emitted only when one or more visible candidates in the frozen
-incremental window do not enter Shared Conversation. The cursor is an opaque starting point for live `camp.read`; it does
+incremental window do not enter Shared Conversation. The cursor is an opaque starting point for live `thread.read`; it does
 not restore the frozen snapshot or guarantee the same count later.
 _Avoid_: executable sequence range, body continuation, Manifest replay cursor, automatic retrieval request
 
@@ -1247,26 +1247,34 @@ Historical inputs retain their own frozen Profile and serializer.
 _Avoid_: formatter constants, model DTO schema, Evidence schema, Member Runtime Parameters, mutable user preference, summary model configuration
 
 **Cross-Thread History Search**:
-An explicit, on-demand lookup by a running Agent within its Cross-Thread History Fence across public ThreadMessages of other surviving Threads in which the same AgentProfile remains a currently eligible ThreadMember. It is transient source retrieval rather than Memory; former membership, private Conversation or A2A content, and deleted Threads are outside it.
-_Avoid_: global Thread history, Archived Thread search, former-membership history, Memory recall, private Conversation search
+An explicit, on-demand lookup by an authenticated running Agent across public messages in surviving Threads. Target-Thread
+membership is not a read permission. Cross-Thread search is bounded by the Run's frozen global public-message boundary;
+private Conversations and deleted Threads remain outside it. Retrieval does not create Memory or route work.
+_Avoid_: membership-gated public history, private Conversation search, unbounded future search, Memory recall
 
 **Thread History Retrieval**:
-The model-facing discovery and raw-read surface for original public ThreadMessages. Every call rederives live authorization
-and recipient-specific visibility; `camp.read` is not bounded by the current ContextManifest and can see later currently
-visible messages. It pages by `limit <= 20` and cursor, then returns the selected page completely without aggregate-size
-shrinking. Its current request shapes are timeline `before/limit`, exact `messageId`, and thread `thread/before/limit`;
-retired `mode/direction/around` fields are neither accepted nor translated. Recallable, suppressed and withdrawn messages
-remain unavailable, every quote source is separately visibility-checked for the viewer, and reading has no claim or ACK
-side effect.
+The model-facing discovery and raw-read surface for public ThreadMessages. Every call rederives live authorization and
+message visibility; `thread.read` is not bounded by the current ContextManifest and can see later published messages.
+It uses a default limit of 20 and a maximum of 100, returning the selected page completely without aggregate-size
+shrinking. Current request shapes are timeline `before/limit`, exact `messageId`, and reply chain `replyChain/before/limit`;
+legacy `thread` remains an input alias for `replyChain`. Retired `mode/direction/around` fields are not translated.
+Published recallable messages and messages with waiting Deliveries remain explicitly readable without claiming those
+Deliveries or closing recall. Withdrawn items expose a marker without their body and are excluded from search;
+quote sources retain their separate visibility checks. Reading has no claim or ACK side effect.
 _Avoid_: Manifest-bounded read, unread-only retrieval, truncated success, attachment file access, bearer cursor, Memory recall
 
 **Cross-Thread History Fence**:
-The immutable maximum scope of one AgentRun's Cross-Thread History Search, pairing the exact set of eligible Thread Discovery Snapshots with one global public-message boundary. Live membership, Member Presence, Thread deletion and tombstones may only narrow it; later joins, renames and messages cannot expand or rewrite it.
-_Avoid_: live Thread directory, bearer cursor, previous-Run authorization, current-Thread message boundary
+The immutable global public-message publication boundary for one AgentRun's cross-Thread `thread.search` and `history.search`.
+New Runs use a live directory: `thread.list` queries current names and latest visible public message activity, with creation
+time as the fallback for empty Threads. Listing or renaming a Thread never advances the frozen message search boundary.
+Older Runs retain their recorded frozen directory mode; live visibility and deletion checks still apply.
+_Avoid_: live cross-Thread search boundary, listing as authorization, advancing history through directory activity
 
 **Thread Discovery Snapshot**:
-The immutable discovery identity of one other Thread inside a Cross-Thread History Fence, containing its Thread ID, Thread Name and last visible public activity at the Fence boundary, with Thread creation as the fallback for an empty Thread. Thread discovery matches and orders this snapshot; later renames or activity do not rewrite it, while live authorization may remove it from results.
-_Avoid_: live Thread list item, Thread updated time, Archived Thread, cross-Run discovery cache
+The historical frozen directory identity retained for older Runs: Thread ID, name and visible activity at their original
+boundary. New Runs do not create directory snapshots and use current metadata instead. Reading old Runs neither rewrites
+nor backfills their directory evidence.
+_Avoid_: current-Run directory requirement, live Thread updated time, cross-Run discovery cache
 
 **Product Runtime Catalog**:
 The closed set of Agent Runtime products that Rovai-ai has integrated and can use to create AgentRuns. Catalog membership is independent of local discovery, installation, authentication, and current readiness; compatibility-evaluation candidates remain outside it.

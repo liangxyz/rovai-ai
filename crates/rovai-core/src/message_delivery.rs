@@ -215,9 +215,6 @@ pub fn persist_queued_agent_message(
         if !request.explicit_recipients.is_empty() {
             conflicting_fields.push("to");
         }
-        if request.task_id.is_some() {
-            conflicting_fields.push("taskId");
-        }
         if !conflicting_fields.is_empty() {
             return Ok(rejected_with_details(
                 "message.public_only_conflict",
@@ -328,32 +325,6 @@ pub fn persist_queued_agent_message(
         .collect::<Vec<_>>();
     effective_recipients.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     effective_recipients.dedup();
-    if request.task_id.is_some() && effective_recipients.len() != 1 {
-        return Ok(rejected_with_details(
-            "message.task_recipient_ambiguous",
-            "taskId requires exactly one effective recipient",
-            json!({
-                "recipientCount": effective_recipients.len(),
-                "newRequestIdRequired": true,
-            }),
-        ));
-    }
-    if let (Some(task_id), Some(recipient_agent_id)) =
-        (request.task_id, effective_recipients.first())
-        && !crate::collaboration::task_link_admission(
-            transaction,
-            task_id,
-            request.camp_id,
-            recipient_agent_id,
-        )?
-    {
-        return Ok(rejected_with_details(
-            "message.invalid_task",
-            "taskId must identify a non-terminal Task assigned to the sole recipient in this Thread",
-            json!({"newRequestIdRequired": true}),
-        ));
-    }
-
     let anchor_message_id =
         load_run_reply_anchor(transaction, request.source_agent_run_id, request.camp_id)?;
     let source_files =
@@ -489,7 +460,6 @@ pub fn persist_queued_agent_message(
             "deliveryIds": delivery_ids,
             "sourceAgentRunId": request.source_agent_run_id,
             "anchorMessageId": anchor_message_id,
-            "taskId": request.task_id,
         }),
     )?;
     crate::message_changes::record(transaction, request.camp_id, false, &[]);

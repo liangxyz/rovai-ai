@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v4
-last_updated: 2026-10-04
+last_updated: 2026-10-16
 ---
 
 # Runtime Activity Mapping Registry
@@ -23,6 +23,7 @@ last_updated: 2026-10-04
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过；[`0.23.0` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过并记录 basename-only Diff 边界 |
 | `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；标准 `rawInput.command` 与 TRAE Bash 实测 `rawInput.Command` 的非空字符串进入公开 input，`Description` 等相邻字段保持私有；命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 实测 `Command + Description` started、相邻 raw 字段排除、非 TRAE 大写字段 fail-closed、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；[v1.52 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过；完整 command-output 矩阵仍保留既有 nonzero status 漂移 |
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
+| `minimax-code-cli` | MiniMax Code | ACP v1 | `fine_grained` | 同 ToolCall 配对，原生 read/write/edit 唯一路径含相对路径；write Boolean created 区分新增/覆盖；只消费成功结果 details.patch，排除带行号的 ACP 预览与输入伪完整状态；未知工具保持 other | 共享 ACP correlation/终态、patch 路径/省略/私有字段 owners；activity-v4 新 Runtime 来源，不改历史 | [0.6.12 接入证据与限制](../research/minimax-code-runtime/README.md)；不从文本猜测工具能力 |
 | `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；成功 Edit/Write terminal 的唯一标准 location 可独立生成文件操作行；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi path-only、run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | 既有 prompt/Shell/cancel/Built-in 矩阵通过；[`0.40.1` post-fix 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过；`run_level` 只表示缺事件时不补造细粒度 Activity |
 | `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | macOS arm64 与 Windows x64 已分别用 `grok 1.0.5` + MiniMax-M3 通过真实 Deep Probe、AgentRun 与 cold resume；`1.0.13` 的 v1.52 文件矩阵连续两次一成一败，连接已证实但文件 Tool 能力未达可重复门槛；Usage/Cost 不从 vendor metadata 推断 |
 | `deepseek-harness` | DeepSeek Harness | ACP v1 + official tools/result observer | `fine_grained` | 精确 Session/call 映射；bash/pwsh→execute、read/read_image→read、write/edit→对应文件语义、glob/grep→file_search、web_search→web_search、web_fetch→fetch、skill→tool；shell canonical exit/signal/timeout 决定结果，canonical path 决定 operation；write 接受 `before: string \| null` 与 string after，edit 只接受 string/string，并仅转换为标准 ACP terminal Diff；未知工具保留 other | bootstrap/工具身份/一次消费、write 显式 null、缺失 before、edit null 与大文件回退 fixture；复用 ACP 终态、Diff 和输出 owner | 0.1.5-rc.2 + MiniMax-M3 真实 read/add/edit/empty matrix 通过；add `+1/-0`、edit `+1/-1`、empty edit `+1/-0`；缺字段或不可信状态保持路径级回退；[新增文件增量证据](../research/deepseek-harness-runtime/acp-0.1.5-create-diff-evidence.json)不扩大平台资格 |
@@ -338,3 +339,10 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。`grep_sea
 Cline descriptor 仅指向共享 ACP；历史已持久化 payload 的 activity-v4 解释保持不变。
 ACP `run_commands/read_files/apply_patch/editor/search_codebase` 分别归一为 execute/read/edit/edit/search；
 未识别工具保留 other。工具名只用于该 Adapter 的已验证结构映射，不将模型文本当作活动语义。
+
+## MiniMax Code 文件来源补验（2026-10-16）
+
+原生 0.6.12 的 Edit ACP diff 是显示预览，不能作为完整 before/after。按 [File Change v8](../contracts/runtime-file-change-observation-v8.md)
+只使用成功 write/edit 的原生 details.patch；write created 与唯一输入路径证明 add/update。新建无 patch 时仅显示新增，
+失败与省略 patch 不补造内容。相对 read 路径由同调用结构化输入补齐。真实 CLI＋本地脚本模型的 Core 文件矩阵、
+持久化与重开结果见[全面对照](../research/minimax-code-runtime/full-parity-2026-10-16.md)；不冒充真实 LLM 或 Renderer 点击验收。

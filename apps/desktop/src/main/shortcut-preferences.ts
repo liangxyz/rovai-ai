@@ -1,17 +1,28 @@
 import { readFile } from 'node:fs/promises'
 import type { ShortcutPreferencesApi, ShortcutPreferencesSnapshot } from '@contracts'
-import { parseShortcutPreferences, shortcutDefaults } from '../shared/shortcuts'
+import { parseShortcutPreferences, migrateLegacyShortcutPreferences, shortcutDefaults } from '../shared/shortcuts'
 import { writePrivateJson } from './general-preferences'
 
 export class ShortcutPreferencesStore {
   #snapshot: ShortcutPreferencesSnapshot = { revision: 0, preferences: shortcutDefaults(), degraded: false }
   #tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly path: string, private readonly platform: NodeJS.Platform) {}
-  async load(): Promise<void> {
+  #loaded: Promise<void> | null = null
+  load(): Promise<void> {
+    this.#loaded ??= this.loadOnce()
+    return this.#loaded
+  }
+  private async loadOnce(): Promise<void> {
     try {
-      const preferences = parseShortcutPreferences(JSON.parse(await readFile(this.path, 'utf8')), this.platform)
+      const raw: unknown = JSON.parse(await readFile(this.path, 'utf8'))
+      const current = parseShortcutPreferences(raw, this.platform)
+      const preferences = current ?? migrateLegacyShortcutPreferences(raw, this.platform)
       if (!preferences) throw new Error('Invalid shortcuts')
       this.#snapshot = { revision: 0, preferences, degraded: false }
+      if (!current) {
+        try { await writePrivateJson(this.path, preferences) }
+        catch { this.#snapshot.migrationPending = true }
+      }
     } catch (error) {
       this.#snapshot.degraded = !(error instanceof Error && 'code' in error && error.code === 'ENOENT')
     }

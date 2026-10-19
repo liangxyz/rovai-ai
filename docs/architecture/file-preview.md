@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-10-18
 ---
 
 # File Preview Architecture
@@ -35,7 +35,7 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v21](../contracts/file-preview-v21.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v23](../contracts/file-preview-v23.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Activity 与 Execution 是 Renderer-only 合成标签，
   只借用同一 Tab shell 和分栏 host，不进入文件 controller、resource owner 或恢复来源。Tab shell 不拥有文件能力
@@ -141,11 +141,12 @@ Renderer 的 `file-preview-session.ts` 保存最多 24 个 Camp 的轻量快照�
 句柄、资源映射、站点和加载请求。React 只订阅状态，通过稳定的预览容器显示当前 Camp；不常驻完整 Camp 或 Runtime。
 
 最多 8 个热 Camp、128 MiB 不可见可重建内容、4 个 HTML 页面实例分别回收；集中配置与完整规则见
-[File Preview v21](../contracts/file-preview-v21.md)。保留不可重新取得内容，不通过普通回收丢弃临时唯一副本。
+[File Preview v23](../contracts/file-preview-v23.md)。保留不可重新取得内容，不通过普通回收丢弃临时唯一副本。
 24 个快照包含热 Camp。只有用户切回/打开/激活更新 LRU，后台完成和监听不更新。
 
-切 Camp 只切显示。热命中直接复用标签内容、Blob URL 和 iframe，不重读、不重验、不重新准备站点；冷恢复仅加载
-当前需要显示的标签。原请求继续归原 Camp/session/tab/generation，关闭、淘汰、代次替代才拒绝并释放迟到资源。
+切 Thread 先复用标签内容、Blob URL 和 iframe。有更新或缓存句柄已回收时，当前可见标签通过候选刷新；
+未变化且仍持有能力的热命中不重读、不重验、不重新准备站点。冷恢复仅加载当前需要显示的标签。
+原请求继续归原 Thread/session/tab/generation，关闭、淘汰、代次替代才拒绝并释放迟到资源。
 HTML 保留页面和站点，隐藏时退出交互与焦点范围，接受有限实例继续执行作者脚本，不增加冻结或监控系统。
 
 Main 将 `{campId, previewSessionId, bindingGeneration}` 与当前导航分开。来源读取检查存活 session；系统打开、
@@ -154,7 +155,19 @@ Main 将 `{campId, previewSessionId, bindingGeneration}` 与当前导航分开�
 保留 unavailable shell，不把项目外临时能力升级为业务来源。
 
 刷新用独立候选句柄/内容/映射，不原地修改旧记录。HTML 候选确认根文档已加载、通道已连接后一起切换，显示提交
-才释放旧版本；失败只释放候选。新旧共存纳入容量。读取新分页仍验证版本，旧缓存显示不经过验证路径。
+才释放旧版本；失败只释放候选。新旧共存纳入容量。读取新分页仍验证对应候选，旧缓存显示不经过验证路径。Desktop 句柄只复用最近一次成功定位的
+偏移和行号，页起点未命中时沿用原定位；新候选不继承该记录。Web 分页复用 Analysis 与属性校验，
+完整读取边界见 [Host Web v8](../contracts/host-web-v8.md)。
+
+共享 controller 在当前可见文件收到变化通知后以 300ms 末尾防抖自动刷新，发起前重新检查可见性；
+后台标签与隐藏 Thread 只标记更新。所有重新显示入口统一检查更新、能力回收与冷恢复。
+首次加载完成后也检查待更新版本，手动/自动刷新及 HTML 候选等待共用已有忙碌状态，
+成功后有更晚更新才按可见性补刷。自动刷新取得候选后，若同一文件的版本未变且原句柄/内容有效、
+刷新前无错误，则在 HTML 容量预留前释放候选并跳过内容准备，只消费本轮开始的通知水位。
+Desktop 使用文件身份与属性，Web 还比较既有摘要；手动刷新和恢复完整加载。
+失败保留旧内容并阻断通知触发的重试；明确用户入口才可再次尝试。
+计时器随隐藏、关闭、淘汰、session 换代或释放清理。分页按可见行号在新内容中重新定位，
+缩短时回落到最后有效行，不跨版本复用字节偏移。完整行为见 [File Preview v23](../contracts/file-preview-v23.md)。
 
 ## 读取与 generation
 
@@ -183,7 +196,8 @@ Root Grant 只服务“选择目录、打开文件夹、添加外部目录、浏
 每个打开 Tab 登记窗口、Camp、previewKey 与已验证 relative identity。事件经平台路径归一化后只发布匹配
 `previewKeys`；filename 缺失或只报告 root 时保守标记该 root 的全部订阅。
 
-事件不执行 read/stat，只标记已有标签有更新。最后一个订阅释放时关闭 watcher；session 回收、窗口销毁、来源撤销与退出
+watcher 事件本身不执行 read/stat，只发布已有文件的更新通知；Renderer 共享 controller 调度可见文件刷新。
+最后一个订阅释放时关闭 watcher；session 回收、窗口销毁、来源撤销与退出
 分别清理自己的引用。watcher 失败后关闭 entry 并记录去路径诊断，不启动轮询。
 
 ## HTML 预览站点与 Markdown 资源
@@ -215,7 +229,7 @@ Renderer 的文档期限由当前根 `documentId` 拥有，重复握手及子 fr
 无响应显示非阻塞的未知状态。服务端诊断采用有界回放与文档订阅起点，按请求开始序号过滤旧记录和延迟旧请求，
 子页面不清空根页面诊断，新的导航不继承历史页已耗尽的展示额度。
 查找使用有界可见正文快照、现有 Worker 和高亮定位；源码独立读取未注入内容。完整 wire、限制和状态见
-[File Preview v21](../contracts/file-preview-v21.md)。
+[File Preview v23](../contracts/file-preview-v23.md)。
 
 Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.ready 前注册 secure standard scheme，
 实际窗口 Session 安装 sender gate 与 protocol handler。token 绑定窗口、Camp、句柄、generation 和文档目录；

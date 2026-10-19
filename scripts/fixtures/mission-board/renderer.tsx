@@ -9,6 +9,7 @@ import {createReviewModel} from '../../../scripts/fixtures/host-web-parity/model
 import {initial, initialDraft, agents, installations, navigation, now} from '../../../scripts/fixtures/host-web-parity/data'
 import {DEFAULT_GENERAL_PREFERENCES} from '../../../apps/desktop/src/shared/general-preferences-model'
 import {DEFAULT_APPEARANCE} from '../../../apps/desktop/src/shared/appearance'
+import {EMPTY_SNAPSHOT} from '../../../apps/desktop/src/shared/navigation-preferences-model'
 import {applyAppearanceSnapshot} from '../../../apps/desktop/src/renderer/src/theme'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/mobile.css'
@@ -58,7 +59,7 @@ function snapshot(m:MissionRecord):ThreadOpenProjection {
  if(snapshots.has(m.threadId)) return snapshots.get(m.threadId)
  const s=JSON.parse(JSON.stringify(initial).replaceAll(initial.thread.id,m.threadId))
  s.thread={...s.thread,id:m.threadId,missionId:m.missionId,title:m.title,activationState:'active',projectPath:m.projectPath}
- s.schemaVersion=8
+ s.schemaVersion=9
  const collection=(n:number)=>({totalCount:n,loadedCount:n,omittedCount:0,complete:true})
  s.coverage={tasks:collection(s.tasks.length),messages:{...collection(s.messages.length),hasEarlier:false,oldestLoadedSequence:s.messages[0]?.sequence??null,newestLoadedSequence:s.messages.at(-1)?.sequence??null},messageDeliveries:collection(s.messageDeliveries.length),turns:collection(s.turns.length),agentRuns:collection(s.agentRuns.length),approvals:collection(s.approvals.length)}
  snapshots.set(m.threadId,s);return s
@@ -68,7 +69,7 @@ const projects=[{projectKey:'directory:/workspace/rovai-ai',projectPath:'/worksp
 const populatedProjects=projects.map((project,index)=>({...project,totalCount:1,recentThreads:[{...navigation(initial).projects[0].recentThreads[0],id:`fixture-project-camp-${index}`,title:`${project.name} 的普通对话`,projectPath:project.projectPath}]}))
 const nav={schemaVersion:3,throughGlobalSequence:10,quickChat:{totalCount:0,recentThreads:[]},projects:populatedProjects}
 const prefs={...DEFAULT_GENERAL_PREFERENCES,newConversationDefaults:{memberAgentIds:profiles.map(a=>a.agentId),defaultLeadAgentId:profiles[0].agentId}}
-const navigationPrefs={schemaVersion:4,pins:[],removedProjects:[],projectOrder:projects.map(p=>p.projectKey),projectNames:{}}
+const navigationPrefs={...structuredClone(EMPTY_SNAPSHOT),registeredProjects:projects.map(p=>p.projectPath),legacyProjectsSynced:true,projectOrder:projects.map(p=>p.projectKey)}
 const changed=()=>events.forEach(fn=>fn({method:'missions.invalidated',params:{}}))
 const seedScrollableLanes=(count=10)=>{
  if(items.some(item=>item.missionId.startsWith('scroll-')))return
@@ -140,6 +141,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  if(method==='runtime.installations.list')return missionInstallations
  if(method==='memory.hearthReviewItems.list')return []
  if(method==='navigation.snapshot')return nav
+ if(method==='preferences.tasks.get')return {enabled:false,headsUpAfterSequence:0,observedThroughChangeSequence:notificationSequence}
  if(method==='navigation.threads')return {throughGlobalSequence:nav.throughGlobalSequence,groupKeys:[],threads:[]}
  if(method==='navigation.findCamp')return items.find(m=>m.threadId===p.threadId)?{...snapshot(items.find(m=>m.threadId===p.threadId)!).thread}:null
  if(method==='threads.exists')return !!m
@@ -154,9 +156,9 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  if(method==='thread.pendingInputs.get')return {threadId:c.threadId,executionActive:false,items:[],editSession:null,submissionOutcomes:[]}
  if(method==='notifications.inbox')return {schemaVersion:9,items:[],unreadCount:0,throughChangeSequence:notificationSequence,nextCursor:null}
  if(method==='notifications.preference.get')return {version:1,updatedAt:now,headsUpEnabled:true,approvalHeadsUpEnabled:true,userMentionHeadsUpEnabled:true,turnCompletedHeadsUpEnabled:true,turnIncompleteHeadsUpEnabled:true,singleChatHeadsUpEnabled:true,missionNeedsYouHeadsUpEnabled:true,missionStatusHeadsUpEnabled:true,taskStatusHeadsUpEnabled:false,missionStatuses:['completed'],taskStatuses:['completed','blocked','cancelled']}
- if(method==='notifications.changesSince')return {schemaVersion:9,requestedAfterChangeSequence:c.afterChangeSequence,nextChangeSequence:notificationSequence,throughChangeSequence:notificationSequence,retainedFloorChangeSequence:0,hasMore:false,resetRequired:false,changes:notificationJournal.filter(change=>change.changeSequence>c.afterChangeSequence)}
+ if(method==='notifications.changesSince')return {schemaVersion:9,requestedAfterChangeSequence:c.afterChangeSequence,nextChangeSequence:notificationSequence,throughChangeSequence:notificationSequence,taskCapability:{enabled:false,headsUpAfterSequence:0,observedThroughChangeSequence:notificationSequence},retainedFloorChangeSequence:0,hasMore:false,resetRequired:false,changes:notificationJournal.filter(change=>change.changeSequence>c.afterChangeSequence)}
  if(method==='notifications.acknowledgeVisibleSources'||method==='notifications.acknowledge')return applied()
- if(method==='events.subscribe')return {schemaVersion:1,events:[],throughGlobalSequence:10}
+ if(method==='events.subscribe')return {schemaVersion:9,events:[],requestedAfterGlobalSequence:c.afterGlobalSequence,nextGlobalSequence:c.afterGlobalSequence,throughGlobalSequence:c.afterGlobalSequence,hasMore:false,resetRequired:false}
  if(method==='workspaces.inspect')return {name:'rovai-ai',projectPath:p.path,gitObservation:{state:'git_valid',branch:'main',head:'a'.repeat(40),repositoryRoot:p.path,objectFormat:'sha1',dirty:false,reason:null}}
  if(method==='missions.update'){
   if(failNextMissionSave){failNextMissionSave=false;throw new Error('fixture save failure')}
@@ -213,7 +215,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  }
  return model.client.request(method as any,p)
 }}
-const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}},generalPreferences:new Proxy({}, {get:(_,key)=>async(...args:any[])=>{if(key==='setNewConversationDefaults')prefs.newConversationDefaults=args[0];return prefs}}),navigationPreferences:new Proxy({}, {get:()=>async()=>navigationPrefs})}
+const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}},generalPreferences:new Proxy({}, {get:(_,key)=>key==='onChanged'?()=>()=>{}:async(...args:any[])=>{if(key==='setNewConversationDefaults')prefs.newConversationDefaults=args[0];return prefs}}),navigationPreferences:new Proxy({}, {get:(_,key)=>key==='onChanged'?()=>()=>{}:async()=>navigationPrefs})}
 const navigationHistory={initial:{entries:[{kind:'missions' as const}],index:0},write:(state:any)=>state,go:async()=>false,listen:()=>()=>{}}
 const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{calls.push({method:"fixture.file.open",p:req});return model.fileApi.open({...req,...(req.threadId?{threadId:initial.thread.id}:{})} as any)}},preferences,navigationHistory,selectWorkspaceDirectory:async()=>({name:'rovai-ai',projectPath:'/workspace/rovai-ai'})}
 ;(window as any).missionQA={items,calls,errors:[],runMentions:runMissionMentionAcceptance,failNextMissionSave:()=>{failNextMissionSave=true},run:runMissionAcceptance,runCheckoutView:runMissionCheckoutViewAcceptance,runDeleteTrace:runMissionDeleteTraceAcceptance,runLargeDiff:runMissionLargeDiffAcceptance,admitMissionNotification,
@@ -229,7 +231,7 @@ const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{call
  sourceMessageId:(missionId:string)=>snapshot(items.find(item=>item.missionId===missionId)!).messages[1].id,
  invalidateMissionDetails:()=>changed(),
  terminalMissionRun:(threadId:string)=>events.forEach(fn=>fn({method:'agent_run.terminal',params:{threadId}})),
- refreshCamp:(threadId:string)=>events.forEach(fn=>fn({method:'camp.pendingInputs.changed',params:{threadId,reason:'published'}}))}
+ refreshCamp:(threadId:string)=>events.forEach(fn=>fn({method:'thread.messages.changed',params:{threadId}}))}
 window.addEventListener('error',e=>(window as any).missionQA.errors.push(String(e.error?.stack??e.message)))
 window.addEventListener('unhandledrejection',e=>(window as any).missionQA.errors.push(String(e.reason)))
 createRoot(document.getElementById('root')!).render(<ThreadClientProvider client={client as any}><CurrentUserProfileContext.Provider value={{profile:{displayName:'维护者',avatarDataUrl:null},update:async()=>{}} as any}><BusinessApp environment={environment}/></CurrentUserProfileContext.Provider></ThreadClientProvider>)

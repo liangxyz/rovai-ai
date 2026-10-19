@@ -14,13 +14,15 @@ const glyphs = {
 }
 
 export function ImageContextMenu({ position, onClose, displayName, ready, busy,
-  hasPath, revealLabel, onAction }: {
+  hasPath, revealLabel, saveLabel, canSave = ready, onAction }: {
   position: ImageMenuPosition | null
   onClose: () => void
   displayName: string
   ready: boolean
   busy: ImageAction | null
   hasPath: boolean
+  saveLabel?: string
+  canSave?: boolean
   revealLabel?: string
   onAction: (action: ImageAction) => void
 }): JSX.Element {
@@ -49,7 +51,7 @@ export function ImageContextMenu({ position, onClose, displayName, ready, busy,
           returnFocus.current = false
         }}>
         {item('copy', busy === 'copy' ? uiAttribute('正在复制图片…') : uiAttribute('复制图片'), () => onAction('copy'), !ready || busy !== null)}
-        {item('save', uiAttribute('保存图片…'), () => onAction('save'), !ready || busy !== null)}
+        {item('save', saveLabel ?? uiAttribute('保存图片…'), () => onAction('save'), !canSave || busy !== null)}
         {(hasPath || revealLabel) && <DropdownMenu.Separator className="attachment-context-menu-separator" />}
         {hasPath && item('path', uiAttribute('复制完整路径'), () => onAction('path'), busy !== null)}
         {revealLabel && item('reveal', revealLabel, () => onAction('reveal'), busy !== null)}

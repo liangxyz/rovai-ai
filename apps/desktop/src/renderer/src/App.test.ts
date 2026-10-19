@@ -9,7 +9,7 @@ import { ThreadDetailEntries } from './ThreadDetailPopover'
 import { createElement, type ComponentProps } from 'react'
 import { ExecutionToolGroupStateContext } from './ExecutionToolGroup'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -551,7 +551,8 @@ describe('active Thread event invalidation', () => {
         complete: true
       }
       return {
-        schemaVersion: 8,
+        schemaVersion: 9,
+        tasksEnabled: true,
         throughGlobalSequence: terminal ? 12 : 10,
         thread: {
           id: 'camp-terminal-refresh', title: '终态刷新', activationState: 'active',
@@ -943,7 +944,8 @@ describe('Thread snapshot cache', () => {
       complete: true
     }
     const projection = {
-      schemaVersion: 8,
+      schemaVersion: 9,
+        tasksEnabled: true,
       throughGlobalSequence: 20,
       thread,
       members: [],
@@ -976,7 +978,7 @@ describe('Thread snapshot cache', () => {
 
     const snapshot = campOpenProjectionAsSnapshot(projection, previous)
 
-    expect(snapshot.schemaVersion).toBe(35)
+    expect(snapshot.schemaVersion).toBe(36)
     expect(snapshot.messages.map(({ id }) => id)).toEqual(['older', 'recent'])
     expect(snapshot.timeline).toEqual([])
     expect(snapshot.messages.every((message) => message.timelineGlobalSequence === null)).toBe(true)
@@ -1172,7 +1174,7 @@ describe('task event projections', () => {
       updatedAt: '2026-08-05T02:10:00Z',
       closedAt: '2026-08-05T02:10:00Z',
       availableActions: []
-    } satisfies ThreadSnapshot['tasks'][number]
+    } satisfies NonNullable<ThreadSnapshot['tasks']>[number]
     const message = (
       id: string,
       sequence: number,
@@ -1300,7 +1302,7 @@ describe('task event projections', () => {
       updatedAt: '2026-07-01T00:00:00Z',
       closedAt: null,
       availableActions: ['update']
-    } satisfies ThreadSnapshot['tasks'][number]
+    } satisfies NonNullable<ThreadSnapshot['tasks']>[number]
 
     expect(campConversationTimeline([], [], [], [task])).toMatchObject([{
       id: 'task:task-old',
@@ -1874,7 +1876,7 @@ describe('task event projections', () => {
 
   it('resolves an uncached notification Run from the current Core snapshot and preserves exact identity checks', async () => {
     const run = { id: 'run-notification-source' } as AgentRunView
-    const schemaVersion: ThreadSnapshot['schemaVersion'] = 35
+    const schemaVersion: ThreadSnapshot['schemaVersion'] = 36
     const snapshot = {
       schemaVersion,
       thread: { id: 'thread-source' },
@@ -1901,7 +1903,7 @@ describe('task event projections', () => {
     await expect(resolveNotificationAgentRun(client, 'thread-source', run.id, null)).resolves.toBeNull()
     for (const incompatible of [
       { ...snapshot, schemaVersion: 34 },
-      { ...snapshot, schemaVersion: 36 },
+      { ...snapshot, schemaVersion: 35 },
       { ...snapshot, thread: { ...snapshot.thread, id: 'other-thread' } }
     ]) {
       request.mockResolvedValue(incompatible)
@@ -2510,7 +2512,7 @@ describe('task event projections', () => {
     }))
     const running = entries(true, 2)
     expect(running.indexOf('data-detail="execution"')).toBeLessThan(running.indexOf('data-detail="tasks"'))
-    expect(running.indexOf('data-detail="tasks"')).toBeLessThan(running.indexOf('data-detail="members"'))
+    expect(running.indexOf('data-detail="members"')).toBeLessThan(running.indexOf('data-detail="tasks"'))
     expect(running).toContain('aria-label="执行，2 位队员正在执行：队员 1、队员 2"')
     expect(running).toMatch(/data-detail="tasks" aria-expanded="true"/)
     expect(running).toContain('aria-controls="camp-details"')
@@ -3602,7 +3604,8 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 1,
       thread: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3665,7 +3668,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('给 洛可 发消息')
     expect(markup).toContain('集结队伍，写下这次冒险的目标…')
-    expect(markup).not.toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
+    expect(markup).not.toContain('和队伍继续前行：补充线索或调整方向…')
     expect(markup).not.toContain('默认由队长 @洛可 接收')
     expect(markup).toContain('class="empty-camp-welcome camp-home-welcome"')
     expect(markup).toContain('想先做些什么？')
@@ -3683,7 +3686,7 @@ describe('task event projections', () => {
     expect(markup).toContain('class="camp-home-runtime"')
     expect(readyMarkup).not.toContain('class="camp-home-runtime"')
     expect(markup).toContain('先了解项目')
-    expect(markup).toContain('整理成任务')
+    expect(markup).toContain('梳理步骤')
     expect(markup).toContain('检查工作区')
     expect(markup).not.toContain('读取项目结构并给出可靠的起步建议。')
     expect(mobileMarkup).toContain('class="empty-camp-welcome mobile-empty-camp-welcome"')
@@ -3837,7 +3840,8 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 1,
       thread: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3890,7 +3894,8 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 3,
       thread: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
@@ -4302,7 +4307,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).not.toContain('aria-label="回复这条消息"')
-    expect(markup).toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
+    expect(markup).toContain('和队伍继续前行：补充线索或调整方向…')
     expect(markup).not.toContain('集结队伍，写下这次冒险的目标…')
     expect(markup).toContain('title="复制"')
     expect(markup).not.toContain('>复制</button>')
@@ -4427,8 +4432,8 @@ describe('task event projections', () => {
     expect(inspectorTabList.indexOf('>执行</span>')).toBeGreaterThan(-1)
     expect(inspectorTabList.indexOf('>执行</span>'))
       .toBeLessThan(inspectorTabList.indexOf('>任务</span><small>'))
-    expect(inspectorTabList.indexOf('>任务</span><small>'))
-      .toBeLessThan(inspectorTabList.indexOf('>队员</span><small>'))
+    expect(inspectorTabList.indexOf('>队员</span><small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>任务</span><small>'))
     expect(inspectorMarkup).toMatch(/data-detail="execution"[^>]*aria-expanded="true"/)
     expect(inspectorMarkup).toContain('data-placement="inspector"')
     expect(inspectorMarkup).toContain('aria-label="切换执行台位置，当前浮层"')
@@ -4475,8 +4480,8 @@ describe('task event projections', () => {
     const ordinaryTabListEnd = ordinaryInspectorMarkup.indexOf('</div>', ordinaryTabListStart)
     const ordinaryTabList = ordinaryInspectorMarkup.slice(ordinaryTabListStart, ordinaryTabListEnd)
     expect(ordinaryTabList).not.toContain('data-detail="execution"')
-    expect(ordinaryTabList.indexOf('>任务</span><small>'))
-      .toBeLessThan(ordinaryTabList.indexOf('>队员</span><small>'))
+    expect(ordinaryTabList.indexOf('>队员</span><small>'))
+      .toBeLessThan(ordinaryTabList.indexOf('>任务</span><small>'))
     expect(ordinaryInspectorMarkup).toMatch(/data-detail="tasks" aria-expanded="true"/)
 
     const groupedEvidenceMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
@@ -4953,7 +4958,8 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 2,
       thread: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -5083,7 +5089,8 @@ describe('task event projections', () => {
       createdAt: '2026-08-20T00:00:00Z'
     }
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 1,
       thread: {
         id: 'camp-attachment-only', title: '附件消息', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -5229,7 +5236,8 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 3,
       thread: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -5389,7 +5397,8 @@ describe('task event projections', () => {
 
   it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: ThreadSnapshot = {
-      schemaVersion: 35,
+      schemaVersion: 36,
+      tasksEnabled: true,
       throughGlobalSequence: 1,
       thread: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -7928,7 +7937,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'deepseek-harness', 'zcode-app', 'antigravity-app', 'pi'])
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'grok-build', 'deepseek-harness', 'zcode-app', 'antigravity-app', 'pi'])
     expect(markup).toContain('member-runtime-picker')
     expect(markup).toContain('aria-label="智能体类型，暂不配置"')
     expect(markup).toContain('aria-haspopup="menu"')
@@ -8149,6 +8158,7 @@ describe('task event projections', () => {
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('TRAE CLI')
     expect(markup).toContain('DeepSeek Harness')
+    expect(markup).toContain('MiniMax Code')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
     expect(markup).not.toContain('Command Code')
@@ -8170,6 +8180,7 @@ describe('task event projections', () => {
     expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length)
     expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length - 2)
     expect(markup.match(/检查状态/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length - 2)
+    expect(markup).not.toContain('runtime-product-check" disabled="">正在检查…')
     expect(markup).toContain('Claude Code 登录指南')
     expect(markup).toContain('Antigravity 安装指南')
     expect(markup).toContain('aria-expanded="false"')
@@ -8404,6 +8415,7 @@ function runtimeAdmissionRows(
     'trae-cn-cli',
     'cursor-agent',
     'kimi-code-cli',
+    'minimax-code-cli',
     'grok-build',
     'deepseek-harness',
     'cline-cli',
@@ -8426,3 +8438,7 @@ function runtimeAdmissionRows(
     }
   })
 }
+
+const taskCapability = vi.hoisted(() => ({ enabled: true }))
+vi.mock('./TaskCapabilityProvider', () => ({ useTaskCapability: () => taskCapability }))
+afterEach(() => { taskCapability.enabled = true })

@@ -296,7 +296,7 @@ function MissionEdit({ mission, projects, agents, installations, catalog, onSave
       <Dialog.Overlay className="dialog-overlay new-camp-dialog-overlay"/>
       <Dialog.Content ref={setDialogContent} className={`compact-dialog mission-definition-dialog mission-edit-dialog${expanded ? ' is-expanded' : ''}`} aria-describedby="mission-edit-description"
         onOpenAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => {
-          if (busy || dialogContent?.querySelector('.composer-caret-menu')) event.preventDefault()
+          if (busy || dialogContent?.querySelector('.composer-caret-menu, .composer-web-link-actions')) event.preventDefault()
         }}>
         <header className="compact-header mission-editor-header">
           <div className="mission-editor-heading"><Dialog.Title><UiText zh={"编辑使命"} /></Dialog.Title><span>{`M-${String(mission.number).padStart(3, '0')}`}</span></div>

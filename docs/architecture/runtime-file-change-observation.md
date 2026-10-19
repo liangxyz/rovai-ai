@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-file-change-observation
 authority: command-and-agent-run-file-change-boundaries
 status: accepted
-last_updated: 2026-10-05
+last_updated: 2026-10-16
 ---
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v7](../contracts/runtime-file-change-observation-v7.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v8](../contracts/runtime-file-change-observation-v8.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -143,6 +143,15 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 - ToolCall 的唯一 location 命中当前 managed output root 时，path-only 与绑定的单 entry Diff 都 fail closed；
   其他 ToolCall 和普通 root 外路径不受影响。
 
+### MiniMax Code ACP
+
+MiniMax 的 `content.type=diff` 是带行号、省略号的预览，不能走 ACP 完整状态路径，replacement input 也不作
+完整状态回退。同一成功 write/edit 的 `rawOutput.details.patch` 经双侧路径、hunk 与预算校验后复用既有
+unified diff 投影；write 的 Index 前缀同样必须对齐。已省略、失败或不完整的 patch 保持 path-only。
+成功 write 的 Boolean `details.created` 与同调用输入路径共同证明 add/update；新建没有 patch 时只显示新增行。
+read/write/edit 的唯一原生路径可补齐相对 location；共享 normalizer 继续拥有 root 和 managed output 排除。
+这些映射不读取磁盘、不改变其他 Runtime、不新增 Renderer 分支，详细准入见 v8。
+
 ### Pi JSONL RPC
 
 - 同一 `toolCallId` 累计 start/update 的 `toolName + args.path`，只有成功 `tool_execution_end` 才发布 typed
@@ -178,7 +187,7 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
 
 ## 相关规范
 
-- [Runtime File Change Observation v7](../contracts/runtime-file-change-observation-v7.md)
+- [Runtime File Change Observation v8](../contracts/runtime-file-change-observation-v8.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)

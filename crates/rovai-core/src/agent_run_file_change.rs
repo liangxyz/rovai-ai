@@ -445,7 +445,7 @@ pub fn read_run_file_changes(
                 },
             )
             .optional()?
-            .context("AgentRun file changes do not exist in this Camp")?;
+            .context("AgentRun file changes do not exist in this Thread")?;
     let stored_schema_version = u32::try_from(stored_schema_version)
         .context("AgentRun file changes have an invalid stored schema version")?;
     ensure_supported_schema_version(stored_schema_version)?;

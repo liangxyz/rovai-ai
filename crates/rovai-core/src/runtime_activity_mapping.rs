@@ -21,7 +21,7 @@ pub struct RuntimeActivityMappingDescriptor {
     pub registry_entry: &'static str,
 }
 
-pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 18] = [
+pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 19] = [
     descriptor(
         AdapterKind::CodexCli,
         "codex-app-server",
@@ -49,6 +49,7 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 18] = [
     descriptor(AdapterKind::QwenCode, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::TraeCnCli, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::CursorAgent, "acp-v1", "run_level", "acp"),
+    descriptor(AdapterKind::MinimaxCodeCli, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::KimiCodeCli, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::GrokBuild, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::ClineCli, "acp-v1", "run_level", "cline"),

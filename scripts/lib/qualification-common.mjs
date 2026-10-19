@@ -238,13 +238,13 @@ export async function dispatchQualificationPrompt(request, {
   prompt,
   execution
 }) {
-  return request('camp.messages.send', {
+  return request('thread.messages.send', {
     commandId,
-    campId,
+    threadId: campId,
     content: composerDocumentForAddress({ mode: 'default' }, prompt),
     sourceAttachments: [],
     quotes: [],
-    replyToCampMessageId: null,
+    replyToThreadMessageId: null,
     execution
   })
 }

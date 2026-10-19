@@ -140,12 +140,12 @@ export function App(): React.JSX.Element {
   } else {
     workspace = (
       <div className="authoritative-workspace">
-        <ShortcutProvider api={window.rovai.shortcuts} platform={window.rovai.platform}><ThreadClientProvider client={desktopThreadClient}><CurrentUserProfileProvider api={window.rovai.currentUserProfile}>
+        <ThreadClientProvider client={desktopThreadClient}><ShortcutProvider api={window.rovai.shortcuts} platform={window.rovai.platform}><CurrentUserProfileProvider api={window.rovai.currentUserProfile}>
           <BusinessApp environment={desktopBusinessEnvironment}
             initialStartupSnapshot={startupSnapshot}
             startupStartedAtMs={startupStartedAt.current}
           />
-        </CurrentUserProfileProvider></ThreadClientProvider></ShortcutProvider>
+        </CurrentUserProfileProvider></ShortcutProvider></ThreadClientProvider>
         <CoreSubsystemNotice subsystems={presentationSupervisor?.coreSubsystems ?? []} />
       </div>
     )

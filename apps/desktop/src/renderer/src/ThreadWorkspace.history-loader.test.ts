@@ -11,7 +11,8 @@ const createdAt = '2026-09-04T00:00:00Z'
 
 function renderHistoryLoader(hasEarlier = true): string {
   const snapshot: ThreadSnapshot = {
-    schemaVersion: 35,
+    schemaVersion: 36,
+      tasksEnabled: true,
     throughGlobalSequence: 1,
     thread: {
       id: 'camp-history-loader',

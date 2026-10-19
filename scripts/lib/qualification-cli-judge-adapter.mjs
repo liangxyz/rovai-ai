@@ -96,7 +96,7 @@ export async function prepareCliJudge({ executable, model, directory }) {
   if (!original) throw new Error('Judge model must exist in the installed catalog')
   await writePrivateJsonExclusive(join(directory, 'provider-model-declaration.json'), original)
   const catalog = join(directory, 'tool-disabled-catalog.json')
-  await writePrivateJsonExclusive(catalog, { models: [{ ...original, apply_patch_tool_type: null, tool_mode: 'native', multi_agent_version: null, use_responses_lite: false, supports_search_tool: false, node_repl_disabled: true, model_messages: null, base_instructions: 'Evaluate only the supplied evidence using the specified rubric. Return JSON.' }] })
+  await writePrivateJsonExclusive(catalog, { models: [{ ...original, experimental_supported_tools: [], apply_patch_tool_type: null, tool_mode: 'native', multi_agent_version: null, use_responses_lite: false, supports_search_tool: false, node_repl_disabled: true, model_messages: null, base_instructions: 'Evaluate only the supplied evidence using the specified rubric. Return JSON.' }] })
   const configuration = { provider: 'openai-codex-cli', snapshotId: model, snapshotDigest: digestJson(original), configurationId: 'codex-cli-evidence-judge-v2', decodingParameters: { reasoningEffort: 'medium' }, retrySchedule: { maximumTransportAttempts: 2, backoffMilliseconds: [3000], retryValidOutput: false }, timeoutMilliseconds: 360_000,
     cli: { executable, executableDigest: await digestFile(executable), version: version.stdout.trim(), catalog, catalogDigest: await digestFile(catalog), settingsDigest: digestJson(CLI_SETTINGS), ambientInstructions: await ambientInstructions(), modelVersionPolicy: 'catalog_bound_alias', outputLimitBytes: 1024 * 1024 } }
   const requests = []

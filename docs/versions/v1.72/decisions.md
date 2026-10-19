@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-12
+last_updated: 2026-10-18
 ---
 
 # v1.72 版本决定
@@ -1056,3 +1056,59 @@ Core 统一提供 UI 与发送前判断；当前成员配置不能替代已有 H
 启动连接暂未就绪不等于不支持插话。已明确目标且版本支持时沿用 Delivery 绑定意图，初始输入接受后
 再构建／投递；失败、停止不自动创建新任务。选择有界读取冻结程序缺失版本，避免旧发现缓存误挡新版本，
 读取失败仍保留普通运行。没有改用 Hook，也不引入独立核对服务、提示词、消息副本或新存储结构。
+
+<a id="v1-72-d52"></a>
+## V1.72-D52：文件下载独立于预览并交给浏览器
+
+- 状态：accepted
+- 日期：2026-10-18
+- 确认：User 的文件传输方案及 seq3 实施授权；seq27 明确改为准入后直接传输，退出全过程撤销和旧预览版本约束
+- 当前权威：[Host Web v7](../../contracts/host-web-v7.md)、[统一 Rust Host](../../architecture/unified-rust-host.md#草稿与用户文件)
+
+增大原有整文件读取预算仍会让大成果无法交付，并把页面和服务器内存绑定到文件大小。
+选择已认证申请加短期下载专用能力，让浏览器管理保存与取消；上传、预览和下载各自控制资源。
+普通 Bearer 不进 URL，票据从原 Session 和精确来源派生；来源在申请时授权，GET 只验证票据、Session 和安全打开。
+
+此前的活动流撤销、事件缺口重验及最终块校验，把普通下载与 Core 活动、旧预览版本和多条取消路径耦合。
+按 User 的可用性优先选择取消这些运行机制：准入后直接发送当前文件，保留有界读取、背压、超时与资源释放。
+代价是已签发能力可在短期内用于仍存在的文件，业务删除不追溯撤回它；Session 撤销只挡新准入，不中断已准入流。
+下载不提供所见版本或原子快照，并发原地写入可能混合；预览读取和 legacy 来源自身的完整性约束不因此改变。
+
+拒绝继续保留周期授权、事件监听与严格尾块校验，也不提供普通/严格双模式。
+网络认证仍显式定义凭证路由，代理须排除敏感路径日志；不为下载引入持久资产、快照或新的文件保存规则。
+原生下载不提供页面可证的“保存完成”，页面只负责申请反馈，浏览器处理后续保存和失败。
+
+预览归属沿用已证明的编辑身份，重登只产生新 Session 的下载能力；不另造前端句柄恢复。
+完成票据在缓存压力下回收，分开表达缓存与并发错误；阻塞 I/O 持有许可，中断保留安全结构化原因。
+本轮不重构上传状态、界面或附件身份，原 commandId 和 Core 成功回执继续拥有恢复语义。
+
+
+<a id="v1-72-d50"></a>
+## V1.72-D50：MiniMax Code 复用 ACP 生命周期，系统提示只约束 Host
+
+- 状态：accepted
+- 日期：2026-10-16
+- 确认：User 接入讨论 seq4 指定 ACP 优先、简单 Host/resume 与不接 Fast；seq6 授权实施并要求完成后对比
+- 当前权威：[MiniMax Code ACP 边界](../../architecture/runtime-catalog-boundaries.md#minimax-code-acp-实施边界)、[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md)
+
+MiniMax 的 append 文件只在进程启动时读取，原生 Session 又可以跨进程精确恢复。选择沿用共享
+Fleet 和既有 Bootstrap 内容摘要：实际系统提示变化时替换 Host，同时保留原 Session；不建立
+另一套冻结机制，也不把内容摘要变成恢复门禁。相比每轮新建 Session，这保留原生历史；相比
+永不更新 Host，这避免身份与系统规则过期。
+
+原生 ACP Steer 返回同 Turn 的接收结果，图片仍通过授权路径交付；不虚构图片块参数。
+原生不支持 additionalDirectories，不发送该非标准扩展，沿用原生权限和 Core 附件授权。
+不把 highspeed 模型包装成 Fast。仅 macOS arm64 进入实验性 Preview，其他平台保持未准入；
+这是此次实现的开发验收范围，不把脚本模型证据或用户实施授权解释成真实模型 First-Class 资格。
+
+<a id="v1-72-d51"></a>
+
+## V1.72-D51：Task 以实例能力退出默认工作流，执行保持可用
+
+状态：accepted；确认：User 2026-10-17 消息 fd9bee73-2ea8-4798-9d3d-dbb9ca067963，R4。
+
+Task 与消息协作重复，直接删除会破坏存量责任和恢复。因此默认关闭业务能力，保留历史，只在调用时校验；不采用忙时拒绝切换或中止既有执行。Bootstrap、Send、Skill 统一一套教学，Task 只在局部发现与动态 section 受控，避免双套配置漂移。
+
+数字键位按真实入口顺序一次迁移，其他冲突键清空、非冲突偏好保留；迁移失败以内存新映射维持可用，再显式重试落盘。代价是四个旧自定义键位会被覆盖，这是 User 明确选择的升级行为。
+
+当前规范：[Task v6](../../contracts/durable-task-v6.md)、[Transport v42](../../contracts/builtin-tool-transport-v42.md)、[Manifest v40/v41](../../contracts/context-manifest-evidence-v40.md)、[Shortcuts v2](../../contracts/desktop-shortcuts-v2.md)。逐项输入对照与实施状态见 [R4](model-context-change-task-capability.md)。

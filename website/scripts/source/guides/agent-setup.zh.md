@@ -2,7 +2,7 @@
 
 各智能体的安装入口，以及账号、模型与工具配置的差异。Rovai 界面中的操作和字段说明见[智能体与模型配置](https://rovai.dev/zh/docs/agents.html)。
 
-本文以 **Rovai v0.4.7** 为基础；在 Rovai 中选择 Pi 思考强度需要 **v0.4.8 或更新版本**。安装和登录在运行 Rovai Desktop 或 Server 的主机上完成。
+本文以 **Rovai v0.4.7** 为基础；在 Rovai 中选择 Pi 思考强度需要 **v0.4.8 或更新版本**。MiniMax Code 的适用版本见[对应章节](#minimax-code)。安装和登录在运行 Rovai Desktop 或 Server 的主机上完成。
 
 在原生智能体中完成账号与模型配置后，到「设置 → 智能体」确认 Rovai 能找到它，再为队员选择智能体与模型。已有的登录和配置继续使用；通过浏览器访问时，使用的是服务主机上的安装。
 
@@ -13,6 +13,7 @@
 | [Codex CLI](https://github.com/openai/codex) | `codex` |
 | [Claude Code](https://code.claude.com/docs/en/setup) | `claude` |
 | [Pi Coding Agent](https://github.com/earendil-works/pi) | `pi` |
+| [MiniMax Code](https://agent.minimax.io/docs/cli/quick-start)（[v0.4.13 起](#minimax-code)） | `mcode` |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | `copilot` |
@@ -107,6 +108,51 @@ Rovai v0.4.7 补充读取的是**标准 Web Profile** 的模型配置；同名 P
 保存后在 Pi 中重新打开 `/model` 加载配置，也可用 `/thinking` 选择强度。回到 Rovai 的**队员 → 运行配置**，打开模型选择器完成刷新，选择具体模型和思考强度，再保存。选择“跟随模型默认值”时，Rovai 不额外指定强度。
 
 Pi 命令以 1.1.0 为例。[Pi 模型配置说明](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/models.md) · [GPT-6.1 Sol 档位说明](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+
+## MiniMax Code：配置文件与思考强度 {#minimax-code}
+
+本节针对独立的 **MiniMax Code（`@minimax-ai/code` / `mcode`）**，以 **0.6.12** 为例。官网下载的 **v0.4.13 已包含 MiniMax Code 接入**。原生配置文件的写法也可独立使用。
+
+### 为已有自定义模型补充档位
+
+先在 mcode 中完成 Provider 和模型配置。CLI 默认读取 `~/.minimax/config.yaml`；设置了 `MINIMAX_DATA_DIR` 时，使用该目录下的 `config.yaml`。配置应位于运行 Rovai Desktop 或 Server 的主机上，并与 Rovai 启动的 mcode 使用同一数据目录。[MiniMax CLI 配置说明](https://agent.minimax.io/docs/cli/configuration)
+
+对已经接通的 Sub2API 等自定义服务，找到 `custom_provider.<Provider 键>.models.<模型 ID>`，合并以下字段。将 `sub2api` 和 `your-model-id` 换成已有的键；这是**局部片段，不是完整配置文件**，保留原有地址、密钥和其他模型字段：
+
+```yaml
+custom_provider:
+  sub2api:
+    models:
+      your-model-id:
+        reasoning: true
+        thinking:
+          effortOptions: [low, medium, high, xhigh]
+          defaultEffort: medium
+```
+
+- `reasoning: true` 声明支持思考；它本身不会提供强度选项。
+- `thinking.effortOptions`：填写模型支持的思考强度，本例为 `low / medium / high / xhigh`。
+- `thinking.defaultEffort` 是原生配置支持的可选默认字段，示例设为 `medium`。它不是当前会话选项；不要写成 `thinking.effort`。需要固定队员强度时，在 Rovai 中显式选择并保存。
+
+官方 BYOK 指南说明了 `effortOptions`；`defaultEffort` 另见[官方配置类型](https://github.com/MiniMax-AI/minimax-code/blob/main/packages/config/src/config.ts)。此处两个字段已在 mcode 0.6.12 核对。使用 `openai-responses` 的 Sub2API 时，普通强度值由 mcode 传入请求的 `reasoning.effort`；配置列表不会替上游实现新档位，仍应验证实际请求。[MiniMax 自定义模型配置指南](https://agent.minimax.io/docs/code/account/byok-agent-setup)
+
+### 在 Rovai 中刷新并选择
+
+保存文件后，打开 **队员 → 运行配置**，选择 **MiniMax Code**，打开模型选择器刷新目录，再选中对应 Provider 下的**具体模型**。该模型返回强度选项后，选择需要的档位并保存运行配置。
+
+模型选“默认”时跟随 mcode 自身选择，不单独展示该模型的强度配置。选中具体模型后，思考强度选“跟随模型默认值”表示 Rovai 不额外指定档位。若自定义模型仍没有选项，先核对数据目录、Provider 与模型键，以及 `effortOptions` 是否写在目标模型下。
+
+### MiniMax 官方模型有哪些区别？
+
+官方模型使用原生提供的能力，不需要在 `custom_provider` 中复制一份。以本次核对的 mcode 0.6.12 目录为例：
+
+| 模型选择器中的条目 | 思考配置 |
+| --- | --- |
+| `M3` / `M3 · thinking` | 分别为不思考和思考版本，没有分级强度 |
+| `M2.7 · thinking` / `M2.7-highspeed · thinking` | 固定思考，没有分级强度 |
+| `M3.1-Flash-Preview · thinking` | 提供 `default / low / medium / high / xhigh / max` |
+
+“支持思考”不等于“支持强度选择”。官方模型目录会更新，以当前具体条目返回的选项为准；不要为没有分级能力的模型手工补出档位。[官方模型目录定义](https://github.com/MiniMax-AI/minimax-code/blob/main/packages/config/src/minimax-model-catalog.ts)
 
 ## 接入新智能体 {#adding-agents}
 

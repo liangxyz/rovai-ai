@@ -5,6 +5,8 @@ use super::*;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DynamicInputContext {
     pub(super) collaboration_state: Value,
+    #[serde(default = "legacy_tasks_enabled")]
+    pub(super) tasks_enabled: bool,
     pub(super) tasks: Vec<SelectedSelfActiveTask>,
     pub(super) omitted_tasks: usize,
     pub(super) run_facts: RenderedRunFacts,
@@ -12,6 +14,11 @@ pub(crate) struct DynamicInputContext {
     pub(super) workspace: PreparedWorkspaceFact,
     pub(super) additional_skills: PreparedAdditionalSkills,
     had_native_session: bool,
+}
+
+// Missing only in historical frozen claim DTOs; new preparations always set it.
+fn legacy_tasks_enabled() -> bool {
+    true
 }
 
 impl DynamicInputContext {
@@ -29,14 +36,21 @@ impl DynamicInputContext {
         .parent()
         .context("Core data directory is unavailable")?;
         let members = load_collaboration_projection_members(database, &snapshot.camp_id)?;
-        let (tasks, omitted_tasks) = load_self_active_tasks(
-            database,
-            snapshot,
-            current_public_camp_batch_context_delivery_profile()?.max_self_active_tasks,
-        )?;
+        let tasks_enabled = snapshot.invocation_kind != "single_chat"
+            && crate::task_capability::enabled(connection)?;
+        let (tasks, omitted_tasks) = if tasks_enabled {
+            load_self_active_tasks(
+                database,
+                snapshot,
+                current_public_camp_batch_context_delivery_profile()?.max_self_active_tasks,
+            )?
+        } else {
+            (Vec::new(), 0)
+        };
         let (facts, mission_details_version) = build_run_facts(database, snapshot, false, 0)?;
         Ok(Self {
             collaboration_state: build_collaboration_state(&members, &snapshot.agent_id),
+            tasks_enabled,
             tasks,
             omitted_tasks,
             run_facts: render_run_facts(&facts)?,

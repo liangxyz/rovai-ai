@@ -70,6 +70,7 @@ pub struct Session {
     pub expires_at: watch::Sender<u64>,
     pub revoked: watch::Sender<bool>,
     pub streams: Arc<Semaphore>,
+    pub downloads: Arc<Semaphore>,
     last_used_at: AtomicU64,
 }
 impl Session {
@@ -79,6 +80,7 @@ impl Session {
             expires_at: watch::channel(expires_at).0,
             revoked: watch::channel(false).0,
             streams: Arc::new(Semaphore::new(2)),
+            downloads: Arc::new(Semaphore::new(2)),
             last_used_at: AtomicU64::new(last_used_at),
         })
     }

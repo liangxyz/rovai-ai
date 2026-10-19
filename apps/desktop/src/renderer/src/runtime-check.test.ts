@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { openRuntimeModelCatalog, requestProductRuntimeCheck } from './runtime-check'
+import { createRuntimeRefresh, openRuntimeModelCatalog, requestProductRuntimeCheck } from './runtime-check'
 
 describe('explicit Runtime check targeting', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -43,7 +43,7 @@ describe('explicit Runtime check targeting', () => {
     })
   })
 
-  it('waits for the backend-owned fresh check and preserves its failure outcome without a separate rescan', async () => {
+  it('waits for the backend-owned check and preserves its failure outcome without a separate rescan', async () => {
     let finishCheck!: (result: unknown) => void
     const completion = new Promise(resolve => { finishCheck = resolve })
     const request = vi.fn().mockReturnValueOnce(completion)
@@ -61,5 +61,98 @@ describe('explicit Runtime check targeting', () => {
     vi.stubGlobal('window', { rovai: { request } })
     await expect(requestProductRuntimeCheck('codex-cli')).rejects.toThrow('discovery failed')
     expect(request).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Runtime snapshot refresh', () => {
+  it('refreshes a shared installation list started before check completion before resolving the Runtime refresh', async () => {
+    const releases: Array<() => void> = []
+    let source = 'old installation'
+    let displayedList: string[] = []
+    let displayedStatus = ''
+    const request = vi.fn(async (method: string) => {
+      if (method === 'runtime.product.check') return { ready: true, outcome: 'ready' }
+      if (method === 'runtime.status.get') return source
+      if (method === 'runtime.installations.list') {
+        const snapshot = [source]
+        await new Promise<void>(resolve => releases.push(resolve))
+        return snapshot
+      }
+      throw new Error(`Unexpected non-Runtime read: ${method}`)
+    })
+    // The shared list and enclosing Runtime read use the same production refresh
+    // function as BusinessApp; an earlier Overview/member reader shares the list.
+    const loadInstallations = createRuntimeRefresh(async () => {
+      displayedList = await request('runtime.installations.list') as string[]
+      return displayedList
+    })
+    const loadRuntime = createRuntimeRefresh(async () => {
+      const results = await Promise.allSettled([request('runtime.status.get'), loadInstallations()])
+      if (results[0].status === 'fulfilled') displayedStatus = results[0].value as string
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+    })
+    const earlierList = loadInstallations()
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
+    source = 'new installation'
+    await request('runtime.product.check')
+    const completion = loadRuntime()
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('runtime.status.get'))
+    releases.shift()!()
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
+    expect(request.mock.calls.filter(([method]) => method === 'runtime.installations.list')).toHaveLength(2)
+    releases.shift()!()
+    await completion
+    expect(displayedStatus).toBe('new installation')
+    expect(displayedList).toEqual(['new installation'])
+    await expect(earlierList).resolves.toEqual(displayedList)
+  })
+
+  it('coalesces requests and reads the final state after events during both the first and trailing reads', async () => {
+    const pending: Array<() => void> = []
+    let source = 0
+    let displayed = -1
+    const read = vi.fn(() => {
+      const snapshot = source
+      return new Promise<void>(resolve => pending.push(() => { displayed = snapshot; resolve() }))
+    })
+    const refresh = createRuntimeRefresh(read)
+    const completion = refresh()
+    await Promise.resolve()
+    expect(read).toHaveBeenCalledTimes(1)
+    source = 1
+    expect(refresh()).toBe(completion)
+    expect(refresh()).toBe(completion)
+    pending.shift()!()
+    await Promise.resolve()
+    expect(read).toHaveBeenCalledTimes(2)
+    source = 2
+    expect(refresh()).toBe(completion)
+    pending.shift()!()
+    await Promise.resolve()
+    expect(read).toHaveBeenCalledTimes(3)
+    pending.shift()!()
+    await completion
+    expect(displayed).toBe(2)
+    expect(read).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps invalidations after a failed read and permits retry after a terminal error', async () => {
+    let reject!: (error: Error) => void
+    const read = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_, fail) => { reject = fail }))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(undefined)
+    const refresh = createRuntimeRefresh(read)
+    const completion = refresh()
+    await Promise.resolve()
+    refresh()
+    reject(new Error('obsolete read'))
+    await expect(completion).resolves.toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(2)
+    await expect(refresh()).rejects.toThrow('offline')
+    await expect(refresh()).resolves.toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(4)
   })
 })

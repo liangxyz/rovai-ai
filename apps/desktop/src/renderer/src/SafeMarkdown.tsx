@@ -4,7 +4,6 @@ import remarkGfm from 'remark-gfm'
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkCjkFriendlyStrikethrough from 'remark-cjk-friendly-gfm-strikethrough/parseOnly'
 import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivation } from './FileReferenceLink'
-import { ResourceReferenceIcon } from './FilePreviewTabIcon'
 import { WebLink } from './WebLink'
 import { isWebUrl } from '../../web-url'
 import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
@@ -320,7 +319,6 @@ export function SafeMarkdown({
             }
             return (
               <WebLink className="markdown-web-reference" target={href}>
-                <ResourceReferenceIcon kind="web" className="resource-reference-icon web-reference-icon" />
                 <span className="resource-reference-label">{linkChildren}</span>
               </WebLink>
             )

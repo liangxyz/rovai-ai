@@ -66,3 +66,4 @@ test('Mission editor popovers accept pointer clicks and wheel scrolling', { time
 
 test('Mission member references survive save failure and invite only on commit', { timeout: 100_000 }, t => runFixture(t, 1, 'mentions'))
 test('Mission mention candidates remain visible and accept native pointer selection', { timeout: 100_000 }, t => runFixture(t, 1, 'mention-pointer'))
+test('Mission web links preserve descriptions and stay interactive inside create and edit dialogs', { timeout: 100_000 }, t => runFixture(t, 1, 'web-links'))

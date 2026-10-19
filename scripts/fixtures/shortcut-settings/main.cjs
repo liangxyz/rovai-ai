@@ -33,6 +33,7 @@ app.whenReady().then(async () => {
     if (failSave) throw new Error('测试保存失败')
     const snapshot = await store.save(value); window.webContents.send('shortcuts:changed', snapshot); return snapshot
   })
+  ipcMain.handle('shortcuts:tasks', (event, value) => inputs.get(event.sender.id)?.setTasksEnabled(value))
   ipcMain.handle('shortcuts:record', (event, value) => inputs.get(event.sender.id)?.setRecording(value))
   try {
     for (const platform of ['darwin', 'win32']) {
@@ -129,13 +130,32 @@ app.whenReady().then(async () => {
       await key('Escape'); assert(!input.isRecording())
       await click('[data-edit="latest"]'); await run('window.dispatchEvent(new Event("blur"))'); await settle(); assert(!input.isRecording()); assert(!await run('!!document.querySelector(".shortcut-inline-recorder")'))
       await run(`window.shortcutTest.save(${JSON.stringify(defaults)})`); await settle()
+      // A capability change cancels only a Task recorder, retains other recording and permits hidden-key transfer.
+      await click('[data-edit="tasks"]')
+      await run('window.shortcutTest.tasks(false)'); await settle()
+      assert(!input.isRecording()); assert(!await run('!!document.querySelector("[data-command=tasks]")'))
+      assert.equal(await run(`(() => { const event=new KeyboardEvent('keydown',{ key:'4', code:'Digit4', bubbles:true,cancelable:true,${platform === 'darwin' ? 'metaKey' : 'ctrlKey'}:true }); document.body.dispatchEvent(event); return event.defaultPrevented })()`), false)
+      if (platform === 'win32') {
+        const before=store.get().preferences; const next=structuredClone(before); next.mouse.side1='tasks'
+        await run(`window.shortcutTest.save(${JSON.stringify(next)})`); await settle()
+        let consumed=false; window.emit('app-command', { preventDefault() { consumed=true } }, 'browser-backward'); await settle()
+        assert.equal(consumed,false)
+      }
+      await click('[data-edit="latest"]'); await key('4', [primary])
+      assert.doesNotMatch(await text(), /已用于/)
+      await click('.shortcut-inline-actions .primary-button')
+      assert.equal(store.get().preferences.bindings.tasks, null)
+      assert.equal(store.get().preferences.bindings.latest, 'Mod+4')
+      await run('window.shortcutTest.tasks(true)'); await settle()
+      assert.equal(store.get().preferences.bindings.tasks, null)
+      await run(`window.shortcutTest.save(${JSON.stringify(defaults)})`); await settle()
       await run('window.shortcutTest.theme("night")'); window.setContentSize(980, 820); await settle(); await capture('night-compact')
       assert(await run('[...document.querySelectorAll(".shortcut-field")].every(e => e.scrollWidth <= e.clientWidth + 1)'))
       window.setContentSize(1440, 1000); await run('window.shortcutTest.theme("day");window.shortcutTest.screen("workspace")'); await settle()
-      await key('2', [primary]); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
-      await key('3', [primary]); assert(await run('!document.querySelector(".camp-members-panel").hidden'))
-      await key('4', [primary]); assert(await run('!document.querySelector(".single-chat-popover").hidden'))
-      await key('4', [primary]); assert(await run('document.querySelector(".single-chat-popover").hidden'))
+      await key('4', [primary]); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
+      await key('2', [primary]); assert(await run('!document.querySelector(".camp-members-panel").hidden'))
+      await key('3', [primary]); assert(await run('!document.querySelector(".single-chat-popover").hidden'))
+      await key('3', [primary]); assert(await run('document.querySelector(".single-chat-popover").hidden'))
       await key('1', [primary]); assert(await run('!document.querySelector(".execution-sidecar-panel").hidden'))
       await run('window.shortcutTest.placement("bottom")'); await settle()
       // Measure the real drawer: its display:contents host has no box even while open.
@@ -170,9 +190,9 @@ app.whenReady().then(async () => {
       assert.match(collapsedFocus, /execution-bottom-collapse-button/, 'Collapse returns internal focus to the external entry')
       await key('1', [primary])
       assert.equal((await measureDrawer()).visible, false, 'The third consecutive shortcut collapses again')
-      await key('2', [primary])
+      await key('4', [primary])
       assert(await run('!document.querySelector(".task-panel-scroll").hidden'), 'Other shortcuts still work after collapse')
-      await key('2', [primary])
+      await key('4', [primary])
       await key('1', [primary])
       assert((await measureDrawer()).visible, 'The drawer can reopen again')
       assert(await run('window.shortcutTest.drawerBeforeCollapse === document.querySelector(".execution-drawer-host-bottom .execution-drawer")'), 'Reopening preserves the mounted drawer')
@@ -212,7 +232,7 @@ app.whenReady().then(async () => {
       const targets = () => run('window.shortcutProbeTargets')
       await nativeClick('#shortcut-target-icon')
       await run('document.activeElement.blur()')
-      await key('2', [primary])
+      await key('4', [primary])
       assert.deepEqual(await targets(), ['shortcut-target-icon'], 'Visible SVG reading targets remain valid')
       for (const [name, invalidate, restore] of [
         ['hidden', 'surface.hidden = true', 'surface.hidden = false'],
@@ -224,10 +244,10 @@ app.whenReady().then(async () => {
       ]) {
         await nativeClick('#shortcut-target-probe')
         await run('document.activeElement.blur(); window.shortcutProbeTargets = []')
-        await key('2', [primary])
+        await key('4', [primary])
         assert.deepEqual(await targets(), ['shortcut-target-probe'], 'A visible cached reading target is retained')
         await run(`(() => { const surface = window.shortcutProbeSurface; ${invalidate} })()`)
-        await key('2', [primary])
+        await key('4', [primary])
         assert.deepEqual(await targets(), ['shortcut-target-probe', 'BODY'], `${name}: stale target falls back to the real event target`)
         if (platform === 'win32') {
           window.emit('app-command', { preventDefault() {} }, 'browser-backward'); await settle()
@@ -236,23 +256,23 @@ app.whenReady().then(async () => {
         }
         await run(`(() => { const surface = window.shortcutProbeSurface; ${restore} })()`)
         const count = (await targets()).length
-        await key('2', [primary])
+        await key('4', [primary])
         assert.equal((await targets()).length, count + 1)
         assert.equal((await targets()).at(-1), 'BODY', `${name}: the invalidated cache stays cleared when the old surface returns`)
       }
       // The actual event target still obeys terminal and inert guards.
       await run('window.shortcutProbeSurface.className = "xterm"; document.querySelector("#shortcut-target-probe").focus(); window.shortcutProbeTargets = []')
-      await key('2', [primary]); assert.deepEqual(await targets(), [])
+      await key('4', [primary]); assert.deepEqual(await targets(), [])
       await run(`window.shortcutProbeSurface.className = ''; window.shortcutProbeSurface.inert = true;
         document.querySelector('#shortcut-target-probe').dispatchEvent(new KeyboardEvent('keydown', {
-          key: '2', code: 'Digit2', bubbles: true, cancelable: true, ${platform === 'darwin' ? 'metaKey' : 'ctrlKey'}: true
+          key: '4', code: 'Digit4', bubbles: true, cancelable: true, ${platform === 'darwin' ? 'metaKey' : 'ctrlKey'}: true
         }))`)
       await settle(); assert.deepEqual(await targets(), [], 'An actual inert event target remains blocked')
       await run('window.stopShortcutProbe(); window.shortcutProbeSurface.remove()')
       console.log(`Reading target boundaries (${platform}): visible cache retained; hidden, inert, display, visibility, opacity and detached targets cleared; terminal/inert guards retained`)
       // A modal blocks application shortcuts, including the native side-button path.
       await run('const blocker=document.createElement("div");blocker.className="app-dialog";blocker.id="shortcut-test-modal";document.body.appendChild(blocker)')
-      await key('3', [primary]); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
+      await key('2', [primary]); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
       await run('document.querySelector("#shortcut-test-modal").remove()')
       await run(`window.shortcutTest.save(${JSON.stringify(defaults)})`); await settle()
       await key('L', [primary]); assert(await run('!!document.activeElement.closest(".structured-mention-editor")'))
@@ -274,7 +294,7 @@ app.whenReady().then(async () => {
       const changed = structuredClone(defaults); changed.bindings.tasks = 'Alt+T'
       await run(`window.shortcutTest.save(${JSON.stringify(changed)})`); await settle()
       await run('document.activeElement.blur()'); await key('T', ['alt']); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
-      await key('2', [primary]); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
+      await key('4', [primary]); assert(await run('!document.querySelector(".task-panel-scroll").hidden'))
       await run('window.shortcutTest.screen("composer")'); await settle()
       const sendPreferences = structuredClone(defaults); sendPreferences.sendMode = 'primary-enter'
       await run(`window.shortcutTest.save(${JSON.stringify(sendPreferences)});window.shortcutTest.composer('原消息')`); await settle()
@@ -285,6 +305,7 @@ app.whenReady().then(async () => {
       const persisted = JSON.parse(readFileSync(path, 'utf8')); assert.equal(persisted.sendMode, 'primary-enter')
       await run('window.shortcutTest.screen("settings")'); await settle()
       await click('.shortcut-page-footer button'); await click('.shortcut-reset-dialog .primary-button'); assert.deepEqual(store.get().preferences, defaults)
+      await require('./task-drafts.cjs')({ run, settle, click, capture })
       await run('window.shortcutTest.language("en")'); await settle(); await run('new Promise(resolve => setTimeout(resolve, 2600))'); await capture('english')
       const multiple = structuredClone(defaults); multiple.bindings.latest = 'Mod+Alt+Shift+J'; multiple.mouse = {side1:'latest',side2:'latest'}
       await run(`window.shortcutTest.save(${JSON.stringify(multiple)})`); window.setContentSize(960, 820); await settle()

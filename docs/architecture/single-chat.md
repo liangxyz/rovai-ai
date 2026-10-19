@@ -2,13 +2,13 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-10-16
+last_updated: 2026-10-18
 ---
 
 # Single Chat Architecture
 
 Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。字段级合同见
-[Single Chat v8](../contracts/single-chat-v8.md)，当前选择理由见
+[Single Chat v9](../contracts/single-chat-v9.md)，当前选择理由见
 [V1.50-D01](../versions/v1.50/decisions.md#v1-50-d01)至
 [V1.50-D04](../versions/v1.50/decisions.md#v1-50-d04)及
 [V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)。
@@ -102,6 +102,11 @@ Renderer 通过公共 `AttachmentCard`、Preview、Open、Reveal 与 FilePreview
 
 ## Context 分支
 
+新单聊的 `RUN_FACTS` 仅提供附件输出根及按条件出现的未结算外部效果，不重复稳定模式与权限说明。
+专用 Charter/Guidance 继续指导模型；工具 policy 与私有终态路由从 AgentRun 冻结记录读取。
+当前版本为 [Manifest 42 / Facts 13](../contracts/context-manifest-evidence-v42.md)，Profile 16 保持，
+旧冻结输入原字节恢复，不为字段删除轮换 Native Session。
+
 普通 `camp_member` Conversation 与 Single Chat 使用独立 Native Binding 和 accepted public watermark。Context builder
 在同一 Manifest/Delivery 管线内根据 invocation 分支：Single Chat Bootstrap 只渲染 Charter 与 Member Identity，不调用
 Memory Entrypoint；Dynamic Context 选择专用 Charter/Guidance，排除 Self Active Tasks 与 A2A Guidance，并允许目标 Agent
@@ -120,7 +125,7 @@ fail closed。Charter revision 9 引入该入口；revision 10 只轮换共享 B
 Charter revision 22 按 [R2](../versions/v1.72/model-context-change-charter-memory-concision.md)
 精简 Single Chat 教学，保留当前请求、引用定位、显式修改条件、封闭白名单与读取范围。
 共享 Binding compatibility 保持 16，已有单聊继续使用冻结 Bootstrap。
-当前 revision 23 仅扩展公共会话的渠道文件提示，Single Chat 文案及排除规则保持。
+revision 23 扩展公共会话渠道文件提示，当前 revision 24 删除公共 Task 教学；Single Chat 文案及排除规则保持。
 完整 `cli-operations` Skill 仍从 Single Chat exposure 排除。
 
 ## 输出与迟到事件

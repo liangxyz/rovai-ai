@@ -1,10 +1,11 @@
+import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import { useState, type KeyboardEvent } from 'react'
 import { runtimeInstallGuide } from './runtime-install-guide'
 import type {
   AdapterInstallation,
   AdapterKind,
   AppearanceSnapshot,
-  HealthStatus,
+  RuntimeStatus,
   HostPlatformKey,
   InterfaceLanguage,
   OnboardingRuntimeSelection,
@@ -72,6 +73,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'trae-cn-cli': traeLogo,
   'cursor-agent': cursorLogo,
   'kimi-code-cli': kimiLogo,
+  'minimax-code-cli': minimaxLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
   'cline-cli': clineLogo,
@@ -93,6 +95,7 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'trae-cn-cli': 'TRAE CLI',
   'cursor-agent': 'Cursor Agent',
   'kimi-code-cli': 'Kimi Code',
+    'minimax-code-cli': 'MiniMax Code',
   'grok-build': 'Grok Build',
   'deepseek-harness': 'DeepSeek Harness',
   'cline-cli': 'Cline',
@@ -145,7 +148,7 @@ export function OnboardingFlow({
 }: {
   snapshot: InProgressOnboarding
   appearance: AppearanceSnapshot
-  health: HealthStatus | null
+  health: RuntimeStatus | null
   installations: AdapterInstallation[]
   runtimePhase: OnboardingRuntimePhase
   busy: boolean
@@ -375,7 +378,7 @@ function RuntimeStep({
 }: {
   member: BuiltinMemberPreset
   selection: OnboardingRuntimeSelection | null
-  health: HealthStatus | null
+  health: RuntimeStatus | null
   installations: AdapterInstallation[]
   phase: OnboardingRuntimePhase
   provisioning: boolean
@@ -750,7 +753,7 @@ export function onboardingRuntimeCanContinue(
 
 export function onboardingHasUsableRuntime(
   phase: OnboardingRuntimePhase,
-  health: HealthStatus | null,
+  health: RuntimeStatus | null,
   installations: AdapterInstallation[]
 ): boolean {
   if (phase !== 'ready' || !health) return false

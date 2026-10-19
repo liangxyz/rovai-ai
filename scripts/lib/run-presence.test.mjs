@@ -7,6 +7,7 @@ import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { verifyRunSources } from './run-presence-source-cases.mjs'
 
 test('production conversation presence matches the divider design and durable retry recovery', {timeout:180_000}, async t => {
 const chrome = process.env.ROVAI_TEST_CHROME ?? process.env.ROVAI_REVIEW_CHROME ?? (process.platform === 'darwin'
@@ -56,6 +57,8 @@ try {
     }
     console.log(`PASS ${name}: ${total} stages`)
   }
+
+  await verifyRunSources(b, out, report)
 
   // Run identity uses the same profile card and frozen model disclosure as messages.
   await scenario('stream',1)

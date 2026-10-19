@@ -13,6 +13,7 @@ export function ComposerWebLinksPlugin(): React.JSX.Element {
   const activeRef = useRef(active)
   activeRef.current = active
   const [error, setError] = useState<string | null>(null)
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null)
   const indexRef = useRef<ReturnType<typeof registerComposerWebLinks> | null>(null)
   const anchor = useRef({ getBoundingClientRect: () => activeRef.current?.range.getBoundingClientRect() ?? new DOMRect() })
 
@@ -24,6 +25,9 @@ export function ComposerWebLinksPlugin(): React.JSX.Element {
     const unregister = editor.registerRootListener(root => {
       removeRootListeners()
       close()
+      // Keep link actions inside the dialog's focus and pointer boundary, outside
+      // the writing plane that clips the description's scrollable content.
+      setPortalHost(root?.closest<HTMLElement>('[role="dialog"]') ?? null)
       if (!root) return
       let down: { x: number; y: number } | null = null
       let dragged = false
@@ -104,7 +108,7 @@ export function ComposerWebLinksPlugin(): React.JSX.Element {
     if (!copied) setError(t(WEB_LINK_COPY_FAILED))
   }
   return <>
-    <WebLinkActions target={active?.target ?? null} anchor={anchor} onClose={() => setActive(null)}
+    <WebLinkActions target={active?.target ?? null} anchor={anchor} portalContainer={portalHost} onClose={() => setActive(null)}
       onOpen={() => { const link = currentLink(); if (link) openWebLink(link.target, setError); else setActive(null) }}
       onCopy={() => { void copy() }} />
     <WebLinkFeedback message={error} onClose={() => setError(null)} />

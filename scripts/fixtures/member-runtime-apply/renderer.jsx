@@ -24,6 +24,8 @@ const client = {
   platform: 'darwin', onEvent: () => () => {}, channels: null,
   memberAvatars: { read: async () => null, selectSource: async () => null },
   request: async (method, payload) => {
+    if (method === 'member.runtimeEnvironment.get') return { revision: 0, environment: {} }
+    if (method === 'preferences.tasks.get') return { enabled: false }
     if (method === 'members.list') {
       if (failRead) throw new Error('Fixture read failure')
       return clone(members)

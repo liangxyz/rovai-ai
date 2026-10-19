@@ -4,6 +4,17 @@
 .conversation-run-presence + .conversation-run-presence { margin-top: 20px; }
 .conversation-run-presence > .message-body { grid-column: 2; width: 100%; padding-top: 0; }
 .conversation-run-presence .bubble-meta { margin-bottom: 1px; }
+.run-source-reference { display: flex; align-items: center; width: 100%; max-width: 690px; min-width: 0; min-height: 24px; gap: 6px; }
+.run-source-reference > .reply-parent-quote { flex: 1 1 0; width: 0; min-width: 0; min-height: 24px; margin: 0; border-radius: 4px; }
+.run-source-reference > button:hover { background: var(--surface-hover); }
+.run-source-reference .execution-batch-count { min-width: 34px; height: 24px; }
+.run-source-popover .execution-input-list time { flex: none; color: var(--faint); font-size: 10px; }
+.run-source-popover .execution-input-list button:disabled { cursor: default; color: var(--faint); }
+.run-source-located .message-surface { outline: 2px solid var(--conversation-focus); outline-offset: 3px; border-radius: 12px; }
+.run-source-return-layer { position: absolute; z-index: 18; right: 0; bottom: 10px; left: 0; display: flex; justify-content: center; pointer-events: none; }
+.run-source-return { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); cursor: pointer; pointer-events: auto; font-size: 11px; }
+.run-source-return svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.run-source-return:focus-visible { outline: 2px solid var(--conversation-focus); outline-offset: 2px; }
 .run-presence-line { display: flex; align-items: center; box-sizing: border-box; gap: 10px; width: 100%; max-width: 690px; min-width: 0; height: 36px; }
 .run-presence-open { display: flex; flex: 1 1 0; align-items: center; gap: 8px; height: 34px; padding: 2px 0; min-width: 0; border: 0; border-radius: 4px; color: var(--ink); background: transparent; cursor: pointer; text-align: left; font: 400 12.5px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .run-presence-open:hover { background: var(--surface-hover); }
@@ -45,6 +56,7 @@
 .conversation-run-presence button:focus-visible { outline: 2px solid var(--conversation-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .run-presence-line { height: 48px; } .run-presence-open { height: 46px; } .run-presence-stop { width: 44px; flex-basis: 44px; } .run-presence-stop, .run-presence-retry { min-width: 44px; height: 44px; } }
 @media (pointer: coarse) { :root .run-presence-stop-confirmation :is(.quiet-button, .danger-button) { min-height: 44px; height: 44px; } }
+@media (pointer: coarse) { .run-source-reference { gap: 8px; } .run-source-reference > button.reply-parent-quote, .run-source-reference .execution-batch-count, .run-source-return, .run-source-popover .execution-input-list button { min-width: 44px; min-height: 44px; } }
 @media (forced-colors: active) { .run-presence-guide { background: CanvasText; } }
 @media (forced-colors: active) { .run-presence-stop-confirmation { background: Canvas; color: CanvasText; border-color: CanvasText; } .run-presence-stop-arrow { fill: Canvas; stroke: CanvasText; } .run-presence-stop-busy { color: CanvasText; } }
 @media (prefers-reduced-motion: reduce), (forced-colors: active) { .run-presence-stop-busy svg { animation: none; } }

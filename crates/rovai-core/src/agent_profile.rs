@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(unix)]
+#[cfg(all(test, unix, feature = "slow-tests"))]
 use std::os::unix::fs::PermissionsExt;
 
 use anyhow::{Context, Result};
@@ -49,6 +49,7 @@ pub enum AdapterKind {
     TraeCnCli,
     CursorAgent,
     KimiCodeCli,
+    MinimaxCodeCli,
     GrokBuild,
     DeepseekHarness,
     ZcodeApp,
@@ -99,7 +100,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
@@ -115,6 +116,7 @@ impl AdapterKind {
         Self::TraeCnCli,
         Self::CursorAgent,
         Self::KimiCodeCli,
+        Self::MinimaxCodeCli,
         Self::GrokBuild,
         Self::DeepseekHarness,
         Self::ZcodeApp,
@@ -136,6 +138,7 @@ impl AdapterKind {
             Self::TraeCnCli => "trae-cn-cli",
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi-code-cli",
+            Self::MinimaxCodeCli => "minimax-code-cli",
             Self::GrokBuild => "grok-build",
             Self::DeepseekHarness => "deepseek-harness",
             Self::ZcodeApp => "zcode-app",
@@ -159,6 +162,7 @@ impl AdapterKind {
             Self::TraeCnCli => "traecli",
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi",
+            Self::MinimaxCodeCli => "mcode",
             Self::GrokBuild => "grok",
             Self::DeepseekHarness => "dsh",
             Self::ZcodeApp => "ZCode",
@@ -176,6 +180,7 @@ impl AdapterKind {
             Self::CursorAgent => &["cursor-agent", "agent"],
             Self::Pi => &["pi"],
             Self::KimiCodeCli => &["kimi"],
+            Self::MinimaxCodeCli => &["mcode"],
             Self::GrokBuild => &["grok"],
             Self::DeepseekHarness => &["dsh"],
             Self::ZcodeApp => &["ZCode"],
@@ -210,6 +215,7 @@ impl AdapterKind {
             Self::TraeCnCli => "TRAE CLI",
             Self::CursorAgent => "Cursor Agent",
             Self::KimiCodeCli => "Kimi Code",
+            Self::MinimaxCodeCli => "MiniMax Code",
             Self::GrokBuild => "Grok Build",
             Self::DeepseekHarness => "DeepSeek Harness",
             Self::ZcodeApp => "ZCode",
@@ -231,6 +237,7 @@ impl AdapterKind {
                 | Self::TraeCnCli
                 | Self::CursorAgent
                 | Self::KimiCodeCli
+                | Self::MinimaxCodeCli
                 | Self::GrokBuild
                 | Self::DeepseekHarness
                 | Self::ZcodeApp
@@ -253,6 +260,7 @@ impl AdapterKind {
             Self::TraeCnCli => "ROVAI_TRAE_CN_BIN",
             Self::CursorAgent => "ROVAI_CURSOR_BIN",
             Self::KimiCodeCli => "ROVAI_KIMI_BIN",
+            Self::MinimaxCodeCli => "ROVAI_MINIMAX_CODE_BIN",
             Self::GrokBuild => "ROVAI_GROK_BIN",
             Self::DeepseekHarness => "ROVAI_DEEPSEEK_HARNESS_BIN",
             Self::ZcodeApp => "ROVAI_ZCODE_BIN",
@@ -281,6 +289,7 @@ impl AdapterKind {
             | Self::TraeCnCli
             | Self::CursorAgent
             | Self::KimiCodeCli
+            | Self::MinimaxCodeCli
             | Self::GrokBuild
             | Self::DeepseekHarness
             | Self::ZcodeApp
@@ -306,6 +315,7 @@ impl AdapterKind {
             | Self::QwenCode
             | Self::TraeCnCli
             | Self::KimiCodeCli
+            | Self::MinimaxCodeCli
             | Self::GrokBuild
             | Self::DeepseekHarness
             | Self::ZcodeApp
@@ -334,6 +344,7 @@ impl FromStr for AdapterKind {
             "trae-cn-cli" => Ok(Self::TraeCnCli),
             "cursor-agent" => Ok(Self::CursorAgent),
             "kimi-code-cli" => Ok(Self::KimiCodeCli),
+            "minimax-code-cli" => Ok(Self::MinimaxCodeCli),
             "grok-build" => Ok(Self::GrokBuild),
             "deepseek-harness" => Ok(Self::DeepseekHarness),
             "zcode-app" => Ok(Self::ZcodeApp),
@@ -968,7 +979,8 @@ pub struct MemberRemovalPreview {
         alias = "currentCampMembershipCount"
     )]
     pub current_camp_membership_count: i64,
-    pub open_assigned_task_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_assigned_task_count: Option<i64>,
     #[serde(rename = "defaultLeadThreadCount", alias = "defaultLeadCampCount")]
     pub default_lead_camp_count: i64,
     #[serde(rename = "soleMemberThreadCount", alias = "soleMemberCampCount")]
@@ -1055,6 +1067,8 @@ pub struct RuntimeEntrypointLocatorIdentity {
 
 #[derive(Debug, Clone)]
 pub struct VerifiedManagedInstallation {
+    /// Captured with the snapshot fingerprint before acquiring the database lock.
+    pub executable_file_identity: Option<ExecutableFileIdentity>,
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
     pub command_name: String,
@@ -1085,6 +1099,69 @@ pub struct VerifiedDiscoveredRuntimeEntry {
 impl VerifiedDiscoveredRuntimeEntry {
     pub fn executable_file_identity(&self) -> &ExecutableFileIdentity {
         &self.identity
+    }
+
+    pub fn entry(&self) -> &DiscoveredRuntimeEntry {
+        &self.entry
+    }
+
+    pub fn is_current(&self) -> bool {
+        crate::agent_runtime_adapter::observe_executable_file_identity(Path::new(
+            &self.entry.executable_path,
+        ))
+        .is_ok_and(|identity| identity == self.identity)
+            && crate::runtime_discovery::entrypoint_locator_identity_is_current(
+                self.entry.entrypoint_locator_identity.as_ref(),
+            )
+    }
+
+    /// Static discovery performs one stable read, or reuses the identity already
+    /// persisted for this exact path. No health evidence is produced.
+    pub fn discover(
+        adapter_kind: AdapterKind,
+        executable_path: String,
+        source: InstallationSource,
+        entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
+        previous: Option<(&str, &ExecutableFileIdentity)>,
+    ) -> Result<Self> {
+        use crate::agent_runtime_adapter::{
+            executable_fingerprint, observe_executable_file_identity,
+        };
+        let path = Path::new(&executable_path);
+        let before = observe_executable_file_identity(path)?;
+        // Windows command shims retain their full dependency verification.
+        let reusable = !path.extension().is_some_and(|extension| {
+            cfg!(windows)
+                && matches!(
+                    extension.to_str().map(str::to_ascii_lowercase).as_deref(),
+                    Some("cmd" | "bat")
+                )
+        });
+        let fingerprint = match previous.filter(|(_, identity)| reusable && *identity == &before) {
+            Some((fingerprint, _)) => fingerprint.to_owned(),
+            None => executable_fingerprint(path)?,
+        };
+        let after = observe_executable_file_identity(path)?;
+        anyhow::ensure!(
+            before == after,
+            "Runtime entry changed during installation discovery"
+        );
+        anyhow::ensure!(
+            crate::runtime_discovery::entrypoint_locator_identity_is_current(
+                entrypoint_locator_identity.as_ref()
+            ),
+            "Runtime entrypoint locator changed during installation discovery"
+        );
+        Ok(Self {
+            entry: DiscoveredRuntimeEntry {
+                adapter_kind,
+                executable_path,
+                source,
+                executable_fingerprint: fingerprint,
+                entrypoint_locator_identity,
+            },
+            identity: after,
+        })
     }
 }
 
@@ -1118,6 +1195,8 @@ impl DiscoveredRuntimeEntry {
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredManagedInstallation {
+    /// Captured with the snapshot fingerprint before acquiring the database lock.
+    pub executable_file_identity: Option<ExecutableFileIdentity>,
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
     pub command_name: String,
@@ -1319,7 +1398,7 @@ impl AgentProfileService {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()
-            .context("failed to list AgentProfile Camp memberships")
+            .context("failed to list AgentProfile Thread memberships")
     }
 
     pub fn list_installations(&self, database: &Database) -> Result<Vec<AdapterInstallationView>> {
@@ -1350,11 +1429,12 @@ impl AgentProfileService {
                        attempt.executable_fingerprint, attempt.attempted_at,
                        attempt.retry_after, attempt.public_runtime_failure_json,
                        COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at),
-                       (SELECT executable_fingerprint FROM runtime_executable_identity
-                        WHERE installation_id = installation.id
-                          AND executable_path = installation.executable_path),
+                       identity.executable_fingerprint,
                        (SELECT generation FROM runtime_search_environment_state WHERE singleton = 1)
                 FROM adapter_installation AS installation
+                LEFT JOIN runtime_executable_identity AS identity
+                  ON identity.installation_id = installation.id
+                 AND identity.executable_path = installation.executable_path
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
                 LEFT JOIN adapter_probe_attempt AS attempt
@@ -1363,7 +1443,7 @@ impl AgentProfileService {
                       FROM adapter_probe_attempt AS candidate
                       WHERE candidate.installation_id = installation.id
                         AND candidate.executable_fingerprint
-                            IS snapshot.executable_fingerprint
+                            IS COALESCE(identity.executable_fingerprint, snapshot.executable_fingerprint)
                       ORDER BY candidate.attempted_at DESC, candidate.id DESC
                       LIMIT 1
                   )
@@ -1420,7 +1500,7 @@ impl AgentProfileService {
         Ok(database.connection_mut().execute(
             r#"
             UPDATE adapter_installation
-            SET path_state = 'path_missing', updated_at = ?6
+            SET path_state = 'path_missing', version = version + 1, updated_at = ?6
             WHERE id = ?1
               AND adapter_kind = ?2
               AND auth_scope = ?3
@@ -1451,34 +1531,48 @@ impl AgentProfileService {
         executable_path: &str,
         executable_fingerprint: &str,
     ) -> Result<Option<ExecutableFileIdentity>> {
+        Ok(self
+            .recorded_executable_identity(database, installation_id, executable_path)?
+            .filter(|(fingerprint, _)| fingerprint == executable_fingerprint)
+            .map(|(_, identity)| identity))
+    }
+
+    pub fn recorded_executable_identity(
+        &self,
+        database: &Database,
+        installation_id: &str,
+        executable_path: &str,
+    ) -> Result<Option<(String, ExecutableFileIdentity)>> {
         database
             .connection()
             .query_row(
                 r#"
                 SELECT identity.byte_size, identity.modified_at_unix_nanos,
-                       identity.file_id
+                       identity.file_id, identity.executable_fingerprint
                 FROM runtime_executable_identity AS identity
                 JOIN adapter_installation AS installation
                   ON installation.id = identity.installation_id
                 WHERE identity.installation_id = ?1
                   AND identity.executable_path = ?2
-                  AND identity.executable_fingerprint = ?3
                   AND installation.executable_path = ?2
                 "#,
-                params![installation_id, executable_path, executable_fingerprint],
+                params![installation_id, executable_path],
                 |row| {
                     let byte_size = row.get::<_, i64>(0)?;
-                    Ok(ExecutableFileIdentity {
-                        byte_size: u64::try_from(byte_size).map_err(|error| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                0,
-                                rusqlite::types::Type::Integer,
-                                Box::new(error),
-                            )
-                        })?,
-                        modified_at_unix_nanos: row.get(1)?,
-                        file_id: row.get(2)?,
-                    })
+                    Ok((
+                        row.get(3)?,
+                        ExecutableFileIdentity {
+                            byte_size: u64::try_from(byte_size).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    0,
+                                    rusqlite::types::Type::Integer,
+                                    Box::new(error),
+                                )
+                            })?,
+                            modified_at_unix_nanos: row.get(1)?,
+                            file_id: row.get(2)?,
+                        },
+                    ))
                 },
             )
             .optional()
@@ -1760,21 +1854,25 @@ impl AgentProfileService {
             .entrypoint_locator_identity
             .as_ref()
             .map(|identity| identity.compatibility_fingerprint.as_str());
-        let executable_identity =
-            observe_executable_file_identity(Path::new(&verified.executable_path)).ok();
+        let executable_identity = verified.executable_file_identity;
         if verified.adapter_kind == AdapterKind::TraeCnCli && executable_identity.is_none() {
             anyhow::bail!("TRAE machine Ready requires the current executable identity");
         }
 
         let transaction = database.connection_mut().transaction()?;
+        // Static discovery may already have recorded an upgrade while the old
+        // health snapshot remains stale. Only the current installation advances.
         let existing = transaction
             .query_row(
                 r#"
                 SELECT installation.id, installation.executable_path,
                        installation.generation, installation.version,
-                       snapshot.executable_fingerprint,
+                       COALESCE(identity.executable_fingerprint, snapshot.executable_fingerprint),
                        locator.compatibility_fingerprint
                 FROM adapter_installation AS installation
+                LEFT JOIN runtime_executable_identity AS identity
+                  ON identity.installation_id = installation.id
+                 AND identity.executable_path = installation.executable_path
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
                 LEFT JOIN runtime_entrypoint_locator_identity AS locator
@@ -1827,7 +1925,9 @@ impl AgentProfileService {
                     transaction.execute(
                         r#"
                         UPDATE adapter_installation
-                        SET enabled = 1, path_state = 'valid', updated_at = ?2
+                        SET enabled = 1, path_state = 'valid',
+                            version = version + CASE WHEN path_state <> 'valid' THEN 1 ELSE 0 END,
+                            updated_at = ?2
                         WHERE id = ?1
                         "#,
                         params![id, now],
@@ -2115,7 +2215,9 @@ impl AgentProfileService {
                         .map(|value| value.compatibility_fingerprint.as_str());
             transaction.execute(
                 "UPDATE adapter_installation SET executable_path = ?2, path_state = 'valid',
-                    generation = generation + ?3, version = version + ?3, updated_at = ?4 WHERE id = ?1",
+                    generation = generation + ?3,
+                    version = version + CASE WHEN path_state <> 'valid' OR ?3 = 1 THEN 1 ELSE 0 END,
+                    updated_at = ?4 WHERE id = ?1",
                 params![id, entry.executable_path, i64::from(changed), now],
             )?;
             if changed {
@@ -2187,31 +2289,29 @@ impl AgentProfileService {
             .entrypoint_locator_identity
             .as_ref()
             .map(|identity| identity.compatibility_fingerprint.as_str());
-        #[cfg(unix)]
-        let executable_is_usable = std::fs::metadata(&discovered.executable_path)
-            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
-        #[cfg(windows)]
-        let executable_is_usable =
-            observe_executable_file_identity(Path::new(&discovered.executable_path)).is_ok();
-        #[cfg(not(any(unix, windows)))]
-        let executable_is_usable = false;
-        let executable_identity =
-            observe_executable_file_identity(Path::new(&discovered.executable_path)).ok();
+        let executable_identity = discovered.executable_file_identity;
+        let executable_is_usable = executable_identity.is_some();
 
         let transaction = database.connection_mut().transaction()?;
+        // Installation changes and preservation of health evidence have separate
+        // fingerprints: static discovery can advance only the former.
         let existing = transaction
             .query_row(
                 r#"
                 SELECT installation.id, installation.executable_path,
-                       snapshot.executable_fingerprint, snapshot.probe_status,
+                       COALESCE(identity.executable_fingerprint, snapshot.executable_fingerprint), snapshot.probe_status,
                        snapshot.permission_schema_version,
                        snapshot.permission_schema_digest,
                        snapshot.permission_options_json,
                        snapshot.model_catalog_json,
                        snapshot.last_successful_probe_at,
                        locator.compatibility_fingerprint,
-                       COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at)
+                       COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at),
+                       snapshot.executable_fingerprint
                 FROM adapter_installation AS installation
+                LEFT JOIN runtime_executable_identity AS identity
+                  ON identity.installation_id = installation.id
+                 AND identity.executable_path = installation.executable_path
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
                 LEFT JOIN runtime_entrypoint_locator_identity AS locator
@@ -2234,6 +2334,7 @@ impl AgentProfileService {
                         row.get::<_, Option<String>>(8)?,
                         row.get::<_, Option<String>>(9)?,
                         row.get::<_, Option<String>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
                     ))
                 },
             )
@@ -2260,12 +2361,15 @@ impl AgentProfileService {
             last_successful_probe_at,
             locator_fingerprint,
             catalog_succeeded_at,
+            snapshot_fingerprint,
         )) = existing
         {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
             let compatibility_changed =
                 identity_changed || locator_fingerprint.as_deref() != next_locator_fingerprint;
+            let snapshot_compatibility_changed =
+                compatibility_changed || snapshot_fingerprint.as_deref() != next_fingerprint;
             transaction.execute(
                 if compatibility_changed {
                     r#"
@@ -2280,7 +2384,9 @@ impl AgentProfileService {
                     r#"
                     UPDATE adapter_installation
                     SET command_name = ?3, source = ?4, enabled = 1,
-                        path_state = 'valid', updated_at = ?5
+                        path_state = 'valid',
+                        version = version + CASE WHEN path_state <> 'valid' THEN 1 ELSE 0 END,
+                        updated_at = ?5
                     WHERE id = ?1
                     "#
                 },
@@ -2312,13 +2418,13 @@ impl AgentProfileService {
                     }
                     _ => false,
                 };
-            let preserve_existing = !compatibility_changed
+            let preserve_existing = !snapshot_compatibility_changed
                 && (schema_matches || normalize_legacy_trae_schema)
                 && (probe_status.as_deref() == Some("ready")
                     || (probe_status.as_deref() == Some("light_ready")
                         && discovered.snapshot.probe_status == "light_failed"
                         && executable_is_usable));
-            let retained_lkg = compatibility_changed
+            let retained_lkg = snapshot_compatibility_changed
                 .then(|| {
                     let models_json = model_catalog_json?;
                     let last_successful_probe_at = last_successful_probe_at?;
@@ -2529,7 +2635,9 @@ impl AgentProfileService {
             transaction.execute(
                 r#"
                 UPDATE adapter_installation
-                SET path_state = 'path_missing', updated_at = ?2
+                SET path_state = 'path_missing',
+                    version = version + CASE WHEN path_state <> 'path_missing' THEN 1 ELSE 0 END,
+                    updated_at = ?2
                 WHERE id = ?1
                 "#,
                 params![installation_id, attempted_at],
@@ -3068,13 +3176,16 @@ impl AgentProfileService {
                           ON conversation.id = agent_run.conversation_id
                         WHERE conversation.agent_id = profile.id
                           AND agent_run.status IN ('queued', 'running', 'waiting')),
-                       (SELECT COUNT(*) FROM task
+                       CASE WHEN ?2 THEN (SELECT COUNT(*) FROM task
                         WHERE assignee_agent_id = profile.id
-                          AND status IN ('pending', 'in_progress', 'blocked'))
+                          AND status IN ('pending', 'in_progress', 'blocked')) ELSE NULL END
                 FROM agent_profile AS profile
                 WHERE profile.id = ?1 AND profile.profile_status <> 'removed'
                 "#,
-                [agent_id],
+                params![
+                    agent_id,
+                    crate::task_capability::enabled(database.connection())?
+                ],
                 |row| {
                     let non_terminal_agent_run_count = row.get::<_, i64>(3)?;
                     Ok(MemberRemovalPreview {
@@ -4271,6 +4382,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::TraeCnCli
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli
+        | AdapterKind::MinimaxCodeCli
         | AdapterKind::GrokBuild
         | AdapterKind::DeepseekHarness
         | AdapterKind::CommandCodeCli => "acp-v1",
@@ -5907,6 +6019,7 @@ mod slow_tests {
                 AdapterKind::TraeCnCli,
                 AdapterKind::CursorAgent,
                 AdapterKind::KimiCodeCli,
+                AdapterKind::MinimaxCodeCli,
                 AdapterKind::GrokBuild,
                 AdapterKind::DeepseekHarness,
                 AdapterKind::ZcodeApp,
@@ -6247,6 +6360,11 @@ mod slow_tests {
         b.runtime_metadata.as_mut().unwrap()["dshOptionsObservedAt"] = Value::Null;
         snapshot.models = vec![a.clone(), b.clone()];
         let verified = |snapshot| VerifiedManagedInstallation {
+            executable_file_identity:
+                crate::agent_runtime_adapter::observe_executable_file_identity(
+                    std::path::Path::new(&(executable.to_string_lossy().into_owned())),
+                )
+                .ok(),
             adapter_kind: AdapterKind::DeepseekHarness,
             executable_path: executable.to_string_lossy().into_owned(),
             command_name: "dsh".into(),
@@ -6478,6 +6596,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "codex".to_string(),
@@ -6517,6 +6640,11 @@ mod slow_tests {
             .commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "codex".to_string(),
@@ -6649,6 +6777,13 @@ mod slow_tests {
                 .commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
+                        executable_file_identity:
+                            crate::agent_runtime_adapter::observe_executable_file_identity(
+                                std::path::Path::new(
+                                    &(executable_path.to_string_lossy().into_owned()),
+                                ),
+                            )
+                            .ok(),
                         adapter_kind: kind,
                         executable_path: executable_path.to_string_lossy().into_owned(),
                         command_name: "codex".to_string(),
@@ -6957,6 +7092,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().into_owned())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: executable_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
@@ -7450,6 +7590,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().into_owned())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: executable_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
@@ -7756,6 +7901,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().into_owned())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: executable_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
@@ -8391,6 +8541,11 @@ mod slow_tests {
                     .commit_verified_managed_installation(
                         &mut database,
                         VerifiedManagedInstallation {
+                            executable_file_identity:
+                                crate::agent_runtime_adapter::observe_executable_file_identity(
+                                    std::path::Path::new(&(frozen.executable_path.clone())),
+                                )
+                                .ok(),
                             adapter_kind: kind,
                             executable_path: frozen.executable_path.clone(),
                             command_name: kind.command_name().into(),
@@ -8535,6 +8690,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(original_path.to_string_lossy().into_owned())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: original_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
@@ -8648,6 +8808,13 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(
+                                &(replacement_path.to_string_lossy().into_owned()),
+                            ),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: replacement_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
@@ -8752,6 +8919,11 @@ mod slow_tests {
             .commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::QwenCode,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "qwen".to_string(),
@@ -8786,6 +8958,11 @@ mod slow_tests {
             .commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::QwenCode,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "qwen".to_string(),
@@ -8938,6 +9115,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::KiroCli,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "kiro-cli".to_string(),
@@ -8971,6 +9153,11 @@ mod slow_tests {
             .commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::KiroCli,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "kiro-cli".to_string(),
@@ -9045,6 +9232,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::KiroCli,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "kiro-cli".to_string(),
@@ -9097,6 +9289,11 @@ mod slow_tests {
             .commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.to_string_lossy().to_string())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::QwenCode,
                     executable_path: executable_path.to_string_lossy().to_string(),
                     command_name: "qwen".to_string(),
@@ -9481,6 +9678,11 @@ mod slow_tests {
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
+                    executable_file_identity:
+                        crate::agent_runtime_adapter::observe_executable_file_identity(
+                            std::path::Path::new(&(executable_path.clone())),
+                        )
+                        .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path: executable_path.clone(),
                     command_name: "codex".to_string(),
@@ -9552,6 +9754,10 @@ mod slow_tests {
             .commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
+                    executable_file_identity: observe_executable_file_identity(Path::new(
+                        &executable_path,
+                    ))
+                    .ok(),
                     adapter_kind: AdapterKind::CodexCli,
                     executable_path,
                     command_name: "codex".to_string(),

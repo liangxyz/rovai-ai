@@ -8,7 +8,7 @@ module.exports = async ({ window, run, settle, click, key, text, platform, prima
   assert.equal(window.webContents.getZoomFactor(), 1.25, 'Recording bypasses the production zoom handler')
   assert.match(await text(), /恢复默认缩放/, 'Shift+0 is rejected before it can be saved')
   assert(await run('document.querySelector(".shortcut-inline-actions .primary-button").disabled'))
-  assert.equal(store.get().preferences.bindings.tasks, 'Mod+2')
+  assert.equal(store.get().preferences.bindings.tasks, 'Mod+4')
   const invalid = structuredClone(defaults); invalid.bindings.tasks = 'Mod+Shift+0'
   await assert.rejects(store.save({ expectedRevision: store.get().revision, preferences: invalid }), /快捷键设置无效/)
   await key('T', ['alt'])

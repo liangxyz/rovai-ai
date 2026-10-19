@@ -10,9 +10,9 @@ export interface ShortcutDefinition {
 }
 export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'execution', name: '展开／收起执行台', group: 'workspace', binding: 'Mod+1', editable: true },
-  { id: 'tasks', name: '打开／收起任务', group: 'workspace', binding: 'Mod+2', editable: true },
-  { id: 'members', name: '打开／收起队员', group: 'workspace', binding: 'Mod+3', editable: true },
-  { id: 'dm', name: '打开／收起单聊', group: 'workspace', binding: 'Mod+4', editable: true },
+  { id: 'members', name: '打开／收起队员', group: 'workspace', binding: 'Mod+2', editable: true },
+  { id: 'dm', name: '打开／收起单聊', group: 'workspace', binding: 'Mod+3', editable: true },
+  { id: 'tasks', name: '打开／收起任务', group: 'workspace', binding: 'Mod+4', editable: true },
   { id: 'preview', name: '显示／收起文件预览区', group: 'workspace', binding: 'Mod+Shift+B', editable: true },
   { id: 'composer', name: '聚焦消息输入框', group: 'workspace', binding: 'Mod+L', editable: true },
   { id: 'latest', name: '回到最新消息', group: 'workspace', binding: null, editable: true },
@@ -34,7 +34,7 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'open-file', name: '用默认应用打开当前文件', group: 'files', binding: null }
 ]
 export const SHORTCUT_MOUSE_SIDES: readonly ShortcutMouseSide[] = ['side1', 'side2']
-export const shortcutDefaults = (): ShortcutPreferences => ({ schemaVersion: 1, bindings: Object.fromEntries(SHORTCUTS.map(row => [row.id, row.binding])) as ShortcutPreferences['bindings'], mouse: { side1: null, side2: null }, sendMode: 'enter' })
+export const shortcutDefaults = (): ShortcutPreferences => ({ schemaVersion: 2, bindings: Object.fromEntries(SHORTCUTS.map(row => [row.id, row.binding])) as ShortcutPreferences['bindings'], mouse: { side1: null, side2: null }, sendMode: 'enter' })
 export const shortcutMouseSide = (button: number): ShortcutMouseSide | null => button === 3 ? 'side1' : button === 4 ? 'side2' : null
 export function shouldSendComposerKey(event: Pick<KeyboardEvent, 'key' | 'isComposing' | 'repeat' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>, platform: NodeJS.Platform, mode: ShortcutPreferences['sendMode']): boolean {
   if (event.key !== 'Enter' || event.isComposing || event.repeat || event.shiftKey || event.altKey) return false
@@ -67,7 +67,7 @@ export function shortcutKeyParts(binding: string | null, platform: NodeJS.Platfo
   return binding.split('+').map(part => labels[part] ?? part)
 }
 export function parseShortcutPreferences(value: unknown, platform: NodeJS.Platform): ShortcutPreferences | null {
-  if (!record(value) || !exact(value, ['schemaVersion', 'bindings', 'mouse', 'sendMode']) || value.schemaVersion !== 1 || !record(value.bindings) || !record(value.mouse)) return null
+  if (!record(value) || !exact(value, ['schemaVersion', 'bindings', 'mouse', 'sendMode']) || value.schemaVersion !== 2 || !record(value.bindings) || !record(value.mouse)) return null
   if (!exact(value.bindings, SHORTCUTS.map(row => row.id)) || !exact(value.mouse, SHORTCUT_MOUSE_SIDES)) return null
   if (value.sendMode !== 'enter' && value.sendMode !== 'primary-enter') return null
   const used = new Set<string>()
@@ -81,3 +81,17 @@ export function parseShortcutPreferences(value: unknown, platform: NodeJS.Platfo
 }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const exact = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
+
+/** One full catalog/configuration; capability affects only action availability. */
+export const shortcutAvailable = (id: ShortcutActionId | null | undefined, tasksEnabled: boolean): boolean => !!id && (id !== 'tasks' || tasksEnabled)
+
+export function migrateLegacyShortcutPreferences(value: unknown, platform: NodeJS.Platform): ShortcutPreferences | null {
+  if (!record(value) || value.schemaVersion !== 1) return null
+  const next = parseShortcutPreferences({ ...value, schemaVersion: 2 }, platform)
+  if (!next) return null
+  const ordered: ShortcutActionId[] = ['execution', 'members', 'dm', 'tasks']
+  const combinations = new Set(['Mod+1', 'Mod+2', 'Mod+3', 'Mod+4'])
+  for (const row of SHORTCUTS) if (!ordered.includes(row.id) && combinations.has(next.bindings[row.id] ?? '')) next.bindings[row.id] = null
+  ordered.forEach((id, index) => { next.bindings[id] = `Mod+${index + 1}` })
+  return next
+}

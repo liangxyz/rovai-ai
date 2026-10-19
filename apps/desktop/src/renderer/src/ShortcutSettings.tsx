@@ -1,7 +1,8 @@
+import { useTaskCapability } from './TaskCapabilityProvider'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ShortcutActionId, ShortcutMouseSide, ShortcutPreferences } from '@contracts'
-import { SHORTCUTS, SHORTCUT_MOUSE_SIDES, normalizeShortcut, shortcutDefaults, shortcutKeyParts, validateShortcut } from '../../shared/shortcuts'
+import { SHORTCUTS, shortcutAvailable, SHORTCUT_MOUSE_SIDES, normalizeShortcut, shortcutDefaults, shortcutKeyParts, validateShortcut } from '../../shared/shortcuts'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader, DialogControlIcon } from './AppDialog'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { useShortcuts } from './ShortcutProvider'
@@ -14,6 +15,8 @@ type SaveOwner = ShortcutActionId | 'send' | 'reset'
 const defaults = shortcutDefaults()
 
 export function ShortcutSettings(): React.JSX.Element | null {
+  const { enabled: tasksEnabled } = useTaskCapability()
+  const available = (id: ShortcutActionId): boolean => shortcutAvailable(id, tasksEnabled)
   const shortcuts = useShortcuts()
   const t = useUiText()
   const [editing, setEditing] = useState<Command | null>(null)
@@ -29,6 +32,11 @@ export function ShortcutSettings(): React.JSX.Element | null {
   const saving = useRef(false)
   const mounted = useRef(true)
   const record = shortcuts?.record
+  useLayoutEffect(() => {
+    if (editing?.id !== 'tasks' || tasksEnabled) return
+    setEditing(null); setCandidate(null); setCaptureError(null); setRestoreIntent(false); setSaveError(null)
+    void record?.(null).catch(() => undefined)
+  }, [tasksEnabled, editing?.id, record])
   useLayoutEffect(() => {
     if (!focusRequest || busy) return
     setFocusRequest(null)
@@ -85,25 +93,26 @@ export function ShortcutSettings(): React.JSX.Element | null {
     ? <span className="shortcut-keycaps">{shortcutKeyParts(binding, platform).map((key, i) => <kbd key={i}>{t(key)}</kbd>)}</span>
     : <span className="shortcut-unbound">{t('未绑定')}</span>
   const openEditor = (row: Command): void => { setEditing(row); setCandidate(null); setCaptureError(null); setRestoreIntent(false); setSaveError(null) }
-  const conflict = candidate && editing && preferences ? SHORTCUTS.find(row => row.id !== editing.id && (candidate.kind === 'keyboard' ? preferences.bindings[row.id] === candidate.binding : preferences.mouse[candidate.side] === row.id)) : null
+  const conflict = candidate && editing && preferences ? SHORTCUTS.find(row => available(row.id) && row.id !== editing.id && (candidate.kind === 'keyboard' ? preferences.bindings[row.id] === candidate.binding : preferences.mouse[candidate.side] === row.id)) : null
   const unchanged = candidate && editing && preferences && !restoreIntent && (candidate.kind === 'keyboard' ? preferences.bindings[editing.id] === candidate.binding : preferences.mouse[candidate.side] === editing.id)
   const commitCandidate = (): void => {
-    if (!preferences || !editing || !candidate || captureError || unchanged) return
+    if (!preferences || !editing || !available(editing.id) || !candidate || captureError || unchanged) return
     const next = structuredClone(preferences)
     if (candidate.kind === 'mouse') next.mouse[candidate.side] = editing.id
     else {
       next.bindings[editing.id] = candidate.binding
-      if (conflict) next.bindings[conflict.id] = null
+      for (const row of SHORTCUTS) if (row.id !== editing.id && next.bindings[row.id] === candidate.binding) next.bindings[row.id] = null
       if (restoreIntent) for (const side of sidesFor(editing.id)) next.mouse[side] = null
     }
     void save(next, editing.id, () => setEditing(null))
   }
   const restoreOne = (row: Command): void => {
-    if (!preferences) return
-    if (row.binding && SHORTCUTS.some(other => other.id !== row.id && preferences.bindings[other.id] === row.binding)) {
+    if (!preferences || !available(row.id)) return
+    if (row.binding && SHORTCUTS.some(other => available(other.id) && other.id !== row.id && preferences.bindings[other.id] === row.binding)) {
       setEditing(row); setCandidate({ kind: 'keyboard', binding: row.binding }); setCaptureError(null); setRestoreIntent(true); return
     }
     const next = structuredClone(preferences)
+    if (row.binding) for (const other of SHORTCUTS) if (other.id !== row.id && next.bindings[other.id] === row.binding) next.bindings[other.id] = null
     next.bindings[row.id] = row.binding
     for (const side of sidesFor(row.id)) next.mouse[side] = null
     void save(next, row.id)
@@ -144,7 +153,7 @@ export function ShortcutSettings(): React.JSX.Element | null {
       </div>{fieldSaveError && <div className="shortcut-inline-feedback"><p className="shortcut-validation-error" role="alert">{fieldSaveError}</p></div>}</>}
     </div>
   }
-  const group = (key: Command['group'], title: string): React.JSX.Element => <section className={`shortcut-section${key === 'workspace' ? ' shortcut-workspace-section' : ''}`} aria-label={t(title)}><div className="section-heading"><h2>{t(title)}</h2></div><div className="shortcut-fields">{SHORTCUTS.filter(row => row.group === key).map(renderField)}</div></section>
+  const group = (key: Command['group'], title: string): React.JSX.Element => <section className={`shortcut-section${key === 'workspace' ? ' shortcut-workspace-section' : ''}`} aria-label={t(title)}><div className="section-heading"><h2>{t(title)}</h2></div><div className="shortcut-fields">{SHORTCUTS.filter(row => row.group === key && available(row.id)).map(renderField)}</div></section>
   return <div className="general-settings shortcut-settings" data-layout="side" aria-busy={busy}>
     <SettingsPageHeader eyebrow="" title={t('快捷键')} description={t('点击右侧按键区，再按键盘快捷键或鼠标侧键。')} />
     {shortcuts.error && <div className="shortcut-save-error" role="alert"><span>{shortcuts.error}</span><button type="button" className="quiet-button" onClick={() => { void shortcuts.reload() }}>{t('重试')}</button></div>}

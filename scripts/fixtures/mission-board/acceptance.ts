@@ -256,7 +256,8 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   const previewToggle = button('收起文件预览').getBoundingClientRect()
   const detailEntries = [...document.querySelectorAll<HTMLElement>('.mission-session-header .camp-detail-entry')]
   check(preview.width >= 420 && Math.abs(preview.width / previewWorkspace.width - .56) <= .01, `Activity uses the shared preview ratio and 420px stable minimum (received ${preview.width}px of ${previewWorkspace.width}px)`)
-  check(detailEntries.length === 4 && detailEntries.every(entry => entry.getBoundingClientRect().right <= preview.left + 1), 'Four Camp tools stay in the message area')
+  check(detailEntries.map(entry => entry.dataset.detail).join(',') === 'execution,members,single-chat'
+    && detailEntries.every(entry => entry.getBoundingClientRect().right <= preview.left + 1), 'Default Camp tools stay in the message area with Task capability disabled')
   check(drawerHeader.right - previewToggle.right <= 10, 'Preview toggle stays at the far right')
   check(!document.querySelector('.mission-session-actions'), 'Mission conversation has no ellipsis action')
   check(parseFloat(getComputedStyle(document.querySelector('.mission-drawer')!).borderRadius) >= 12, 'Mission drawer uses the approved rounded floating surface')

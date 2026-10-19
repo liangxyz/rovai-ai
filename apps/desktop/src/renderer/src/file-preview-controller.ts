@@ -31,6 +31,7 @@ export interface FilePreviewTabModel {
   externalUpdateVersion: number
   isRefreshing: boolean
   refreshError: string | null
+  downloadState?: 'preparing' | FilePreviewOperationResult<{ started: true }>
   pageOffsets: number[]
   pageIndex: number
   htmlSourceMode?: boolean
@@ -56,6 +57,14 @@ export interface FileChangesPreviewTabModel {
 export type MissionActivityTabModel = import('./file-preview-session').MissionActivityTabSnapshot
 export type ExecutionTabModel = import('./file-preview-session').ExecutionTabSnapshot
 export type PreviewTabModel = FilePreviewTabModel | FileChangesPreviewTabModel | MissionActivityTabModel | ExecutionTabModel
+
+export function canDownloadFile(tab: PreviewTabModel, api: FilePreviewApi): boolean {
+  if (tab.kind !== 'file') return false
+  if (!tab.content && ['source_not_authorized', 'file_not_found', 'attachment_missing'].includes(tab.error?.code ?? '')) return false
+  const downloadCapability = (tab.file?.capabilities ?? tab.retainedCapabilities)?.includes('download')
+  if (tab.file) return Boolean(api.download && downloadCapability)
+  return Boolean(tab.sourceRequest && (api.downloadSource || api.download && downloadCapability))
+}
 
 export type FilePreviewOpenOutcome =
   | { kind: 'preview'; tabId: string }
@@ -107,6 +116,7 @@ export interface FilePreviewContextValue {
   close(tabId: string): void
   closeMany(tabIds: string[]): void
   download(tabId: string): Promise<FilePreviewOperationResult<{ started: true }>>
+  clearDownloadFeedback(tabId: string): void
   openInSystem(tabId: string): Promise<FilePreviewOperationResult<{ opened: true }>>
   revealInFolder(tabId: string): Promise<FilePreviewOperationResult<{ revealed: true }>>
   copyPath(tabId: string): Promise<FilePreviewOperationResult<{ copied: true }>>
@@ -132,6 +142,7 @@ function errorFromUnknown(): FilePreviewErrorPayload {
 
 export function filePreviewErrorMessage(error: Pick<FilePreviewErrorPayload, 'code'>): string {
   switch (error.code) {
+    case 'file_changed': return uiAttribute('文件已变化，请刷新预览后重试。')
     case 'preview_timeout': return uiAttribute('未收到预览服务响应，请重试。')
     case 'file_not_found': return uiAttribute('找不到这个文件')
     case 'attachment_missing': return uiAttribute('找不到这个附件')
@@ -234,6 +245,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   let openFeedback: FilePreviewOpenFeedback | null = null
   const retired = new Map<string, { file: ResolvedFilePreview | null; content: FilePreviewContent | null }>()
   const refreshDone = new Map<string, () => void>()
+  const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const committedLoads = new Set<symbol>()
   let snapshot: { tabs: PreviewTabModel[]; activeTabId: string | null; paneVisible: boolean; openFeedback: FilePreviewOpenFeedback | null } = { tabs: tabsRef.current, activeTabId: activeTabIdRef.current, paneVisible: paneVisibleRef.current, openFeedback }
   const notify = (): void => {
@@ -243,8 +255,14 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     owner.changed()
   }
   const setTabs = (update: (tabs: PreviewTabModel[]) => PreviewTabModel[]): void => { tabsRef.current = update(tabsRef.current); notify() }
-  const setActiveTabId = (value: string | null): void => { activeTabIdRef.current = value; notify() }
-  const setPaneVisible = (value: boolean): void => { paneVisibleRef.current = value; notify() }
+  const setActiveTabId = (value: string | null): void => {
+    if (activeTabIdRef.current && activeTabIdRef.current !== value) clearRefreshTimer(activeTabIdRef.current)
+    activeTabIdRef.current = value; notify()
+  }
+  const setPaneVisible = (value: boolean): void => {
+    if (!value && activeTabIdRef.current) clearRefreshTimer(activeTabIdRef.current)
+    paneVisibleRef.current = value; notify()
+  }
   const setOpenFeedback = (update: (value: FilePreviewOpenFeedback | null) => FilePreviewOpenFeedback | null): void => { openFeedback = update(openFeedback); notify() }
   const revokeContent = (content: FilePreviewContent | null) => {
     if (content?.kind === 'html') void api.releaseHtmlSite({ previewId: content.preview.previewId }).catch(() => undefined)
@@ -264,7 +282,11 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
             ? restorableFilePreviewRequest(tab.sourceRequest)
             : null,
           presentation: tab.presentation,
-          reading: tab.reading || tab.content || tab.pageOffsets.length ? { ...tab.reading, pageOffsets: tab.pageOffsets, pageIndex: tab.pageIndex, htmlSourceMode: tab.htmlSourceMode } : undefined
+          reading: tab.reading || tab.content || tab.pageOffsets.length ? {
+            ...tab.reading,
+            visibleLine: tab.reading?.visibleLine ?? (tab.content?.kind === 'page' ? tab.content.page.startLine : undefined),
+            pageOffsets: tab.pageOffsets, pageIndex: tab.pageIndex, htmlSourceMode: tab.htmlSourceMode
+          } : undefined
         }),
       activeTabId: activeTabIdRef.current,
       paneVisible: paneVisibleRef.current
@@ -323,18 +345,20 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
           : result
       }
       if (file.kind === 'paged_text') {
-        let offset = reading?.pageOffsets?.[reading.pageIndex ?? 0] ?? 0
-        if (!reading && file.target?.line && file.target.line > 1) {
-          const resolved = await api.resolveLine({
-            ...request,
-            line: file.target.line
-          })
+        let offset = 0
+        const line = reading?.visibleLine ?? (!reading ? file.target?.line : undefined)
+        if (line && line > 1) {
+          let resolved = await api.resolveLine({ ...request, line })
+          if (!resolved.ok) return resolved
+          // A shortened file can resolve past the final line's text to EOF.
+          // Ask for the reported line again to read from its actual beginning.
+          if (resolved.value.line < line) resolved = await api.resolveLine({ ...request, line: resolved.value.line })
           if (!resolved.ok) return resolved
           offset = resolved.value.offset
         }
         const result = await api.readPage({ ...request, offset })
         return result.ok
-          ? { ok: true, content: { kind: 'page', page: result.value }, pageOffsets: reading?.pageOffsets ?? [offset], pageIndex: reading?.pageIndex ?? 0 }
+          ? { ok: true, content: { kind: 'page', page: result.value }, pageOffsets: [offset], pageIndex: 0 }
           : result
       }
       const result = await api.readText(request)
@@ -394,6 +418,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
           loadState: errorLoadState(loaded.error),
           error: safeOpenError(loaded.error)
         }))
+    scheduleRefresh(tabId)
   }
 
   const showOpenedTab = (tabId: string, isNew: boolean, focusTab = false) => {
@@ -401,6 +426,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     setActiveTabId(tabId)
     setPaneVisible(true)
     setOpenFeedback((previous) => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew, focusTab }))
+    const tab = tabsRef.current.find(entry => entry.id === tabId)
+    if (tab?.kind === 'file' && tab.content) ensureVisibleTab(tabId)
   }
 
   const openFileChanges = (
@@ -611,6 +638,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         ...entry,
         sourceRequest: request,
         loadState: 'opening',
+        downloadState: undefined,
         error: null,
         requestGeneration,
         isRefreshing: false,
@@ -643,6 +671,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       : remaining.at(-1)?.id ?? null
     setActiveTabId(nextActiveTabId)
     if (wasVisible) setPaneVisible(rollback?.paneVisible ?? remaining.length > 0)
+    if (nextActiveTabId) ensureVisibleTab(nextActiveTabId)
   }
 
   const performOpen = async (
@@ -663,8 +692,13 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (!admitted) throw new Error('Preview capacity exhausted')
       await bindingPromiseRef.current
       await owner.sync()
-      if (scopeGenerationRef.current !== scopeGeneration) {
+      const current = tabsRef.current.find(entry => entry.id === tabId)
+      if (scopeGenerationRef.current !== scopeGeneration || current?.kind !== 'file' || current.requestGeneration !== requestGeneration) {
         return { kind: 'error', error: unavailableSourceError() }
+      }
+      if (mode === 'restore' && !isVisible(tabId)) {
+        setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, loadState: 'cold' } : entry))
+        return { kind: 'preview', tabId }
       }
       let result: FilePreviewOperationResult<OpenFilePreviewResult>
       if (mode === 'restore') {
@@ -925,17 +959,45 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     owner.touch(session, tabId)
     setActiveTabId(tabId)
     setPaneVisible(true)
-    if (tab.kind === 'file' && tab.loadState === 'cold') restoreTab(tabId, true)
+    ensureVisibleTab(tabId)
   }
 
   const showPane = () => {
     owner.touch(session, activeTabIdRef.current ?? undefined)
     setPaneVisible(true)
-    const tab = tabsRef.current.find((entry) => entry.id === activeTabIdRef.current)
-    if (tab?.kind === 'file' && tab.loadState === 'cold') restoreTab(tab.id, true)
+    if (activeTabIdRef.current) ensureVisibleTab(activeTabIdRef.current)
   }
 
   const hidePane = () => setPaneVisible(false)
+
+  const isVisible = (tabId: string): boolean => !disposed && owner.isCurrent(threadId)
+    && paneVisibleRef.current && activeTabIdRef.current === tabId
+  const clearRefreshTimer = (tabId: string): void => {
+    clearTimeout(refreshTimers.get(tabId))
+    refreshTimers.delete(tabId)
+  }
+  const suspendRefresh = (): void => { for (const tabId of refreshTimers.keys()) clearRefreshTimer(tabId) }
+  const scheduleRefresh = (tabId: string): void => {
+    clearRefreshTimer(tabId)
+    const tab = tabsRef.current.find(entry => entry.id === tabId)
+    if (!isVisible(tabId) || tab?.kind !== 'file' || tab.loadState !== 'ready'
+      || !tab.hasExternalUpdate || tab.isRefreshing || tab.refreshError) return
+    refreshTimers.set(tabId, setTimeout(() => {
+      refreshTimers.delete(tabId)
+      const latest = tabsRef.current.find(entry => entry.id === tabId)
+      if (isVisible(tabId) && latest?.kind === 'file' && latest.loadState === 'ready'
+        && latest.hasExternalUpdate && !latest.isRefreshing && !latest.refreshError) void reload(tabId, true)
+    }, 300))
+  }
+  // Called only by display/activation entry points, never ordinary state updates.
+  const ensureVisibleTab = (tabId: string): void => {
+    if (!isVisible(tabId)) return
+    const tab = tabsRef.current.find(entry => entry.id === tabId)
+    if (tab?.kind !== 'file' || tab.loadState === 'opening' || tab.isRefreshing) return
+    if (tab.content) {
+      if (tab.hasExternalUpdate || !tab.file || tab.refreshError) void reload(tabId, true)
+    } else if (tab.loadState === 'cold') restoreTab(tabId, true)
+  }
 
   const openMissionActivity = (missionId: string): void => {
     if (disposed || !threadId) return
@@ -983,7 +1045,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         : previous.slice(Math.max(0, activeIndex + 1)).find((tab) => !ids.has(tab.id))?.id
         ?? previous.slice(0, Math.max(0, activeIndex)).reverse().find((tab) => !ids.has(tab.id))?.id
         ?? remaining[0].id
-    for (const tab of closing) if (tab.kind === 'file') { discardCandidate(tab); revokeContent(tab.content); if (tab.file) displayed(tab.id, tab.file.handleId) }
+    for (const tab of closing) if (tab.kind === 'file') { clearRefreshTimer(tab.id); refreshVersions.delete(tab.id); discardCandidate(tab); revokeContent(tab.content); if (tab.file) displayed(tab.id, tab.file.handleId) }
     setTabs(() => remaining)
     setActiveTabId(nextActiveTabId)
     setOpenFeedback((current) => current && ids.has(current.tabId) ? null : current)
@@ -995,7 +1057,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         void api.release({ handleId: tab.file.handleId })
       }
     }
-    if (nextActiveTabId && owner.isCurrent(threadId) && paneVisibleRef.current) restoreTab(nextActiveTabId, true)
+    if (nextActiveTabId && nextActiveTabId !== currentActiveTabId) ensureVisibleTab(nextActiveTabId)
   }
 
   const close = (tabId: string) => closeMany([tabId])
@@ -1015,9 +1077,30 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     try { return await action(file) }
     finally { if (!tab.file) void api.release({ handleId: file.handleId }) }
   }
-  const download = (tabId: string) => withActionFile<{ started: true }>(tabId, file => api.download
-    ? api.download({ handleId: file.handleId, expectedGeneration: file.contentGeneration })
-    : Promise.resolve({ ok: false, error: unavailableSourceError() }))
+  const download = async (tabId: string): Promise<FilePreviewOperationResult<{ started: true }>> => {
+    const tab = tabsRef.current.find(entry => entry.id === tabId)
+    if (tab?.kind !== 'file' || !canDownloadFile(tab, api) || tab.downloadState === 'preparing'
+      || tab.loadState === 'opening' || tab.isRefreshing) return { ok: false, error: unavailableSourceError() }
+    setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, downloadState: 'preparing' as const } : entry))
+    let result: FilePreviewOperationResult<{ started: true }>
+    try {
+      if (!tab.file && tab.sourceRequest && api.downloadSource) {
+        await owner.sync()
+        result = await api.downloadSource(tab.sourceRequest)
+      } else {
+        result = await withActionFile(tabId, file => api.download!({ handleId: file.handleId, expectedGeneration: file.contentGeneration }))
+      }
+    } catch (error) {
+      result = { ok: false, error: { code: 'read_failed', message: error instanceof Error ? error.message : uiAttribute('下载申请失败，请重试。'), retryable: true } }
+    }
+    // Feedback stays with the requesting file, even when its retained panel is hidden.
+    // A replaced preview or a closed tab must not receive the old result.
+    setTabs(tabs => tabs.map(entry => entry.kind === 'file' && entry.id === tabId && entry.requestGeneration === tab.requestGeneration
+      ? { ...entry, downloadState: result } : entry))
+    return result
+  }
+  const clearDownloadFeedback = (tabId: string): void => setTabs(tabs => tabs.map(entry => entry.kind === 'file'
+    && entry.id === tabId && entry.downloadState !== 'preparing' ? { ...entry, downloadState: undefined } : entry))
   const openInSystem = (tabId: string) => withActionFile(tabId, file => api.openInSystem({ handleId: file.handleId }))
   const revealInFolder = (tabId: string) => withActionFile(tabId, file => api.revealInFolder({ handleId: file.handleId }))
   const copyPath = (tabId: string) => withActionFile(tabId, file => api.copyPath({
@@ -1048,6 +1131,9 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       ...tab, ...loaded,
       file, candidate: undefined, loadState: 'ready', isRefreshing: false, refreshError: null,
       hasExternalUpdate: file.hasExternalUpdate || tab.externalUpdateVersion !== refreshVersions.get(tab.id),
+      reading: loaded.content.kind === 'page'
+        ? { ...tab.reading, visibleLine: loaded.content.page.startLine, codeScrollTop: 0 }
+        : tab.reading,
       htmlSource: undefined, pages: undefined
     }))
     refreshDone.get(tab.id)?.(); refreshDone.delete(tab.id)
@@ -1067,15 +1153,17 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     revokeContent(previous.content)
     if (previous.file) void api.release({ handleId: previous.file.handleId })
   }
-  const reload = async (tabId: string): Promise<void> => {
+  const reload = async (tabId: string, visibleOnly = false): Promise<void> => {
     const tab = tabsRef.current.find(entry => entry.id === tabId)
-    if (tab?.kind !== 'file' || tab.isRefreshing) return
+    if (disposed || tab?.kind !== 'file' || tab.isRefreshing || tab.loadState === 'opening'
+      || visibleOnly && pageRequests.has(tabId)) return
+    clearRefreshTimer(tabId)
     if (!tab.file && !tab.content) { await reopen(tabId); return }
     const oldFile = tab.file
     const scope = scopeGenerationRef.current
-    const requestGeneration = tab.requestGeneration + 1
+    let requestGeneration = tab.requestGeneration
     refreshVersions.set(tabId, tab.externalUpdateVersion)
-    setTabs(tabs => tabs.map(entry => entry.id !== tabId ? entry : { ...tab, requestGeneration, isRefreshing: true, refreshError: null }))
+    setTabs(tabs => tabs.map(entry => entry.id !== tabId ? entry : { ...tab, requestGeneration, isRefreshing: true, refreshError: null, downloadState: undefined }))
     let candidate: ResolvedFilePreview | null = null
     let loaded: LoadedFilePreviewContent | null = null
     let reservation: (() => void) | null = null
@@ -1083,16 +1171,48 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       && entry.id === tabId && entry.requestGeneration === requestGeneration && scopeGenerationRef.current === scope) as FilePreviewTabModel | undefined
     try {
       await owner.sync()
+      if (!current()) return
+      if (visibleOnly && !isVisible(tabId)) {
+        setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: false, hasExternalUpdate: true } : entry))
+        return
+      }
       if (oldFile) {
         const result = await api.reload({ handleId: oldFile.handleId, reopenToken: oldFile.reopenToken, expectedGeneration: oldFile.contentGeneration })
         if (!result.ok) throw new Error(filePreviewErrorMessage(result.error))
         candidate = result.value
-      } else candidate = await restoreHandle(tab)
+      } else {
+        const request = tab.sourceRequest && restorableFilePreviewRequest(tab.sourceRequest)
+        if (request) {
+          const result = await api.restore(request)
+          if (!result.ok) throw new Error(filePreviewErrorMessage(result.error))
+          if (result.value.kind === 'file_preview') candidate = result.value.file
+        }
+      }
       if (!candidate) throw new Error(uiAttribute('无法重新取得文件，已保留当前预览。'))
       if (!current()) return
+      const version = oldFile?.contentVersion
+      if (visibleOnly && oldFile && tab.content && !tab.refreshError
+        && oldFile.previewKey === candidate.previewKey
+        && version?.size === candidate.contentVersion.size && version.mtimeMs === candidate.contentVersion.mtimeMs
+        && version.fileId === candidate.contentVersion.fileId
+        // Desktop supplies file identity; Web supplies its full digest as the generation.
+        && (version.fileId !== undefined || oldFile.contentGeneration === candidate.contentGeneration)) {
+        const changed = candidate.hasExternalUpdate
+        setTabs(tabs => tabs.map(entry => entry.id !== tabId || entry.kind !== 'file' ? entry : {
+          ...entry, isRefreshing: false,
+          hasExternalUpdate: changed || entry.externalUpdateVersion !== refreshVersions.get(tabId)
+        }))
+        return
+      }
+      // A version-only check must not invalidate reads of the retained content.
+      requestGeneration += 1
+      setTabs(tabs => tabs.map(entry => entry.id !== tabId ? entry : { ...entry, requestGeneration }))
       reservation = candidate.kind === 'html' ? await owner.reserveHtml(session, tabId) : () => undefined
       if (!reservation) throw new Error(uiAttribute('预览资源不足，旧预览已保留。'))
-      const content = await loadContent(candidate)
+      const reading = current()?.reading ?? tab.reading
+      const content = await loadContent(candidate, {
+        ...reading, visibleLine: reading?.visibleLine ?? (tab.content?.kind === 'page' ? tab.content.page.startLine : undefined)
+      })
       if (!content.ok) throw new Error(filePreviewErrorMessage(content.error))
       loaded = content
       const entry = current()
@@ -1113,6 +1233,10 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       reservation?.()
       if (loaded) revokeContent(loaded.content)
       if (candidate) void api.release({ handleId: candidate.handleId })
+      if (current()) {
+        refreshVersions.delete(tabId)
+        scheduleRefresh(tabId)
+      }
     }
   }
 
@@ -1124,12 +1248,12 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     const scopeGeneration = scopeGenerationRef.current
     const requestGeneration = tab.requestGeneration
     const nextIndex = tab.pageIndex + direction
-    if (nextIndex < 0) return
-    const offset = direction === 1
+    if (nextIndex < 0 && !tab.content.page.hasPrevious) return
+    let offset = direction === 1
       ? tab.pageOffsets[nextIndex] ?? tab.content.page.endOffset
       : tab.pageOffsets[nextIndex]
-    if (offset === undefined || offset < 0 || offset >= (file?.size ?? tab.content.page.contentVersion.size)) return
-    const cached = tab.pages?.[offset]
+    if (offset !== undefined && (offset < 0 || offset >= (file?.size ?? tab.content.page.contentVersion.size))) return
+    const cached = offset === undefined ? undefined : tab.pages?.[offset]
     pageRequests.add(tabId)
     try {
       if (!cached && !file) {
@@ -1147,25 +1271,41 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         const acquired = file
         setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, file: acquired } : entry))
       }
-      const result = cached ? { ok: true as const, value: cached } : await api.readPage({ handleId: file!.handleId, expectedGeneration: file!.contentGeneration, offset })
+      let maxBytes: number | undefined
+      if (offset === undefined) {
+        // A refreshed page starts a new history at its reading line. Locate an
+        // earlier window by line rather than reusing offsets from the old file.
+        const lines = Math.max(1, tab.content.page.text.split('\n').length - 1)
+        const resolved = await api.resolveLine({ handleId: file!.handleId, expectedGeneration: file!.contentGeneration,
+          line: Math.max(1, tab.content.page.startLine - lines) })
+        if (!resolved.ok || resolved.value.offset >= tab.content.page.startOffset) return
+        offset = resolved.value.offset
+        maxBytes = Math.min(256 * 1024, tab.content.page.startOffset - offset)
+      }
+      const pageOffset = offset
+      const result = cached ? { ok: true as const, value: cached } : await api.readPage({
+        handleId: file!.handleId, expectedGeneration: file!.contentGeneration, offset: pageOffset, ...(maxBytes ? { maxBytes } : {})
+      })
       if (
         !result.ok
         || scopeGenerationRef.current !== scopeGeneration
       ) return
       setTabs((current) => current.map((entry) => {
         if (entry.kind !== 'file' || entry.id !== tabId || entry.requestGeneration !== requestGeneration) return entry
-        const offsets = entry.pageOffsets.slice(0, nextIndex + 1)
-        offsets[nextIndex] = offset
-        if (result.value.hasNext) offsets[nextIndex + 1] = result.value.endOffset
+        const index = Math.max(0, nextIndex)
+        const offsets = nextIndex < 0 ? [] : entry.pageOffsets.slice(0, index + 1)
+        offsets[index] = pageOffset
+        if (result.value.hasNext) offsets[index + 1] = result.value.endOffset
         return {
           ...entry,
           content: { kind: 'page', page: result.value },
           pageOffsets: offsets,
-          pageIndex: nextIndex,
-          pages: { ...entry.pages, [offset]: result.value }
+          pageIndex: index,
+          reading: { ...entry.reading, visibleLine: result.value.startLine, codeScrollTop: 0 },
+          pages: { ...entry.pages, [pageOffset]: result.value }
         }
       }))
-    } finally { pageRequests.delete(tabId) }
+    } finally { pageRequests.delete(tabId); scheduleRefresh(tabId) }
   }
 
   const saveReading = (tabId: string, state: Partial<FilePreviewReadingState>): void => {
@@ -1264,26 +1404,36 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     retired,
     cool: () => { scopeGenerationRef.current += 1; committedLoads.clear(); for (const tab of tabsRef.current) session.evict(tab.id); session.id = newCommandId(); bindingPromiseRef.current = owner.sync() },
     setBinding: (binding: Promise<void>) => { bindingPromiseRef.current = binding },
-    actions: { open, openFileChanges, syncFileChanges, openMissionActivity, openExecution, loadChanges, selectChangedFile, showPane, hidePane, activate, move, close, closeMany, download, openInSystem, revealInFolder, copyPath, toggleHtmlSource, reload, reopen, retry, changePage, saveReading, loadHtmlSource, saveHtmlSource, completeHtmlRefresh, displayed },
-    ensureActive: () => { if (paneVisibleRef.current && activeTabIdRef.current) restoreTab(activeTabIdRef.current, true) },
+    actions: { open, openFileChanges, syncFileChanges, openMissionActivity, openExecution, loadChanges, selectChangedFile, showPane, hidePane, activate, move, close, closeMany, download, clearDownloadFeedback, openInSystem, revealInFolder, copyPath, toggleHtmlSource, reload, reopen, retry, changePage, saveReading, loadHtmlSource, saveHtmlSource, completeHtmlRefresh, displayed },
+    suspendRefresh,
+    ensureActive: () => { if (activeTabIdRef.current) ensureVisibleTab(activeTabIdRef.current) },
     externalUpdate: (previewKeys: string[]) => {
       const changed = new Set(previewKeys)
       setTabs(tabs => tabs.map(tab => tab.kind === 'file' && tab.previewKey && changed.has(tab.previewKey)
         ? { ...tab, hasExternalUpdate: true, externalUpdateVersion: tab.externalUpdateVersion + 1 } : tab))
+      const active = tabsRef.current.find(tab => tab.id === activeTabIdRef.current)
+      if (active?.kind === 'file' && active.previewKey && changed.has(active.previewKey)) scheduleRefresh(active.id)
     },
     evictBytes: (tabId: string) => {
+      clearRefreshTimer(tabId)
+      refreshVersions.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
       if (tab?.kind !== 'file') { session.evict(tabId); return }
+      discardCandidate(tab)
       const keepPage = tab.content?.kind === 'html'
       if (!keepPage && tab.file) displayed(tab.id, tab.file.handleId)
       if (!keepPage) revokeContent(tab.content)
       setTabs(tabs => tabs.map(entry => entry.id === tabId ? {
         ...tab, content: keepPage ? tab.content : null,
+        candidate: undefined, isRefreshing: false,
         pages: undefined, htmlSource: undefined, requestGeneration: tab.requestGeneration + 1,
+        downloadState: undefined,
         loadState: keepPage ? 'ready' : 'cold'
       } : entry))
     },
     evict: (tabId: string, handleOnly = false, alreadyReleased = false, htmlOnly = false) => {
+      clearRefreshTimer(tabId)
+      refreshVersions.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
       if (!tab) return
       if (tab.kind === 'mission_activity' || tab.kind === 'execution') return
@@ -1301,6 +1451,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         ...tab, file: htmlOnly ? tab.file : null,
         cachedVersion: tab.file?.contentVersion ?? tab.cachedVersion, retainedCapabilities: tab.file?.capabilities ?? tab.retainedCapabilities,
         content: independent ? tab.content : null, requestGeneration: tab.requestGeneration + 1,
+        downloadState: undefined,
         loadState: independent ? 'ready' : tab.sourceRequest ? 'cold' : 'unavailable',
         candidate: undefined, pages: handleOnly ? tab.pages : undefined, htmlSource: handleOnly || htmlOnly ? tab.htmlSource : undefined,
         isRefreshing: false, refreshError: null
@@ -1308,6 +1459,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     },
     dispose: () => {
       disposed = true
+      suspendRefresh()
+      refreshVersions.clear()
       committedLoads.clear()
       scopeGenerationRef.current += 1
       for (const tab of tabsRef.current) if (tab.kind === 'file') {

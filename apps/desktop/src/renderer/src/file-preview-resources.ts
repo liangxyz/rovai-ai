@@ -67,6 +67,7 @@ export class FilePreviewResources {
   activate(threadId: string | null): void {
     this.#connect()
     if (this.currentThreadId === threadId) return
+    if (this.currentThreadId) this.sessions.get(this.currentThreadId)?.suspendRefresh()
     this.currentThreadId = threadId
     const session = threadId ? this.session(threadId) : null
     if (session?.getSnapshot().tabs.length) this.touch(session, session.getSnapshot().activeTabId ?? undefined)

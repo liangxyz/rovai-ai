@@ -896,7 +896,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if cancel_requested_at.is_some() {
@@ -1113,7 +1113,7 @@ impl ExecutionRuntimeService {
         limit: i64,
     ) -> Result<Vec<ThreadTurnExecutionBudgetExpiry>> {
         if !(1..=100).contains(&limit) {
-            anyhow::bail!("CampTurn Execution Budget expiry limit must be between 1 and 100");
+            anyhow::bail!("ThreadTurn Execution Budget expiry limit must be between 1 and 100");
         }
         let budget_now = observed_budget_now.to_rfc3339();
         let audit_now = audit_now.to_rfc3339();
@@ -1189,7 +1189,7 @@ impl ExecutionRuntimeService {
             })
             .optional()?;
         let Some(version) = version else {
-            return Ok(Err(rejected("camp.not_found", "Camp does not exist")));
+            return Ok(Err(rejected("camp.not_found", "Thread does not exist")));
         };
         if version != expected_version {
             return Ok(Err(CommandHandlerResult::rejected(
@@ -1907,7 +1907,7 @@ impl ExecutionRuntimeService {
             {
                 return Ok(rejected(
                     "agent_run.workspace_scope_mismatch",
-                    "AgentRun workspace does not match the Camp project path",
+                    "AgentRun workspace does not match the Thread project path",
                 ));
             }
             let starting_git_observation = envelope
@@ -2050,7 +2050,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             let audit_now = chrono::Utc::now().to_rfc3339();
@@ -2139,7 +2139,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if run.version != envelope.payload.expected_version
@@ -2178,7 +2178,7 @@ impl ExecutionRuntimeService {
             {
                 return Ok(rejected(
                     "agent_run.network_recovery_deadline_fenced",
-                    "CampTurn is no longer accepting network recovery",
+                    "ThreadTurn is no longer accepting network recovery",
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
@@ -2281,7 +2281,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if run.version != envelope.payload.expected_version
@@ -2315,7 +2315,7 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejected(
                     "agent_run.network_recovery_stopped",
-                    "CampTurn Execution Budget deadline has elapsed",
+                    "ThreadTurn Execution Budget deadline has elapsed",
                 ));
             }
             if !run.member_active
@@ -2442,7 +2442,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if run.version != envelope.payload.expected_version
@@ -2574,7 +2574,7 @@ impl ExecutionRuntimeService {
             {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -2723,7 +2723,7 @@ impl ExecutionRuntimeService {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp_turn.cancel_user_required",
-                    "Only a User can stop a CampTurn from the v0.04 workbench",
+                    "Only a User can stop a ThreadTurn from the v0.04 workbench",
                 ));
             }
             let turn = transaction
@@ -2744,12 +2744,12 @@ impl ExecutionRuntimeService {
                 )
                 .optional()?;
             let Some((camp_id, status, version, cancel_requested_at)) = turn else {
-                return Ok(rejected("camp_turn.not_found", "CampTurn does not exist"));
+                return Ok(rejected("camp_turn.not_found", "ThreadTurn does not exist"));
             };
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
                 return Ok(rejected(
                     "camp_turn.camp_mismatch",
-                    "CampTurn is outside the Camp",
+                    "ThreadTurn is outside the Thread",
                 ));
             }
             if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
@@ -2867,7 +2867,7 @@ impl ExecutionRuntimeService {
             {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if matches!(status.as_str(), "succeeded" | "failed" | "cancelled") {
@@ -2895,7 +2895,7 @@ impl ExecutionRuntimeService {
             if turn_cancel_requested_at.is_some() {
                 return Ok(rejected(
                     "agent_run.turn_cancellation_in_progress",
-                    "The owning CampTurn is already stopping",
+                    "The owning ThreadTurn is already stopping",
                 ));
             }
 
@@ -3039,7 +3039,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if execution_epoch != envelope.payload.execution_epoch {
@@ -3529,7 +3529,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref().is_some_and(|id| id != camp_id) {
                 return Ok(rejected(
                     "conversation.camp_mismatch",
-                    "Conversation is outside the requested Camp",
+                    "Conversation is outside the requested Thread",
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -3629,6 +3629,15 @@ impl ExecutionRuntimeService {
         })
     }
 
+    pub fn has_current_run_public_send(
+        &self,
+        database: &Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<bool> {
+        has_current_run_public_send(database.connection(), agent_run_id, execution_epoch)
+    }
+
     pub fn succeed_agent_run(
         &self,
         database: &mut Database,
@@ -3691,9 +3700,7 @@ impl ExecutionRuntimeService {
         if envelope.payload.native_turn_id.trim().is_empty() {
             anyhow::bail!("nativeTurnId must not be empty");
         }
-        if envelope.payload.final_output.trim().is_empty() {
-            anyhow::bail!("successful AgentRun finalOutput must not be empty");
-        }
+        let has_final_output = !envelope.payload.final_output.trim().is_empty();
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_runtime_adapter(&envelope.actor) {
                 return Ok(rejected(
@@ -3714,6 +3721,15 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
+            if !has_final_output
+                && (target.invocation_kind == "single_chat"
+                    || !has_current_run_public_send(transaction, &target.agent_run_id, target.execution_epoch)?)
+            {
+                return Ok(rejected(
+                    "agent_run.missing_final_output",
+                    "Empty final output requires a committed public send from this Run and execution epoch",
+                ));
+            }
             if target.invocation_kind == "single_chat" {
                 return persist_single_chat_success(
                     transaction,
@@ -3731,13 +3747,14 @@ impl ExecutionRuntimeService {
                 .map(AdapterKind::public_output_mode)
                 .unwrap_or(PublicOutputMode::ExplicitSendOnly);
             let publication_allowed = terminal_publication_allowed(transaction, &target)?;
-            let final_output_digest =
+            let final_output_digest = has_final_output.then(||
                 canonical_content_digest(&[StructuredThreadMessageSegment::Text {
                     text: envelope.payload.final_output.clone(),
-                }])?;
+                }])).transpose()?;
             let (ordinary_final_camp_message_id, automatic_public_output_suppressed) =
                 if public_output_mode == PublicOutputMode::AssistantFinalVisible
                     && publication_allowed
+                    && has_final_output
                 {
                     // A Runtime may have already made the exact final answer public through
                     // `camp.message.send`. Suppress only that same Run + canonical body digest;
@@ -3771,7 +3788,7 @@ impl ExecutionRuntimeService {
                             transaction,
                             &target,
                             &envelope.payload.final_output,
-                            &final_output_digest,
+                            final_output_digest.as_deref().expect("nonempty final has a digest"),
                             &envelope.actor,
                             envelope.payload.execution_epoch,
                             "assistant_final_visible",
@@ -3932,7 +3949,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(target.camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if target.version != envelope.payload.expected_version {
@@ -4136,7 +4153,7 @@ impl ExecutionRuntimeService {
             if envelope.camp_id.as_deref() != Some(target.camp_id.as_str()) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
-                    "AgentRun is outside the Camp",
+                    "AgentRun is outside the Thread",
                 ));
             }
             if target.version != envelope.payload.expected_version {
@@ -5380,6 +5397,41 @@ struct MissingSendRecoveryOutcome {
     message_id: Option<String>,
 }
 
+/// The successful send receipt, message, Run and execution epoch must agree.
+/// A prior epoch, rejected command, recalled message or another Run cannot
+/// substitute for this turn's output. Missing-send recovery has its separate,
+/// broader suppression rule because even withdrawn sends are side effects.
+fn has_current_run_public_send(connection: &Connection, run_id: &str, epoch: i64) -> Result<bool> {
+    Ok(connection.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM camp_message AS message
+            JOIN agent_run AS run ON run.id = message.source_agent_run_id
+            JOIN conversation ON conversation.id = run.conversation_id
+            LEFT JOIN camp_turn ON camp_turn.id = run.camp_turn_id
+            JOIN event_log AS outcome ON outcome.command_id = message.source_operation_id
+            WHERE run.id = ?1 AND run.execution_epoch = ?2
+              AND run.invocation_kind <> 'single_chat'
+              AND message.author_type = 'agent' AND message.author_id = conversation.agent_id
+              AND message.camp_id = COALESCE(run.camp_id, camp_turn.camp_id) AND message.tombstoned_at IS NULL
+              AND message.recall_state NOT IN ('recallable', 'withdrawn')
+              AND outcome.event_type = 'command.result'
+              AND outcome.command_type = 'thread.message.send'
+              AND outcome.result_status = 'accepted'
+              AND outcome.result_code = 'camp_message.send_accepted'
+              AND outcome.result_entity_type = 'camp_message'
+              AND outcome.result_entity_id = message.id
+              AND outcome.camp_id = message.camp_id
+              AND outcome.actor_type = 'agent' AND outcome.actor_id = conversation.agent_id
+              AND outcome.source_agent_run_id = run.id AND outcome.execution_epoch = ?2
+              AND json_extract(outcome.result_payload_json, '$.messageId') = message.id
+        )
+        "#,
+        params![run_id, epoch],
+        |row| row.get(0),
+    )?)
+}
+
 fn decide_missing_send_recovery(
     transaction: &Transaction<'_>,
     target: &TerminalTarget,
@@ -5670,7 +5722,7 @@ fn validate_terminal_target(
     if camp_id != Some(target.camp_id.as_str()) {
         return Ok(Some(rejected(
             "agent_run.camp_mismatch",
-            "AgentRun is outside the Camp",
+            "AgentRun is outside the Thread",
         )));
     }
     if target.version != expected_version {
@@ -6169,7 +6221,7 @@ pub(crate) fn cancel_automation_camp_turn_in_tx(
         |row| row.get(0),
     )?;
     if !association {
-        anyhow::bail!("AutomationRun does not own the requested CampTurn");
+        anyhow::bail!("AutomationRun does not own the requested ThreadTurn");
     }
     let actor = ActorRef::System {
         component_id: "automation-cancellation".to_string(),
@@ -6345,7 +6397,7 @@ pub(crate) fn recompute_camp_turn(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if runs.is_empty() {
-        anyhow::bail!("CampTurn has no current AgentRun responsibilities");
+        anyhow::bail!("ThreadTurn has no current AgentRun responsibilities");
     }
 
     let has_nonterminal = runs
@@ -6510,7 +6562,7 @@ fn claim_admission_rejection(
     if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
         return Ok(Some(rejected(
             "agent_run.camp_mismatch",
-            "AgentRun is outside the Camp",
+            "AgentRun is outside the Thread",
         )));
     }
     if run.version != envelope.payload.expected_version {
@@ -6523,7 +6575,7 @@ fn claim_admission_rejection(
         if run.execution_budget_exhausted_at.is_some() {
             return Ok(Some(rejected(
                 "agent_run.execution_budget_exhausted",
-                "CampTurn Execution Budget is already exhausted",
+                "ThreadTurn Execution Budget is already exhausted",
             )));
         }
         if !matches!(run.camp_turn_status.as_str(), "running" | "waiting")
@@ -6531,7 +6583,7 @@ fn claim_admission_rejection(
         {
             return Ok(Some(rejected(
                 "agent_run.turn_fenced",
-                "CampTurn is no longer accepting AgentRun execution",
+                "ThreadTurn is no longer accepting AgentRun execution",
             )));
         }
         let budget_now = camp_turn_execution_budget_now();
@@ -6552,7 +6604,7 @@ fn claim_admission_rejection(
             return Ok(Some(CommandHandlerResult::rejected(
                 "agent_run.execution_budget_exhausted",
                 json!({
-                    "message": "CampTurn Execution Budget deadline has elapsed",
+                    "message": "ThreadTurn Execution Budget deadline has elapsed",
                     "reason": "elapsed",
                     "threadTurnId": run.camp_turn_id,
                     "deadlineAt": run.execution_budget_deadline_at,
@@ -6583,7 +6635,7 @@ fn claim_admission_rejection(
     if !run.member_active {
         return Ok(Some(rejected(
             "agent_run.member_unavailable",
-            "Agent is no longer an executable current Camp member",
+            "Agent is no longer an executable current Thread member",
         )));
     }
     if !current_authorization_covers_snapshot(
@@ -6593,7 +6645,7 @@ fn claim_admission_rejection(
     )? {
         return Ok(Some(rejected(
             "agent_run.authorization_revoked",
-            "Current Camp authorization no longer covers the frozen AgentRun",
+            "Current Thread authorization no longer covers the frozen AgentRun",
         )));
     }
     if run.status == "waiting" && has_recovery_safety_blocker(transaction, &run.id)? {
@@ -6766,7 +6818,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     current_capability_overrides: serde_json::from_str(
                         &current_capability_overrides,
                     )
-                    .context("CampMember capability overrides are invalid")?,
+                    .context("ThreadMember capability overrides are invalid")?,
                 })
             },
         )
@@ -6798,7 +6850,7 @@ pub(crate) fn current_authorization_covers_snapshot(
                 Some("deny") => {
                     current.remove(capability);
                 }
-                _ => anyhow::bail!("invalid CampMember capability override"),
+                _ => anyhow::bail!("invalid ThreadMember capability override"),
             }
         }
     }

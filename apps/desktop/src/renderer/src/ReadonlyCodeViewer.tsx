@@ -25,6 +25,8 @@ export function ReadonlyCodeViewer({
   startLine = 1,
   target,
   theme,
+  readingLine,
+  onReadingLine,
   findScopeLabel = ''
 }: {
   fileName: string
@@ -32,10 +34,14 @@ export function ReadonlyCodeViewer({
   startLine?: number
   target?: FileLocationTarget
   theme: ResolvedTheme
+  readingLine?: number
+  onReadingLine?(line: number): void
   findScopeLabel?: string
 }): React.JSX.Element {
   const interfaceLanguage = useInterfaceLanguage()
   const viewRef = useRef<EditorView | null>(null)
+  const readingLineRef = useRef(readingLine)
+  readingLineRef.current = readingLine
   const previousThemeRef = useRef(theme)
   const themeAnchorRef = useRef<{ theme: ResolvedTheme; view: EditorView; position: number } | null>(null)
   const [editor, setEditor] = useState<EditorView | null>(null)
@@ -68,6 +74,25 @@ export function ReadonlyCodeViewer({
     document.addEventListener(APPEARANCE_READING_CHANGED, measure)
     return () => document.removeEventListener(APPEARANCE_READING_CHANGED, measure)
   }, [])
+
+  useEffect(() => {
+    const line = readingLineRef.current
+    if (!editor || line === undefined) return
+    let frame = 0
+    const restore = (): void => {
+      if (!editor.scrollDOM.clientHeight) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const local = Math.max(1, Math.min(editor.state.doc.lines, line - startLine + 1))
+        editor.dispatch({ effects: EditorView.scrollIntoView(editor.state.doc.line(local).from, { y: 'start', yMargin: 0 }) })
+        observer.disconnect()
+      })
+    }
+    const observer = new ResizeObserver(restore)
+    observer.observe(editor.scrollDOM)
+    restore()
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [editor, text, startLine])
 
   const findAdapter = useMemo(() => editor ? codeFileFindAdapter(editor, findScopeLabel) : null, [editor, text, findScopeLabel])
   useFileFindAdapter(findAdapter)
@@ -148,6 +173,12 @@ export function ReadonlyCodeViewer({
       role="region"
       aria-label={uiAttribute("{0} 内容", String(fileName))}
       tabIndex={0}
+      onScrollCapture={(event) => {
+        const view = viewRef.current
+        if (!view || event.target !== view.scrollDOM || !view.scrollDOM.clientHeight || !onReadingLine) return
+        const height = Math.max(0, (view.scrollDOM.getBoundingClientRect().top - view.documentTop) / view.scaleY)
+        onReadingLine(startLine + view.state.doc.lineAt(view.lineBlockAtHeight(height).from).number - 1)
+      }}
       onKeyDown={(event) => {
         const view = viewRef.current
         if (!view || !isPreviewSelectAll(event)) return

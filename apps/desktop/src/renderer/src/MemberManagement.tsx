@@ -24,7 +24,7 @@ import type {
   AdapterInstallation,
   AdapterKind,
   AgentProfile,
-  HealthStatus,
+  RuntimeStatus,
   HostPlatformKey,
   MemberRemovalPreview,
   ProductRuntimeAvailability,
@@ -877,8 +877,8 @@ const MemberEditor = forwardRef<
                   <AppDialogFactGrid>
                     <AppDialogFact label={uiAttribute("当前会话")}>
                       {removal.preview.currentThreadMembershipCount}<UiText zh={" 个"} /></AppDialogFact>
-                    <AppDialogFact label={uiAttribute("未完成任务")}>
-                      {removal.preview.openAssignedTaskCount}<UiText zh={" 个将释放"} /></AppDialogFact>
+                    {removal.preview.openAssignedTaskCount !== undefined && <AppDialogFact label={uiAttribute("未完成任务")}>
+                      {removal.preview.openAssignedTaskCount}<UiText zh={" 个将释放"} /></AppDialogFact>}
                     <AppDialogFact label={uiAttribute("会话将变空")}>
                       {removal.preview.soleMemberThreadCount}<UiText zh={" 个"} /></AppDialogFact>
                   </AppDialogFactGrid>
@@ -1457,16 +1457,19 @@ export function RuntimeInstallationsPanel({
   health,
   onReload
 }: {
-  health: HealthStatus | null
+  health: RuntimeStatus | null
   installations: AdapterInstallation[]
   onReload(): Promise<void>
 }): React.JSX.Element {
   const client = useThreadClient()
   const [settingsRuntime, setSettingsRuntime] = useState<AdapterKind | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
+  const [checkingKinds, setCheckingKinds] = useState<Set<AdapterKind>>(new Set())
+  const pendingChecks = useRef(new Set<AdapterKind>())
+  const [rescanning, setRescanning] = useState(false)
+  const rescanPending = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<{ runtimeKind: AdapterKind; mode: 'install' | 'login' } | null>(null)
-  const [checkFeedback, setCheckFeedback] = useState<{ runtimeKind: AdapterKind; error: string } | null>(null)
+  const [checkFeedback, setCheckFeedback] = useState<Partial<Record<AdapterKind, string>>>({})
   const guideId = useId()
   const availability = health?.runtimeAvailability ?? []
   const hasEnabledRuntime =
@@ -1477,10 +1480,10 @@ export function RuntimeInstallationsPanel({
     ) ?? false
 
   const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
-    if (busy !== null) return
-    setBusy(`check-${runtimeKind}`)
-    setError(null)
-    setCheckFeedback(null)
+    if (pendingChecks.current.has(runtimeKind)) return
+    pendingChecks.current.add(runtimeKind)
+    setCheckingKinds(new Set(pendingChecks.current))
+    setCheckFeedback(current => ({ ...current, [runtimeKind]: undefined }))
     try {
       try {
         const result = await requestProductRuntimeCheck(runtimeKind, client.request)
@@ -1490,14 +1493,17 @@ export function RuntimeInstallationsPanel({
         await onReload()
       }
     } catch (nextError) {
-      setCheckFeedback({ runtimeKind, error: errorMessage(nextError) })
+      setCheckFeedback(current => ({ ...current, [runtimeKind]: errorMessage(nextError) }))
     } finally {
-      setBusy(null)
+      pendingChecks.current.delete(runtimeKind)
+      setCheckingKinds(new Set(pendingChecks.current))
     }
   }
 
   const rescan = async (): Promise<void> => {
-    setBusy('rescan')
+    if (rescanPending.current) return
+    rescanPending.current = true
+    setRescanning(true)
     setError(null)
     try {
       await client.request('runtime.discovery.rescan', {
@@ -1507,7 +1513,8 @@ export function RuntimeInstallationsPanel({
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
-      setBusy(null)
+      rescanPending.current = false
+      setRescanning(false)
     }
   }
 
@@ -1523,10 +1530,10 @@ export function RuntimeInstallationsPanel({
         aside={
           <button
             className="quiet-button"
-            disabled={busy !== null || (health !== null && !hasEnabledRuntime)}
+            disabled={rescanning || (health !== null && !hasEnabledRuntime)}
             onClick={() => void rescan()}
           >
-            {busy === 'rescan'
+            {rescanning
               ? uiAttribute("正在重新检测…")
               : health === null
                 ? uiAttribute("重新检测")
@@ -1566,10 +1573,12 @@ export function RuntimeInstallationsPanel({
             const mode = presentation.status === 'not_installed' ? 'install'
               : presentation.status === 'authentication_required' ? 'login' : null
             const isOpen = guide !== null && expanded?.runtimeKind === runtimeKind
-            const checking = busy === `check-${runtimeKind}`
-            const feedback = checkFeedback?.runtimeKind === runtimeKind ? (
+            // A stale server snapshot must not lock retry after this row's request
+            // settles. The badge still presents server state; Core coalesces checks.
+            const checking = checkingKinds.has(runtimeKind)
+            const feedback = checkFeedback[runtimeKind] ? (
               <p className="runtime-guide-feedback is-error" role="alert">
-                {checkFeedback.error}
+                {checkFeedback[runtimeKind]}
               </p>
             ) : null
             return (
@@ -1593,17 +1602,17 @@ export function RuntimeInstallationsPanel({
                   onClick={() => setExpanded(isOpen ? null : { runtimeKind, mode: mode ?? 'install' })}
                 >
                   {isOpen ? uiAttribute("收起") : mode === 'login' ? uiAttribute("登录指南") : uiAttribute("安装指南")}<DialogControlIcon name="chevron" />
-                </button> : <button type="button" className="quiet-button runtime-product-check" disabled={busy !== null || !allowed} onClick={() => void checkProduct(runtimeKind)}>
+                </button> : <button type="button" className="quiet-button runtime-product-check" disabled={checking || !allowed} onClick={() => void checkProduct(runtimeKind)}>
                   {checking
                     ? uiAttribute("正在检查…")
                     : allowed ? uiAttribute("检查状态") : uiAttribute("不可检查")}<DialogControlIcon name="refresh" />
                 </button>}
                 <button type="button" className="quiet-button runtime-product-settings" aria-label={uiAttribute("{0} 启动设置", String(adapterLabel(runtimeKind)))}
-                  title={uiAttribute("启动设置")} disabled={busy !== null || !allowed} onClick={() => setSettingsRuntime(runtimeKind)}><DialogControlIcon name="settings" /></button>
+                  title={uiAttribute("启动设置")} disabled={checking || !allowed} onClick={() => setSettingsRuntime(runtimeKind)}><DialogControlIcon name="settings" /></button>
                 {item?.failure && <RuntimeFailureNotice failure={item.failure} />}
                 {isOpen && guide && expanded ? <RuntimeInstallationGuide
                   id={`${guideId}-${runtimeKind}`} label={adapterLabel(runtimeKind)} guide={guide}
-                  mode={expanded.mode} busy={busy !== null} checking={checking} feedback={feedback}
+                  mode={expanded.mode} busy={checking} checking={checking} feedback={feedback}
                   onCheck={() => void checkProduct(runtimeKind)}
                 /> : feedback}
               </article>

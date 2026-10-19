@@ -76,7 +76,7 @@ impl ThreadAttachmentPublicationCoordinator {
             .map(String::as_str)
             .collect::<Vec<_>>();
         if stored_ids != requested_ids {
-            anyhow::bail!("Camp Composer Draft attachments changed before publication commit");
+            anyhow::bail!("Thread Composer Draft attachments changed before publication commit");
         }
         self.commit_intent(
             transaction,
@@ -135,7 +135,7 @@ impl ThreadAttachmentPublicationCoordinator {
         )?;
         let semantic_revision = current_revision
             .checked_add(1)
-            .context("Camp Attachment semantic revision overflow")?;
+            .context("Thread Attachment semantic revision overflow")?;
         let operation_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
@@ -354,7 +354,7 @@ fn check_effective_quota(
     let camp_effective = u64::try_from(camp_materialized)?
         .checked_add(u64::try_from(camp_reserved)?)
         .and_then(|value| value.checked_add(requested_bytes))
-        .context("Camp attachment quota overflow")?;
+        .context("Thread attachment quota overflow")?;
     let instance_effective = u64::try_from(instance_materialized)?
         .checked_add(u64::try_from(instance_reserved)?)
         .and_then(|value| value.checked_add(requested_bytes))

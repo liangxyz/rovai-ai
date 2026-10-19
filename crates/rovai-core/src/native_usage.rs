@@ -29,6 +29,7 @@ enum Dialect {
     Kimi,
     Qoder,
     Trae,
+    Minimax,
 }
 
 pub(crate) struct NativeUsageObservation {
@@ -48,6 +49,27 @@ pub(crate) enum NativeUsageReader {
 }
 
 impl NativeUsageReader {
+    pub(crate) fn minimax_tail(
+        &self,
+        message_ids: BTreeSet<String>,
+        tool_call_ids: BTreeSet<String>,
+    ) -> Option<Self> {
+        let Self::Jsonl(reader) = self else {
+            return None;
+        };
+        if !matches!(reader.dialect, Dialect::Minimax)
+            || (message_ids.is_empty() && tool_call_ids.is_empty())
+        {
+            return None;
+        }
+        let mut reader = reader.clone();
+        reader.minimax_messages = Some(message_ids);
+        reader.minimax_tool_calls = tool_call_ids;
+        // Compaction can replace the active journal during a prompt. Only this
+        // frozen, identity-filtered tail may revisit native history artifacts.
+        reader.disabled = false;
+        Some(Self::Jsonl(reader))
+    }
     pub(crate) fn for_prompt(
         kind: AdapterKind,
         workspace: &Path,
@@ -63,6 +85,24 @@ impl NativeUsageReader {
             })
         }
     }
+    pub(crate) fn for_minimax_prompt(
+        root: &Path,
+        workspace: &Path,
+        session_id: &str,
+    ) -> Option<Self> {
+        let root = fs::canonicalize(root).ok()?;
+        let path = minimax_session_path(&root, workspace.to_str()?, session_id).ok()?;
+        NativeJsonlUsageReader::baseline(
+            Dialect::Minimax,
+            root,
+            path,
+            workspace.to_str()?.to_owned(),
+            session_id.to_owned(),
+        )
+        .ok()
+        .map(Self::Jsonl)
+    }
+
     pub(crate) fn poll(&mut self) -> Vec<NativeUsageObservation> {
         match self {
             Self::Jsonl(reader) => reader.poll(),
@@ -71,6 +111,7 @@ impl NativeUsageReader {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct NativeJsonlUsageReader {
     dialect: Dialect,
     root: PathBuf,
@@ -83,9 +124,14 @@ pub(crate) struct NativeJsonlUsageReader {
     seen: BTreeSet<String>,
     disabled: bool,
     context_model: Option<NativeContextModel>,
+    // A terminal reader admits only message or tool-call identities observed on
+    // this exact ACP prompt. Tool-only assistant messages have no display ID.
+    minimax_messages: Option<BTreeSet<String>>,
+    minimax_canonical_messages: BTreeMap<String, String>,
+    minimax_tool_calls: BTreeSet<String>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct FileIdentity {
     #[cfg(unix)]
     dev: u64,
@@ -168,6 +214,7 @@ impl NativeJsonlUsageReader {
                 .join("projects")
                 .join(qoder_workspace_key(&workspace))
                 .join(format!("{session_id}.jsonl")),
+            Dialect::Minimax => unreachable!("MiniMax uses the frozen Host data directory"),
             Dialect::Trae => unreachable!("TRAE uses the platform cache root"),
         };
         Self::baseline(dialect, root, path, workspace, session_id.to_string()).ok()
@@ -192,6 +239,9 @@ impl NativeJsonlUsageReader {
             seen: BTreeSet::new(),
             disabled: false,
             context_model: None,
+            minimax_messages: None,
+            minimax_canonical_messages: BTreeMap::new(),
+            minimax_tool_calls: BTreeSet::new(),
         };
         if let Some(mut file) = reader.open()? {
             let metadata = file.metadata()?;
@@ -232,6 +282,11 @@ impl NativeJsonlUsageReader {
                 bail!("native Session identity does not match");
             }
         }
+        if matches!(self.dialect, Dialect::Minimax)
+            && minimax_session_path(&self.root, &self.workspace, &self.session_id)? != self.path
+        {
+            bail!("native Usage Session location changed");
+        }
         open_native_file(&self.root, &self.path)
     }
 
@@ -251,6 +306,9 @@ impl NativeJsonlUsageReader {
     }
 
     fn poll_checked(&mut self) -> Result<Vec<NativeUsageObservation>> {
+        if self.minimax_messages.is_some() {
+            return self.poll_minimax_tail();
+        }
         let Some(mut file) = self.open()? else {
             if self.file_identity.is_some() {
                 bail!("native Usage journal disappeared");
@@ -271,6 +329,40 @@ impl NativeJsonlUsageReader {
         self.file_identity = Some(identity);
         file.seek(SeekFrom::Start(self.offset))?;
         self.read_complete_lines(&mut file, metadata.len(), false)
+    }
+
+    fn poll_minimax_tail(&mut self) -> Result<Vec<NativeUsageObservation>> {
+        anyhow::ensure!(
+            minimax_session_path(&self.root, &self.workspace, &self.session_id)? == self.path,
+            "native Usage Session location changed"
+        );
+        self.minimax_canonical_messages = minimax_message_bindings(
+            &self.root,
+            &self.session_id,
+            self.minimax_messages
+                .as_ref()
+                .context("missing terminal identities")?,
+        )?;
+        let paths = minimax_history_artifacts(&self.root, &self.path, &self.session_id)?;
+        let mut remaining = MAX_JOURNAL_BYTES;
+        let mut observations = Vec::new();
+        // Active history wins over its older snapshots. The exact ACP identities
+        // and original baseline remain mandatory, even after a file replacement.
+        for path in paths {
+            let Some(mut file) = open_native_file(&self.root, &path)? else {
+                continue;
+            };
+            let end = file.metadata()?.len();
+            anyhow::ensure!(end <= remaining, "native Usage history exceeds bound");
+            remaining -= end;
+            self.offset = 0;
+            self.skip_partial = false;
+            observations.extend(self.read_complete_lines(&mut file, end, false)?);
+            if self.disabled {
+                break;
+            }
+        }
+        Ok(observations)
     }
 
     fn read_complete_lines(
@@ -349,6 +441,41 @@ impl NativeJsonlUsageReader {
                     }
                     calls
                 }
+                Dialect::Minimax => {
+                    let Some(record) = minimax_record(&line) else {
+                        continue;
+                    };
+                    let id = format!("minimax-native:{}:{}", self.session_id, record.message_id);
+                    if self.minimax_messages.is_some()
+                        && !self
+                            .minimax_canonical_messages
+                            .get(&record.message_id)
+                            .map_or_else(
+                                || {
+                                    record.turn_id.as_ref().is_some_and(|turn| {
+                                        self.minimax_canonical_messages
+                                            .values()
+                                            .any(|observed| observed == turn)
+                                    }) && !record
+                                        .message
+                                        .tool_call_ids
+                                        .is_disjoint(&self.minimax_tool_calls)
+                                },
+                                |turn_id| record.turn_id.as_ref() == Some(turn_id),
+                            )
+                    {
+                        continue;
+                    }
+                    if baseline {
+                        if self.seen.len() >= MAX_IDENTITIES {
+                            self.disabled = true;
+                            break;
+                        }
+                        self.seen.insert(id);
+                        continue;
+                    }
+                    parse_minimax(&line, &self.session_id).into_iter().collect()
+                }
                 Dialect::Kimi => parse_kimi(&line, &self.session_id).into_iter().collect(),
                 Dialect::Trae => {
                     let Some(record) = trae_record(&line, &self.session_id) else {
@@ -423,6 +550,232 @@ impl NativeJsonlUsageReader {
         }
         Ok(observations)
     }
+}
+
+// Only locators and explicit identity mappings are selected, never message bodies.
+fn open_minimax_database(root: &Path) -> Result<rusqlite::Connection> {
+    let path = root.join("v2/sqlite/runtime-state.sqlite");
+    open_native_file(root, &path)?.context("MiniMax Session index missing")?;
+    let c = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
+    c.busy_timeout(std::time::Duration::from_millis(250))?;
+    Ok(c)
+}
+
+fn minimax_history_artifacts(root: &Path, active: &Path, session_id: &str) -> Result<Vec<PathBuf>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Catalog {
+        schema_version: u32,
+        session_id: String,
+        artifacts: Vec<Artifact>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Artifact {
+        generation: u64,
+        kind: String,
+        file_name: String,
+    }
+    let directory = active
+        .parent()
+        .context("missing native history directory")?;
+    let mut paths = vec![active.to_path_buf()];
+    let Some(file) = open_native_file(root, &directory.join("history-catalog.json"))? else {
+        return Ok(paths);
+    };
+    anyhow::ensure!(
+        file.metadata()?.len() <= MAX_LINE_BYTES,
+        "native history catalog exceeds bound"
+    );
+    let catalog: Catalog = serde_json::from_reader(file.take(MAX_LINE_BYTES))?;
+    anyhow::ensure!(
+        catalog.schema_version == 1 && catalog.session_id == session_id,
+        "native history catalog does not match"
+    );
+    anyhow::ensure!(
+        catalog.artifacts.len() <= MAX_IDENTITIES,
+        "native history catalog exceeds bound"
+    );
+    let mut snapshots: Vec<_> = catalog
+        .artifacts
+        .into_iter()
+        .filter(|item| item.kind == "snapshot")
+        .collect();
+    snapshots.sort_by_key(|item| std::cmp::Reverse(item.generation));
+    for item in snapshots.into_iter().take(63) {
+        let prefix = format!("g{:012}--ctx_", item.generation);
+        let identity = item
+            .file_name
+            .strip_prefix(&prefix)
+            .and_then(|name| name.strip_suffix(".jsonl"));
+        anyhow::ensure!(
+            identity.is_some_and(|id| uuid::Uuid::parse_str(id).is_ok()),
+            "invalid native history artifact"
+        );
+        paths.push(directory.join("snapshots").join(item.file_name));
+    }
+    Ok(paths)
+}
+
+fn minimax_message_bindings(
+    root: &Path,
+    session_id: &str,
+    ids: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>> {
+    let c = open_minimax_database(root)?;
+    let mut query = c.prepare(
+        "SELECT json_extract(data_json,'$.canonical_message_id'),turn_id FROM local_runtime_message_rows
+         WHERE session_id=?1 AND msg_id=?2 AND role='assistant' AND json_valid(data_json) LIMIT 2"
+    )?;
+    let mut bindings = BTreeMap::new();
+    for id in ids {
+        let rows = query
+            .query_map(rusqlite::params![session_id, id], |row| {
+                Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if let [(Some(canonical), turn)] = rows.as_slice()
+            && safe_identity(canonical)
+            && safe_identity(turn)
+        {
+            if bindings
+                .get(canonical)
+                .is_some_and(|existing| existing != turn)
+            {
+                bail!("conflicting MiniMax message binding");
+            }
+            bindings.insert(canonical.clone(), turn.clone());
+        }
+    }
+    Ok(bindings)
+}
+
+fn minimax_session_path(root: &Path, workspace: &str, session_id: &str) -> Result<PathBuf> {
+    anyhow::ensure!(
+        safe_identity(session_id),
+        "invalid MiniMax Session identity"
+    );
+    let c = open_minimax_database(root)?;
+    let (cwd, parent, relative): (String, Option<String>, String) = c.query_row(
+        "SELECT workspace_dir,parent_session_id,history_relative_dir FROM local_runtime_sessions WHERE session_id=?1",
+        [session_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    // ACP uses Win32 paths while the Core freezes canonical verbatim paths.
+    // Compare their equivalent lexical representations without admitting a
+    // different workspace or weakening the exact root-Session identity check.
+    #[cfg(windows)]
+    let same_workspace =
+        dunce::simplified(Path::new(&cwd)) == dunce::simplified(Path::new(workspace));
+    #[cfg(not(windows))]
+    let same_workspace = cwd == workspace;
+    anyhow::ensure!(
+        same_workspace && parent.is_none(),
+        "MiniMax root Session does not match"
+    );
+    anyhow::ensure!(
+        !relative.is_empty()
+            && Path::new(&relative)
+                .components()
+                .all(|part| matches!(part, Component::Normal(_))),
+        "MiniMax history path is invalid"
+    );
+    Ok(root
+        .join("v2/sessions")
+        .join(relative)
+        .join("messages.jsonl"))
+}
+
+#[derive(Deserialize)]
+struct MinimaxRecord {
+    message_id: String,
+    turn_id: Option<String>,
+    message: MinimaxMessage,
+}
+#[derive(Deserialize)]
+struct MinimaxMessage {
+    role: String,
+    #[serde(rename = "stopReason")]
+    stop_reason: Option<String>,
+    usage: Option<MinimaxUsage>,
+    timestamp: Option<i64>,
+    #[serde(
+        default,
+        rename = "content",
+        deserialize_with = "minimax_content_tool_ids"
+    )]
+    tool_call_ids: BTreeSet<String>,
+}
+
+fn minimax_content_tool_ids<'de, D>(
+    deserializer: D,
+) -> std::result::Result<BTreeSet<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Part {
+        #[serde(rename = "type")]
+        kind: Option<String>,
+        id: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Content {
+        Parts(Vec<Part>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Content::deserialize(deserializer)? {
+        Content::Parts(parts) => parts
+            .into_iter()
+            .filter(|part| part.kind.as_deref() == Some("toolCall"))
+            .filter_map(|part| part.id.filter(|id| !id.is_empty() && id.len() <= 256))
+            .take(MAX_IDENTITIES)
+            .collect(),
+        Content::Other(_) => BTreeSet::new(),
+    })
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MinimaxUsage {
+    input: Option<i64>,
+    output: Option<i64>,
+    cache_read: Option<i64>,
+    cache_write: Option<i64>,
+}
+
+fn minimax_record(line: &[u8]) -> Option<MinimaxRecord> {
+    let record: MinimaxRecord = serde_json::from_slice(line).ok()?;
+    (record.message.role == "assistant" && safe_identity(&record.message_id)).then_some(record)
+}
+fn parse_minimax(line: &[u8], session_id: &str) -> Option<NativeUsageObservation> {
+    let record = minimax_record(line)?;
+    if !matches!(
+        record.message.stop_reason.as_deref(),
+        Some("stop" | "toolUse" | "length")
+    ) {
+        return None;
+    }
+    let raw = record.message.usage?;
+    Some(observation(
+        session_id,
+        format!("minimax-native:{session_id}:{}", record.message_id),
+        "minimax-native-message-usage-v1",
+        record.turn_id,
+        RuntimeInputSemantics::ExclusiveBuckets,
+        RuntimeUsageFields {
+            input_tokens: nonnegative(raw.input),
+            output_tokens: nonnegative(raw.output),
+            cache_read_input_tokens: nonnegative(raw.cache_read),
+            cache_write_input_tokens: nonnegative(raw.cache_write),
+            ..RuntimeUsageFields::default()
+        },
+        record.message.timestamp,
+    ))
 }
 
 fn open_native_file(root: &Path, file_path: &Path) -> Result<Option<File>> {
@@ -1315,6 +1668,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn minimax(id: &str) -> serde_json::Value {
+        json!({"message_id":id,"turn_id":"turn-1","message":{"role":"assistant","content":"PRIVATE_MINIMAX_CANARY", "stopReason":"stop", "usage":{"input":100,"output":5,"cacheRead":20,"cacheWrite":3},"timestamp":1}})
+    }
+
     fn trae(id: &str) -> serde_json::Value {
         json!({"id":id,"session_id":"session-1","branch":"Trae CLI","agent_name":"Trae CLI",
             "agent_id":"root-agent","parent_tool_call_id":"","created_at":"2026-10-02T21:55:27+08:00",
@@ -1345,6 +1702,52 @@ mod tests {
     // fields. ACP parser fixtures cannot exercise these persisted envelopes.
     #[test]
     fn native_dialects_select_root_calls_preserve_missing_and_ignore_restated_content() {
+        let frame = minimax("call-1");
+        let parsed = parse_minimax(frame.to_string().as_bytes(), "root-1").unwrap();
+        assert_eq!(
+            parsed.usage.input_semantics,
+            RuntimeInputSemantics::ExclusiveBuckets
+        );
+        assert_eq!(parsed.usage.fields.input_tokens, Some(100));
+        assert_eq!(parsed.usage.fields.cache_read_input_tokens, Some(20));
+        assert_eq!(parsed.usage.fields.cache_write_input_tokens, Some(3));
+        assert!(
+            !serde_json::to_string(&parsed.usage)
+                .unwrap()
+                .contains("PRIVATE_MINIMAX_CANARY")
+        );
+        let mut tool_only = frame.clone();
+        tool_only["message"]["content"] = json!([
+            {"type":"toolCall","id":"call-1|provider-id","arguments":{"secret":"PRIVATE_TOOL_ARGUMENT"}},
+            {"type":"thinking","id":"not-a-tool","text":"PRIVATE_REASONING"}
+        ]);
+        assert_eq!(
+            minimax_record(tool_only.to_string().as_bytes())
+                .unwrap()
+                .message
+                .tool_call_ids,
+            ["call-1|provider-id".to_string()].into()
+        );
+        let usage = parse_minimax(tool_only.to_string().as_bytes(), "root-1").unwrap();
+        assert!(
+            !serde_json::to_string(&usage.usage)
+                .unwrap()
+                .contains("PRIVATE_")
+        );
+        for patch in [
+            json!({"role":"user"}),
+            json!({"stopReason":"error"}),
+            json!({"stopReason":"aborted"}),
+            json!({"usage":null}),
+            json!({"usage":{"input":-1}}),
+        ] {
+            let mut value = frame.clone();
+            for (key, field) in patch.as_object().unwrap() {
+                value["message"][key] = field.clone();
+            }
+            let parsed = parse_minimax(value.to_string().as_bytes(), "root-1");
+            assert!(parsed.is_none_or(|item| item.usage.fields.input_tokens.is_none()));
+        }
         let mut frame = trae("call-1");
         let read = |v: &serde_json::Value| {
             trae_record(v.to_string().as_bytes(), "session-1")
@@ -1787,11 +2190,22 @@ mod tests {
             Dialect::Kimi,
             Dialect::Qoder,
             Dialect::Trae,
+            Dialect::Minimax,
         ] {
             let root =
                 std::env::temp_dir().join(format!("rovai-native-usage-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&root).unwrap();
-            let path = root.join("wire.jsonl");
+            let root = fs::canonicalize(root).unwrap();
+            let path = if matches!(dialect, Dialect::Minimax) {
+                fs::create_dir_all(root.join("v2/sqlite")).unwrap();
+                fs::create_dir_all(root.join("v2/sessions/current")).unwrap();
+                let c = rusqlite::Connection::open(root.join("v2/sqlite/runtime-state.sqlite"))
+                    .unwrap();
+                c.execute_batch("CREATE TABLE local_runtime_sessions(session_id TEXT PRIMARY KEY,workspace_dir TEXT,parent_session_id TEXT,history_relative_dir TEXT); INSERT INTO local_runtime_sessions VALUES('session-1','/workspace',NULL,'current');").unwrap();
+                root.join("v2/sessions/current/messages.jsonl")
+            } else {
+                root.join("wire.jsonl")
+            };
             if matches!(dialect, Dialect::Trae) {
                 fs::write(
                     root.join("session.json"),
@@ -1804,6 +2218,7 @@ mod tests {
                 Dialect::Kimi => kimi(id),
                 Dialect::Qoder => qoder(id),
                 Dialect::Trae => trae(id),
+                Dialect::Minimax => minimax(id),
             };
             let line = |id| format!("{}\n", make(id));
             let mut historical = make("old");
@@ -1909,6 +2324,183 @@ mod tests {
             );
             drop(file);
             assert!(terminal.poll().is_empty());
+            if matches!(dialect, Dialect::Minimax) {
+                assert!(
+                    terminal
+                        .minimax_tail(BTreeSet::new(), BTreeSet::new())
+                        .is_none()
+                );
+                let c = rusqlite::Connection::open(root.join("v2/sqlite/runtime-state.sqlite"))
+                    .unwrap();
+                c.execute_batch("CREATE TABLE local_runtime_message_rows(session_id TEXT,msg_id TEXT,role TEXT,turn_id TEXT,data_json TEXT);
+                    INSERT INTO local_runtime_message_rows VALUES
+                    ('session-1','display-old','assistant','turn-1','{\"canonical_message_id\":\"old\"}'),
+                    ('session-1','display-wrong-turn','assistant','another-turn','{\"canonical_message_id\":\"wrong-turn\"}'),
+                    ('other-session','display-owned','assistant','turn-1','{\"canonical_message_id\":\"successor\"}');").unwrap();
+                let mut tail = terminal
+                    .minimax_tail(
+                        [
+                            "display-owned".into(),
+                            "display-old".into(),
+                            "display-wrong-turn".into(),
+                        ]
+                        .into(),
+                        ["active-tool|provider-id".into()].into(),
+                    )
+                    .unwrap();
+                let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+                write!(
+                    file,
+                    "{}{}{}{}",
+                    line("old"),
+                    line("successor"),
+                    line("wrong-turn"),
+                    line("owned-tail").trim_end()
+                )
+                .unwrap();
+                file.flush().unwrap();
+                assert!(
+                    tail.poll().is_empty(),
+                    "history, next turn and incomplete line are excluded"
+                );
+                writeln!(file).unwrap();
+                file.flush().unwrap();
+                assert!(
+                    tail.poll().is_empty(),
+                    "no inferred display/canonical identity mapping"
+                );
+                c.execute("INSERT INTO local_runtime_message_rows VALUES('session-1','display-owned','assistant','turn-1','{\"canonical_message_id\":\"owned-tail\"}')", []).unwrap();
+                let observed = tail.poll();
+                assert_eq!(observed.len(), 1);
+                assert_eq!(
+                    observed[0].source_identity,
+                    "minimax-native:session-1:owned-tail"
+                );
+                assert!(tail.poll().is_empty(), "terminal retry cannot double count");
+                let mut tool_only = make("owned-tool-only");
+                tool_only["turn_id"] = json!("turn-1");
+                tool_only["message"]["content"] = json!([{
+                    "type":"toolCall", "id":"active-tool|provider-id", "name":"bash",
+                    "arguments":{"command":"PRIVATE_ARGUMENT_MUST_NOT_ENTER_USAGE"}
+                }]);
+                let mut another_tool = tool_only.clone();
+                another_tool["message_id"] = json!("unobserved-tool");
+                another_tool["message"]["content"][0]["id"] = json!("another-prompt-tool");
+                let mut wrong_type = tool_only.clone();
+                wrong_type["message_id"] = json!("unknown-content-type");
+                wrong_type["message"]["content"][0]["type"] = json!("thinking");
+                let mut conflicting = tool_only.clone();
+                conflicting["message_id"] = json!("wrong-turn");
+                let mut reused_id = tool_only.clone();
+                reused_id["message_id"] = json!("older-turn-reused-tool-id");
+                reused_id["turn_id"] = json!("unobserved-historical-turn");
+                write!(
+                    file,
+                    "{tool_only}\n{another_tool}\n{wrong_type}\n{conflicting}\n{reused_id}\n"
+                )
+                .unwrap();
+                file.flush().unwrap();
+                let observed = tail.poll();
+                assert_eq!(
+                    observed.len(),
+                    1,
+                    "only the frozen native tool-call ID admits a tool-only assistant"
+                );
+                assert_eq!(
+                    observed[0].source_identity,
+                    "minimax-native:session-1:owned-tool-only"
+                );
+                assert_eq!(observed[0].usage.fields.output_tokens, Some(5));
+                assert!(
+                    tail.poll().is_empty(),
+                    "re-reading the tool-only tail cannot double count"
+                );
+                drop(file);
+                let mut active = tool_only.clone();
+                active["message_id"] = json!("after-compaction-active");
+                let mut archived = tool_only.clone();
+                archived["message_id"] = json!("before-compaction-archived");
+                let archive_name = "g000000000001--ctx_11111111-1111-4111-8111-111111111111.jsonl";
+                let directory = path.parent().unwrap();
+                fs::create_dir_all(directory.join("snapshots")).unwrap();
+                fs::write(
+                    directory.join("snapshots").join(archive_name),
+                    format!(
+                        "{archived}\n{tool_only}\n{another_tool}\n{conflicting}\n{reused_id}\n"
+                    ),
+                )
+                .unwrap();
+                let catalog_path = directory.join("history-catalog.json");
+                let mut catalog = json!({"schemaVersion":1,"sessionId":"session-1","artifacts":[
+                    {"generation":1,"kind":"snapshot","fileName":archive_name}
+                ]});
+                fs::write(&catalog_path, catalog.to_string()).unwrap();
+                fs::write(&path, format!("{}\n{active}\n", make("old"))).unwrap();
+                assert!(terminal.poll().is_empty());
+                let mut rotated = tail
+                    .minimax_tail(
+                        ["display-owned".into(), "display-wrong-turn".into()].into(),
+                        ["active-tool|provider-id".into()].into(),
+                    )
+                    .unwrap();
+                let observed = rotated.poll();
+                assert_eq!(
+                    observed.len(),
+                    2,
+                    "rotation admits only exact prompt identities in active and archived history"
+                );
+                assert!(
+                    rotated.poll().is_empty(),
+                    "compaction copies cannot duplicate consumption"
+                );
+                catalog["sessionId"] = json!("other-session");
+                fs::write(&catalog_path, catalog.to_string()).unwrap();
+                assert!(rotated.poll().is_empty());
+                assert!(matches!(&rotated, NativeUsageReader::Jsonl(reader) if reader.disabled));
+                catalog["sessionId"] = json!("session-1");
+                catalog["artifacts"][0]["fileName"] = json!("../foreign.jsonl");
+                fs::write(&catalog_path, catalog.to_string()).unwrap();
+                assert!(minimax_history_artifacts(&root, &path, "session-1").is_err());
+                assert!(minimax_session_path(&root, "/another", "session-1").is_err());
+                assert!(minimax_session_path(&root, "/workspace", "other-session").is_err());
+                let c = rusqlite::Connection::open(root.join("v2/sqlite/runtime-state.sqlite"))
+                    .unwrap();
+                #[cfg(windows)]
+                {
+                    let workspace = root.join("workspace");
+                    fs::create_dir(&workspace).unwrap();
+                    let canonical = workspace.canonicalize().unwrap();
+                    let native_path = dunce::simplified(&canonical).to_str().unwrap();
+                    c.execute(
+                        "UPDATE local_runtime_sessions SET workspace_dir=?1",
+                        [native_path],
+                    )
+                    .unwrap();
+                    assert!(
+                        NativeUsageReader::for_minimax_prompt(&root, &canonical, "session-1")
+                            .is_some(),
+                        "Windows ACP native paths and Core verbatim paths identify the same workspace"
+                    );
+                    assert!(
+                        minimax_session_path(&root, &format!("{native_path}-other"), "session-1")
+                            .is_err(),
+                        "path normalization must not admit another workspace"
+                    );
+                    c.execute(
+                        "UPDATE local_runtime_sessions SET workspace_dir='/workspace'",
+                        [],
+                    )
+                    .unwrap();
+                }
+                c.execute(
+                    "UPDATE local_runtime_sessions SET parent_session_id='parent'",
+                    [],
+                )
+                .unwrap();
+                assert!(minimax_session_path(&root, "/workspace", "session-1").is_err());
+                c.execute("UPDATE local_runtime_sessions SET parent_session_id=NULL,history_relative_dir='../outside'", []).unwrap();
+                assert!(minimax_session_path(&root, "/workspace", "session-1").is_err());
+            }
             fs::remove_dir_all(root).unwrap();
         }
         let kiro_root =

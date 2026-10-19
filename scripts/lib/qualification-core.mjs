@@ -4,8 +4,37 @@ import { createInterface } from 'node:readline'
 import { access } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { windowsProcessTable } from './windows-process-table.mjs'
-import { runCaptured } from './qualification-common.mjs'
+import { canonicalJson, runCaptured } from './qualification-common.mjs'
 import { coreDataDirectoryArguments } from './runtime-camp-files-root.mjs'
+
+/** Only compare public Runtime configuration, never native auth/environment. */
+export function frozenMemberRuntimeDifferences(member, profile) {
+  const differences = []
+  function compare(field, expected, actual) {
+    if (expected === undefined || actual === undefined) {
+      if (expected !== actual) differences.push({ field, expected: expected === undefined ? '<missing>' : expected, actual: actual === undefined ? '<missing>' : actual })
+      return
+    }
+    if (expected && actual && typeof expected === 'object' && typeof actual === 'object'
+      && !Array.isArray(expected) && !Array.isArray(actual)) {
+      for (const key of [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort()) {
+        compare(`${field}.${key}`, expected[key], actual[key])
+      }
+    } else if (canonicalJson(expected) !== canonicalJson(actual)) {
+      differences.push({ field, expected, actual })
+    }
+  }
+  // Member reads are static, even after runtime.product.check succeeds. The
+  // Runner checks the real installation separately; this is not model drift.
+  if (!['ready', 'installed_unverified'].includes(profile?.runtimeReadiness?.status)) {
+    compare('runtimeReadiness.status', 'ready', profile?.runtimeReadiness?.status)
+  }
+  compare('runtimeReadiness.blockers', [], profile?.runtimeReadiness?.blockers)
+  for (const field of ['adapterKind', 'model', 'permissions']) {
+    compare(`runtimeConfiguration.${field}`, member[field], profile?.runtimeConfiguration?.[field])
+  }
+  return differences
+}
 
 export async function findCompetingRovaiProcesses() {
   return (await processTable()).filter((process) => {
@@ -80,7 +109,8 @@ export function startQualificationCore({
   workingDirectory,
   runtimeCacheDirectory,
   mcpConfigPath = null,
-  onNotification = null
+  onNotification = null,
+  environmentOverrides = {}
 }) {
   const executable = resolve(coreExecutable)
   const dataArguments = coreDataDirectoryArguments(dataDirectory)
@@ -90,7 +120,7 @@ export function startQualificationCore({
     '--skill-library-root', join(resolvedDataDirectory, 'managed-skill-library')
   ]
   if (mcpConfigPath) args.push('--mcp-config-path', resolve(mcpConfigPath))
-  const environment = { ...process.env }
+  const environment = { ...process.env, ...environmentOverrides }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('ROVAI_QUALIFICATION_')) delete environment[key]
   }

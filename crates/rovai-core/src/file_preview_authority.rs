@@ -188,7 +188,7 @@ fn directory_camp_root(database: &Database, camp_id: &str) -> Result<Option<Stri
             |row| row.get(0),
         )
         .optional()
-        .context("failed to resolve the Camp workspace")
+        .context("failed to resolve the Thread workspace")
 }
 
 fn workspace_execution_root(workspace_json: Option<&str>) -> Option<String> {
@@ -460,7 +460,7 @@ fn message_source(
             },
         )
         .optional()
-        .context("failed to resolve the CampMessage file reference")?;
+        .context("failed to resolve the ThreadMessage file reference")?;
     let Some((body, source_agent_run_id, binding_kind, project_path, workspace_json)) = row else {
         return Ok(None);
     };

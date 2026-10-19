@@ -57,6 +57,7 @@ import {
   assertExecutable,
   descendantsOf,
   findCompetingRovaiProcesses,
+  frozenMemberRuntimeDifferences,
   processTable,
   qualificationRuntimePrivateDiagnostic,
   startQualificationCore,
@@ -1143,11 +1144,9 @@ async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM) {
   const profiles = await request('members.list')
   for (const member of trialTeam) {
     const profile = profiles.find((candidate) => candidate.agentId === member.agentId)
-    if (!profile || profile.runtimeReadiness?.status !== 'ready'
-        || profile.runtimeConfiguration?.adapterKind !== member.adapterKind
-        || canonicalJson(profile.runtimeConfiguration?.model) !== canonicalJson(member.model)
-        || canonicalJson(profile.runtimeConfiguration?.permissions) !== canonicalJson(member.permissions)) {
-      throw new Error(`frozen member Runtime drifted: ${member.agentId}`)
+    const differences = frozenMemberRuntimeDifferences(member, profile)
+    if (differences.length > 0) {
+      throw new Error(`frozen member Runtime drifted: ${member.agentId}: ${JSON.stringify(differences)}`)
     }
   }
   return {

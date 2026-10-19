@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OpenFilePreviewRequest } from '@contracts'
 import { RootWatchRegistry } from './file-preview-watchers'
+import * as fileAccess from './file-preview-access'
 import { CoreFilePreviewSourceAuthority } from './file-preview-authority'
 import { previewPathIsVisible } from '../../renderer/src/file-preview-tab-presentation'
 import {
@@ -96,6 +97,75 @@ function request(rawReference: string): OpenFilePreviewRequest {
 }
 
 describe('FilePreviewService', () => {
+  it('reuses only the latest line location within its candidate handle', async () => {
+    const reads: Array<{ position: number; bytes: number }> = []
+    const openFile = fileAccess.openPreviewFile
+    const spy = vi.spyOn(fileAccess, 'openPreviewFile').mockImplementation(async (...args) => {
+      const opened = await openFile(...args)
+      const read = opened.file.read.bind(opened.file)
+      // Count actual file reads; classification is excluded by resetting after reload.
+      vi.spyOn(opened.file, 'read').mockImplementation((async (buffer: Buffer, offset: number, length: number, position: number | null) => {
+        const result = await read(buffer, offset, length, position)
+        reads.push({ position: position as number, bytes: result.bytesRead })
+        return result
+      }) as typeof opened.file.read)
+      return opened
+    })
+    try {
+      const { root, service } = await fixture()
+      await writeFile(join(root, 'large.log'), 'hello!\n'.repeat(800_000))
+      const opened = await service.open(1, request('large.log'))
+      if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('Expected a file')
+      const old = opened.value.file
+      const fresh = await service.reload(1, { handleId: old.handleId, reopenToken: old.reopenToken, expectedGeneration: old.contentGeneration })
+      if (!fresh.ok) throw new Error('Expected a candidate')
+      const candidate = { handleId: fresh.value.handleId, expectedGeneration: fresh.value.contentGeneration }
+      reads.length = 0
+      const located = await service.resolveLine(1, { ...candidate, line: 524_289 })
+      if (!located.ok) throw new Error('Expected a location')
+      expect(reads.reduce((sum, read) => sum + read.bytes, 0)).toBe(3.5 * 1024 * 1024)
+      reads.length = 0
+      expect(await service.readPage(1, { ...candidate, offset: located.value.offset }))
+        .toMatchObject({ ok: true, value: { startLine: 524_289, text: expect.stringMatching(/^hello!\n/) } })
+      expect(reads).toEqual([{ position: located.value.offset, bytes: 256 * 1024 }])
+
+      await service.resolveLine(1, { ...candidate, line: 850 })
+      reads.length = 0
+      expect(await service.readPage(1, { ...candidate, offset: located.value.offset }))
+        .toMatchObject({ ok: true, value: { startLine: 524_289 } })
+      expect(reads.filter(read => read.position < located.value.offset).reduce((sum, read) => sum + read.bytes, 0))
+        .toBe(located.value.offset)
+
+      // Another handle must locate independently, even before the file changes.
+      reads.length = 0
+      expect(await service.readPage(1, { handleId: old.handleId, expectedGeneration: old.contentGeneration, offset: located.value.offset }))
+        .toMatchObject({ ok: true, value: { startLine: 524_289 } })
+      expect(reads.some(read => read.position === 0)).toBe(true)
+      await writeFile(join(root, 'large.log'), 'shortened\n')
+      expect(await service.readPage(1, { ...candidate, offset: 0 })).toMatchObject({ ok: false })
+    } finally { spy.mockRestore() }
+  })
+
+  it('publishes a real watcher save and reads fresh bytes through the existing reload candidate', async () => {
+    const { root, authority, native } = await fixture()
+    const service = new FilePreviewService(authority, native)
+    services.push(service)
+    await service.bindThread(1, 'camp-1')
+    await writeFile(join(root, 'live.txt'), 'before')
+    const opened = await service.open(1, request('live.txt'))
+    if (!opened.ok || opened.value.kind !== 'file_preview') throw new Error('Expected a file')
+    const old = opened.value.file
+    await writeFile(join(root, 'live.txt'), 'after saving the actual file')
+    await vi.waitFor(() => expect(native.publishExternalUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'camp-1', previewKeys: [old.previewKey]
+    })))
+    const fresh = await service.reload(1, { handleId: old.handleId, reopenToken: old.reopenToken, expectedGeneration: old.contentGeneration })
+    if (!fresh.ok) throw new Error('Expected a candidate')
+    expect(fresh.value.handleId).not.toBe(old.handleId)
+    expect(await service.readText(1, { handleId: fresh.value.handleId, expectedGeneration: fresh.value.contentGeneration }))
+      .toMatchObject({ ok: true, value: { text: 'after saving the actual file' } })
+  })
+
   it('reclaims background handles by user LRU, protecting visible and busy handles under concurrent allocation', async () => {
     const { root, service, native } = await fixture()
     native.publishResourcesReleased = vi.fn()

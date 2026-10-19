@@ -414,6 +414,7 @@ describe('Notification attention controller', () => {
         requestedAfterChangeSequence: 0,
         nextChangeSequence: 1,
         throughChangeSequence: 2,
+        taskCapability: { enabled: true, headsUpAfterSequence: 0, observedThroughChangeSequence: 2 },
         resetRequired: false,
         hasMore: true,
         changes: [change(first, 1)]
@@ -428,11 +429,25 @@ describe('Notification attention controller', () => {
       requestedAfterChangeSequence: cursor,
       nextChangeSequence: 2,
       throughChangeSequence: 2,
+      taskCapability: { enabled: true, headsUpAfterSequence: 0, observedThroughChangeSequence: 2 },
       resetRequired: false,
       hasMore: false,
       changes: [change(first, 1)]
     }))
     expect(retried.nextChangeSequence).toBe(2)
+    const paged = await readNotificationChangePages(0, async (cursor) => ({
+      schemaVersion: 9,
+      requestedAfterChangeSequence: cursor,
+      nextChangeSequence: cursor === 0 ? 1 : 3,
+      throughChangeSequence: cursor === 0 ? 2 : 3,
+      taskCapability: { enabled: cursor === 0, headsUpAfterSequence: 0, observedThroughChangeSequence: cursor === 0 ? 2 : 3 },
+      resetRequired: false,
+      hasMore: cursor === 0,
+      changes: [change(first, cursor === 0 ? 1 : 2)]
+    }))
+    expect(paged.changes.map(item => item.changeSequence)).toEqual([1, 2])
+    expect(paged.taskCapability.enabled).toBe(false)
+    expect(paged.taskCapability.observedThroughChangeSequence).toBe(3)
   })
 
   it('fails closed when a preference snapshot is incomplete', () => {

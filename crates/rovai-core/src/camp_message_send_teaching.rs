@@ -9,7 +9,7 @@ pub const CAMP_MESSAGE_SEND_BODY_HELP: &str = "Use --body for simple single-line
      For multiline or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file.\n\
      After a successful send, delete files you created solely as temporary input for that send.";
 
-pub const CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION: &str = "Guarantee that this public Thread message addresses no Agent. When true, explicit Agent recipients and taskId are invalid, effectiveRecipients and deliveryIds are empty, and no Agent is woken. This may be combined with mentionUser because User attention is not Agent routing.";
+pub const CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION: &str = "Guarantee that this public Thread message addresses no Agent. When true, explicit Agent recipients are invalid, effectiveRecipients and deliveryIds are empty, and no Agent is woken. This may be combined with mentionUser because User attention is not Agent routing.";
 
 pub const CAMP_MESSAGE_SEND_TO_PRINCIPAL_SCHEMA_DESCRIPTION: &str = "Mention the User and create an Inbox notification. Ordinary public Thread messages are already visible to the User. Use this only when the message creates a new unresolved decision, answer, or action for the User, or when the User explicitly requested notification of an important result. It creates no Agent Delivery, does not represent approval, and may be combined with publicOnly. User attention is message-local and is never inherited.";
 
@@ -23,13 +23,13 @@ pub const CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP: &str =
 
 effectiveRecipients and deliveryIds are empty, and no Agent Delivery is created.
 
-Do not combine this option with --to or --task-id. It may be combined with --to-user.";
+Do not combine this option with --to. It may be combined with --to-user.";
 
 pub const CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP: &str = "Mention the User and create an Inbox notification.
 
 Ordinary public Thread messages are already visible to the User. Use this flag only when the message creates a new unresolved decision, answer, or action for the User, or when the User explicitly requested notification of an important result.
 
-It creates no Agent Delivery, does not represent approval, and may be combined with --public-only. User attention is message-local and is never inherited by replies, Tasks, or downstream A2A work.";
+It creates no Agent Delivery, does not represent approval, and may be combined with --public-only. User attention is message-local and is never inherited.";
 
 pub const CAMP_MESSAGE_SEND_HELP_EXAMPLES: [&str; 4] = [
     "rovai send --public-only --body 'Updated [src/example.rs](src/example.rs).'",
@@ -65,11 +65,11 @@ mod tests {
         );
         assert_eq!(
             CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION,
-            "Guarantee that this public Thread message addresses no Agent. When true, explicit Agent recipients and taskId are invalid, effectiveRecipients and deliveryIds are empty, and no Agent is woken. This may be combined with mentionUser because User attention is not Agent routing."
+            "Guarantee that this public Thread message addresses no Agent. When true, explicit Agent recipients are invalid, effectiveRecipients and deliveryIds are empty, and no Agent is woken. This may be combined with mentionUser because User attention is not Agent routing."
         );
         assert_eq!(
             CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP,
-            "Guarantee that this public message wakes no Agent.\n\neffectiveRecipients and deliveryIds are empty, and no Agent Delivery is created.\n\nDo not combine this option with --to or --task-id. It may be combined with --to-user."
+            "Guarantee that this public message wakes no Agent.\n\neffectiveRecipients and deliveryIds are empty, and no Agent Delivery is created.\n\nDo not combine this option with --to. It may be combined with --to-user."
         );
         assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("concrete continuing work, not CC"));
         assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("never use it for acknowledgement"));

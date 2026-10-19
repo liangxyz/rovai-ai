@@ -68,7 +68,7 @@ impl ThreadDeletionService {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.delete_user_required",
-                    "Only a User can permanently delete a Camp",
+                    "Only a User can permanently delete a Thread",
                 ));
             }
             if let Some((operation_id, accepted_at)) =
@@ -90,7 +90,7 @@ impl ThreadDeletionService {
                 )
                 .optional()?;
             let Some(version) = version else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
             if version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
@@ -150,7 +150,7 @@ impl ThreadDeletionService {
                 "#,
                 params![envelope.payload.camp_id, envelope.command_id, now],
             )?;
-            ensure!(changed == 1, "Camp deletion cutover lost its serialized admission");
+            ensure!(changed == 1, "Thread deletion cutover lost its serialized admission");
             Ok(accepted_result(
                 &envelope.payload.camp_id,
                 &envelope.command_id,
@@ -169,11 +169,11 @@ impl ThreadDeletionService {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.deletion_retry_user_required",
-                    "Only a User can retry Camp deletion",
+                    "Only a User can retry Thread deletion",
                 ));
             }
             Uuid::parse_str(&envelope.payload.operation_id)
-                .context("Camp deletion operationId must be a UUID")?;
+                .context("Thread deletion operationId must be a UUID")?;
             let now = Utc::now().to_rfc3339();
             let camp_changed = transaction.execute(
                 r#"
@@ -221,7 +221,7 @@ impl ThreadDeletionService {
             if camp_changed == 0 && cleanup_changed == 0 && !completed {
                 return Ok(rejected(
                     "camp.deletion_not_found",
-                    "Camp deletion operation does not exist",
+                    "Thread deletion operation does not exist",
                 ));
             }
             Ok(CommandHandlerResult::applied(
@@ -254,7 +254,7 @@ impl ThreadDeletionService {
     ) -> Result<Vec<ThreadDeletionCandidate>> {
         ensure!(
             (1..=32).contains(&limit),
-            "Camp deletion batch limit is invalid"
+            "Thread deletion batch limit is invalid"
         );
         let now = Utc::now().to_rfc3339();
         let mut statement = database.connection().prepare(
@@ -286,7 +286,7 @@ impl ThreadDeletionService {
     ) -> Result<Vec<ThreadDeletionCleanupCandidate>> {
         ensure!(
             (1..=32).contains(&limit),
-            "Camp cleanup batch limit is invalid"
+            "Thread cleanup batch limit is invalid"
         );
         let now = Utc::now().to_rfc3339();
         let mut statement = database.connection().prepare(
@@ -351,7 +351,7 @@ impl ThreadDeletionService {
                 now.to_rfc3339(),
             ],
         )?;
-        ensure!(changed == 1, "Camp deletion failure target changed");
+        ensure!(changed == 1, "Thread deletion failure target changed");
         Ok(attention)
     }
 
@@ -396,7 +396,7 @@ impl ThreadDeletionService {
                 now.to_rfc3339(),
             ],
         )?;
-        ensure!(changed == 1, "Camp cleanup failure target changed");
+        ensure!(changed == 1, "Thread cleanup failure target changed");
         if !attention {
             transaction.execute(
                 r#"
@@ -433,16 +433,16 @@ impl ThreadDeletionService {
             .flatten();
         ensure!(
             marker.as_deref() == Some(candidate.operation_id.as_str()),
-            "Camp deletion marker changed before business commit"
+            "Thread deletion marker changed before business commit"
         );
         let unconfirmed = unconfirmed_runtime_cleanup_count(&transaction, &candidate.camp_id)?;
         ensure!(
             unconfirmed == 0,
-            "Camp execution cleanup is unconfirmed; deletion remains fenced"
+            "Thread execution cleanup is unconfirmed; deletion remains fenced"
         );
         let workspace_cleanup_scheduled =
             workspace_cleanup_scheduled(&transaction, &candidate.operation_id)?
-                .context("Camp deletion acceptance receipt is missing")?;
+                .context("Thread deletion acceptance receipt is missing")?;
         if !workspace_cleanup_scheduled {
             // A retained Mission worktree is deliberately outside deletion
             // ownership. Drop its internal cleanup journal before the legacy
@@ -540,7 +540,7 @@ pub(crate) fn workspace_cleanup_scheduled(
         )?;
         ensure!(
             !asynchronous_handoff,
-            "Camp deletion acceptance receipt is missing"
+            "Thread deletion acceptance receipt is missing"
         );
     }
     Ok(scheduled)
@@ -605,11 +605,11 @@ fn existing_operation(connection: &Connection, camp_id: &str) -> Result<Option<(
     receipt
         .map(|(payload, created_at)| {
             let payload: Value = serde_json::from_str(&payload)
-                .context("Camp deletion receipt payload is invalid")?;
+                .context("Thread deletion receipt payload is invalid")?;
             let operation_id = payload
                 .get("operationId")
                 .and_then(Value::as_str)
-                .context("Camp deletion receipt has no operationId")?;
+                .context("Thread deletion receipt has no operationId")?;
             Ok((operation_id.to_string(), created_at))
         })
         .transpose()

@@ -3,7 +3,7 @@ import { browserMemberAvatars } from './member-avatars'
 import type { ThreadClient } from '../../desktop/src/renderer/src/camp-client'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
 import type { ThreadReadInvalidation, SingleChatSnapshot, CoreMethod, FilePreviewApi, FilePreviewExternalUpdateEvent, FilePreviewOperationResult, OpenFilePreviewResult, RestoreFilePreviewRequest, LocalAttachmentSourceView } from '@contracts'
-import { ConsoleClient, WEB_OPERATIONS, type WebOperation } from './client'
+import { ConsoleClient, HttpRequestError, WEB_OPERATIONS, type WebOperation } from './client'
 import { createBrowserNavigationHistory } from './navigation-history'
 import { browserEditingRecovery } from './editing-recovery'
 import { browserPreferences } from './preferences'
@@ -149,7 +149,16 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
         : { ok: false, error: { code: 'read_failed', message: '未能准备新预览。', retryable: true } }
     },
     release: async request => { names.delete(request.handleId); paths.delete(request.handleId); sources.delete(request.handleId); syncWatch(); return transport.files('release', request) },
+    downloadSource: transport.nativeDownload ? async source => {
+      try { await transport.download({ kind: 'source', source }); return { ok: true, value: { started: true } } }
+      catch (error) { return { ok: false, error: { code: error instanceof HttpRequestError && error.code === 'file_changed' ? 'file_changed' : 'read_failed', message: error instanceof Error ? error.message : '下载申请失败，请重试。', retryable: true } } }
+    } : undefined,
     download: async request => {
+      if (transport.nativeDownload) {
+        try { await transport.download({ kind: 'preview', ...request }); return { ok: true, value: { started: true } } }
+        catch (error) { return { ok: false, error: { code: error instanceof HttpRequestError && error.code === 'file_changed' ? 'file_changed' : 'read_failed', message: error instanceof Error ? error.message : '下载申请失败，请重试。', retryable: true } } }
+      }
+      // Legacy Hosts retain their bounded preview download only.
       const result = await transport.fileBytes('download', request)
       if (!result.ok) return result
       const url = URL.createObjectURL(result.value.blob)
@@ -173,7 +182,8 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
   }
   client.composerAttachments.preview = async locator => {
     const result = await opened('open', { kind: 'attachment', threadId: locator.threadId, locator })
-    if (!result.ok) return { preview: null, availability: result.error.code === 'file_not_found' ? 'missing' : 'unreadable' }
+    if (!result.ok) return { preview: null, availability: result.error.code === 'file_not_found' || result.error.code === 'attachment_missing' ? 'missing'
+      : ['file_too_large', 'decode_failed'].includes(result.error.code) ? 'available' : 'unreadable' }
     if (result.value.kind !== 'file_preview') return { preview: null, availability: 'unreadable' }
     const file = result.value.file
     try {
@@ -188,12 +198,16 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
   }
   client.attachments = { kind: 'download', download: async locator => {
     try {
+      if (transport.nativeDownload) {
+        await transport.download({ kind: 'source', source: { kind: 'attachment', threadId: locator.threadId, locator } })
+        return { opened: true, error: null, availability: 'available' }
+      }
       const response = await transport.attachment(locator)
       const url = URL.createObjectURL(response.blob)
       const link = document.createElement('a'); link.href = url; link.download = response.name; link.click()
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
       return { opened: true, error: null, availability: 'available' }
-    } catch { return { opened: false, error: 'target_unavailable', availability: 'missing' } }
+    } catch (error) { throw error instanceof Error ? error : new Error('下载申请失败，请重试。') }
   } }
   const { preferences, profile } = browserPreferences(transport.presentationScope, transport)
   const environment: BusinessEnvironment = { navigationHistory: createBrowserNavigationHistory(transport.editingScope), client, preferences, files, selectWorkspaceDirectory,

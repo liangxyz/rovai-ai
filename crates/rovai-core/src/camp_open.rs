@@ -45,7 +45,7 @@ impl ThreadOpenService {
             let reconcile_duration = reconcile_started_at.elapsed();
             if execution.result.status == CommandResultStatus::Rejected {
                 anyhow::bail!(
-                    "Camp enter Default Lead reconciliation was rejected: {}",
+                    "Thread enter Default Lead reconciliation was rejected: {}",
                     execution.result.code
                 );
             }
@@ -95,7 +95,7 @@ impl ThreadOpenService {
             )
             .optional()?;
         if activation_state.is_none() {
-            anyhow::bail!("Camp does not exist or is being deleted");
+            anyhow::bail!("Thread does not exist or is being deleted");
         }
         let pending = activation_state.as_deref() == Some("pending");
         if pending {

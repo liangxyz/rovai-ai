@@ -124,13 +124,24 @@ pub(super) fn legacy_schema_matches(c: &Connection) -> bool {
         && schema(c,"table","context_manifest").is_ok_and(|s|s.contains("context_manifest_version = 37 AND formatter_version = 37 AND run_facts_schema_version = 10") && !s.contains("agent_run_id TEXT NOT NULL UNIQUE"))
 }
 
-pub(super) fn schema_matches(c: &Connection) -> bool {
-    input_identity_schema_matches(c) && c.query_row("SELECT count(*)=6 FROM sqlite_master WHERE type='trigger' AND name IN
-        ('agent_run_input_v39_only_insert','context_manifest_v39_only_insert','context_manifest_source_immutable',
+pub(super) fn retained_schema_matches(c: &Connection) -> bool {
+    input_identity_schema_matches(c) && c.query_row("SELECT count(*)=4 FROM sqlite_master WHERE type='trigger' AND name IN
+        ('context_manifest_source_immutable',
          'runtime_input_source_immutable','runtime_input_source_insert','agent_run_claim_context_immutable')", [], |r|r.get::<_,bool>(0)).unwrap_or(false)
         && schema(c,"table","context_manifest").is_ok_and(|s|s.contains("context_manifest_version = 39 AND formatter_version = 39 AND run_facts_schema_version = 10")
             && s.contains("context_manifest_version = 37 AND formatter_version = 37 AND run_facts_schema_version = 6")
             && s.contains("context_manifest_version = 37 AND formatter_version = 37 AND run_facts_schema_version = 10"))
+}
+
+pub(super) fn schema_matches(c: &Connection) -> bool {
+    retained_schema_matches(c)
+        && c.query_row(
+            "SELECT count(*)=2 FROM sqlite_master WHERE type='trigger' AND name IN
+            ('agent_run_input_v39_only_insert','context_manifest_v39_only_insert')",
+            [],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
 }
 
 fn clause(sql: &str, prefix: &str) -> Result<String> {
@@ -354,6 +365,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             matches!(
                 classify_database_contract(&tx)?,
                 DatabaseContractClassification::Current(_)
+                    | DatabaseContractClassification::SupportedMigrationSource(_)
             ),
             "Steer convergence admission failed"
         );
@@ -369,6 +381,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 // Only synthetic fixtures downgrade. Product migrations never change historical versions or bytes.
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::minimax::downgrade_for_test(c);
     if !schema_matches(c) {
         return;
     }
@@ -495,6 +508,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .execute_batch("DROP TRIGGER reject_steer_migration;")
         .unwrap();
     migrate(database).unwrap();
+    database.migrate(false).unwrap();
     assert_eq!(
         before,
         public_history_claim_preserved_evidence_digest(database.connection()).unwrap()
@@ -502,6 +516,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     assert!(matches!(
         classify_database_contract(database.connection()).unwrap(),
         DatabaseContractClassification::Current(_)
+            | DatabaseContractClassification::SupportedMigrationSource(_)
     ));
 }
 
@@ -509,6 +524,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
 pub(crate) fn assert_legacy_upgrade(database: &mut Database) {
     // Recreate the deployed branch 203 layout with populated input/receipt rows.
     // Only the fixture removes the compact columns; production converges forward.
+    super::minimax::downgrade_for_test(database.connection());
     let branch_rows = |c: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
         [
             "context_manifest",
@@ -563,6 +579,7 @@ pub(crate) fn assert_legacy_upgrade(database: &mut Database) {
     );
     database.migrate(false).unwrap();
     assert_eq!(branch_rows(database.connection()), branch_before);
+    super::minimax::downgrade_for_test(database.connection());
 
     // Build the source schema with the actual old migration, not by assuming
     // that a marker number or a handful of columns implies the old contract.
@@ -687,7 +704,10 @@ pub(crate) fn assert_legacy_upgrade(database: &mut Database) {
             .unwrap(),
         claims
     );
-    assert!(schema_matches(database.connection()));
+    assert!(matches!(
+        classify_database_contract(database.connection()).unwrap(),
+        DatabaseContractClassification::Current(_)
+    ));
     // An idempotent reopen does not acquire or replay any source.
     database.migrate(false).unwrap();
     assert_eq!(snapshot(database.connection()), before);
@@ -706,6 +726,7 @@ mod tests {
             let directory = std::env::temp_dir()
                 .join(format!("rovai-steer-migration-{source}-{}", Uuid::new_v4()));
             let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+            super::minimax::downgrade_for_test(database.connection());
             match source {
                 148 => message_senders::downgrade_for_test(database.connection()),
                 149 => execution_storage::downgrade_for_test(database.connection()),
@@ -713,6 +734,7 @@ mod tests {
                 151 => unified_activity::downgrade_for_test(database.connection()),
                 152 => compact_execution::downgrade_for_test(database.connection()),
                 153 => downgrade_for_test(database.connection()),
+                154 => super::minimax::downgrade_for_test(database.connection()),
                 _ => {}
             }
             assert_eq!(
@@ -742,7 +764,10 @@ mod tests {
                 tx.rollback().unwrap();
             }
             database.migrate(false).unwrap();
-            assert!(schema_matches(database.connection()));
+            assert!(matches!(
+                classify_database_contract(database.connection()).unwrap(),
+                DatabaseContractClassification::Current(_)
+            ));
             assert!(database.schema_migration_applied(199).unwrap());
             assert!(database.schema_migration_applied(203).unwrap());
             assert!(database.schema_migration_applied(204).unwrap());
@@ -755,6 +780,9 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-steer-partial-migration-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        // These faults own the deployed Steer shape. Current Task-capability
+        // admission reuses the same retained identity checks.
+        super::minimax::downgrade_for_test(database.connection());
         for fault in [
             "compact_view",
             "compact_guard",

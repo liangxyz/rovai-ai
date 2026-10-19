@@ -140,6 +140,7 @@ while IFS= read -r ignored; do :; done
             "sha256:mcp",
             &attachment_root,
             "sha256:compatibility",
+            None,
         )
         .await
         .unwrap();
@@ -183,6 +184,7 @@ while IFS= read -r ignored; do :; done
             "sha256:mcp",
             &attachment_root,
             "sha256:compatibility",
+            None,
         )
         .await
         .unwrap();

@@ -8,6 +8,7 @@ import {
   nextLocalThreadComposerDraftAfterSend,
   saveLocalThreadComposerDraft
 } from './camp-composer-local-store'
+import { localDraftMatchesSubmission, onLocalThreadSendRecovered, recoverLocalThreadSend } from './camp-composer-send-recovery'
 
 class MemoryStorage implements Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
   readonly values = new Map<string, string>()
@@ -28,6 +29,54 @@ const members = [
 ] as ThreadSnapshot['members']
 
 describe('local Thread Composer drafts', () => {
+  it('settles only the accepted matching public submission and preserves later edits and other Threads', () => {
+    const storage = new MemoryStorage()
+    const original: ThreadComposerDraftView = { ...emptyLocalThreadComposerDraft('thread-a', 4), body: '已发送',
+      content: { version: 2, segments: [{ kind: 'text', text: '已发送' }] } }
+    const submitted = { commandId: 'original', threadId: original.threadId, content: original.content,
+      sourceAttachments: [], quotes: [], replyToThreadMessageId: null }
+    const accepted = { commandResult: { status: 'applied', payload: { threadMessageId: 'message-a' } } }
+    const other = { ...original, threadId: 'thread-b' }
+    saveLocalThreadComposerDraft(other, storage)
+    const recovered: string[] = []
+    const unsubscribe = onLocalThreadSendRecovered(({ next }) => recovered.push(next.threadId))
+    try {
+      for (const result of [{ commandResult: { status: 'rejected' } }, { commandResult: null }, null]) {
+        saveLocalThreadComposerDraft(original, storage)
+        recoverLocalThreadSend(submitted, result, storage)
+        expect(loadLocalThreadComposerDraft(original.threadId, storage)).toEqual(original)
+      }
+      const edits: ThreadComposerDraftView[] = [
+        { ...original, content: { version: 2, segments: [{ kind: 'text', text: '后来修改' }] } },
+        { ...original, replyIntent: { replyToThreadMessageId: 'new-reply', targetState: 'available', author: null, excerpt: null, recipientSelectionRequired: false } },
+        { ...original, attachments: [{ id: '11111111-1111-4111-8111-111111111111', sourcePath: '/new', displayName: 'new', kind: 'file', mediaType: null, byteSize: 1, fileCount: 1, previewKind: 'none', availability: 'available' }] },
+        { ...original, quotes: [{ version: 1, quoteId: 'new', source: { scope: 'camp', campId: original.threadId, messageId: 'source' }, authorAtCapture: { type: 'user', displayName: 'User' }, text: '新增引用', format: 'plain_text', capturedAt: '2026-10-17', sourceContentDigest: 'source', snapshotDigest: 'snapshot' }] }
+      ]
+      for (const edited of edits) {
+        saveLocalThreadComposerDraft(edited, storage)
+        recoverLocalThreadSend(submitted, accepted, storage)
+        expect(loadLocalThreadComposerDraft(original.threadId, storage)).toEqual(edited)
+      }
+      expect(recovered).toEqual([])
+      saveLocalThreadComposerDraft(original, storage)
+      // Restored JSON need not retain the original property order.
+      recoverLocalThreadSend({ ...submitted, content: { segments: original.content.segments, version: 2 } }, accepted, storage)
+      expect(loadLocalThreadComposerDraft(original.threadId, storage)).toBeNull()
+      expect(loadLocalThreadComposerDraft(other.threadId, storage)).toEqual(other)
+      expect(recovered).toEqual([original.threadId])
+    } finally { unsubscribe() }
+  })
+
+  it('matches a materialized continuation without treating a different recipient as the sent draft', () => {
+    const draft: ThreadComposerDraftView = { ...emptyLocalThreadComposerDraft('thread-a'),
+      content: { version: 2, segments: [{ kind: 'text', text: '继续' }] },
+      continuationIntent: { sourceThreadMessageId: 'prior', recipient: { agentId: 'reviewer', displayName: 'Reviewer', recipientAvailability: 'available' }, recipientSelectionRequired: false } }
+    const submitted = { threadId: draft.threadId, content: materializeLocalContinuation(draft, members).content,
+      quotes: [], sourceAttachments: [], replyToThreadMessageId: null }
+    expect(localDraftMatchesSubmission(draft, submitted)).toBe(true)
+    expect(localDraftMatchesSubmission({ ...draft, continuationIntent: { ...draft.continuationIntent!, recipient: { ...draft.continuationIntent!.recipient, agentId: 'lead' } } }, submitted)).toBe(false)
+  })
+
   it('keeps independent unsent state for each Thread and clears only the selected Thread', () => {
     const storage = new MemoryStorage()
     const campA: ThreadComposerDraftView = {

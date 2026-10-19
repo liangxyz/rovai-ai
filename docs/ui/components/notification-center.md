@@ -3,7 +3,7 @@ document_type: ui-component
 authority: notification-attention-presentation
 status: accepted
 target_version: cross-version
-last_updated: 2026-09-20
+last_updated: 2026-10-17
 ---
 
 # 应用内提醒与会话未读
@@ -19,6 +19,8 @@ Change Journal。Renderer 只呈现短暂应用内提醒和 Camp 行“有新回
 任务状态默认关闭，预选已完成、受阻、已取消；使命状态默认开启且只选已完成。各状态筛选内联展开，
 总开关或分类关闭时保留选择，保存失败回读当前值并允许重试。宽屏会话组占左侧两行，使命和任务各占右侧一组；
 窄屏依次堆叠。普通队员消息没有浮层类别。
+
+会话任务关闭或 Host 能力未知时，整组任务提醒不渲染，既有偏好保留；内存中待展示的任务提醒撤下。重新开启从当前变更水位开始，不补弹关闭期间或历史任务提醒。旧任务通知导航退回对应会话，不尝试打开已隐藏的任务详情。
 
 本轮完成等待该消息引发的全部关联分支与投递成功，单聊回复独立控制。使命需要你只来自实际状态转换；
 只有显式 sourceMessageId 才显示该消息正文，没有关联时只显示使命名和“需要你”。任务受阻不等同用户待办。
@@ -73,7 +75,7 @@ Occurrence。
 
 ## References
 
-- [Notification Episode v9](../../contracts/notification-episode-v9.md)
+- [Notification Episode v10](../../contracts/notification-episode-v10.md)
 - [Current User Attention v8](../../contracts/current-user-attention-v8.md)
 - [App Shell 与统一侧栏](app-shell-navigation.md)
 - [DESIGN.md](../../../DESIGN.md)

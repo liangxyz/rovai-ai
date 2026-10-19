@@ -23,9 +23,9 @@ export async function importBenchmarkReviewCamps({
   try {
     await core.request('health.check', {}, 120_000)
     const workspace = await core.request('workspaces.inspect', { path: projectPath })
-    const preflight = await core.request('camps.creationPreflight')
+    const preflight = await core.request('threads.creationPreflight')
     if (!preflight.admissible || !preflight.initialLeadAgentId || preflight.presentMembers.length === 0) {
-      throw new Error(`local Rovai profile cannot create benchmark Review Camp: ${JSON.stringify(preflight)}`)
+      throw new Error(`local Rovai profile cannot create benchmark Review Thread: ${JSON.stringify(preflight)}`)
     }
     const members = preflight.presentMembers.map((member) => member.agentId)
     const defaultLead = preflight.initialLeadAgentId
@@ -66,7 +66,7 @@ export async function importBenchmarkReviewCamps({
       projectPath: project.projectPath,
       projectionMode: legacyTrialCamps ? 'legacy_trial_camps' : 'single_review_camp',
       resultCampCount: trialCamps.length,
-      reviewCampId: reviewCamp.campId,
+      reviewCampId: reviewCamp.threadId,
       navigationCampCount: project.totalCount,
       createdAgentRuns: 0,
       createdCampTurns: 0
@@ -77,7 +77,7 @@ export async function importBenchmarkReviewCamps({
 }
 
 export async function createEvidenceCamp({ core, commandPrefix, name, body, projectPath, members, defaultLead }) {
-  const created = await core.request('camps.create', {
+  const created = await core.request('threads.create', {
     commandId: `${commandPrefix}:create`,
     name,
     workspace: { projectPath },
@@ -85,24 +85,24 @@ export async function createEvidenceCamp({ core, commandPrefix, name, body, proj
     defaultLeadAgentId: defaultLead,
     collaborationMode: 'peer'
   })
-  const campId = created.payload?.campId
-  if (created.status === 'rejected' || !campId) {
-    throw new Error(`benchmark Camp creation failed: ${JSON.stringify(created)}`)
+  const threadId = created.payload?.threadId
+  if (created.status !== 'applied' || !threadId) {
+    throw new Error(`benchmark Thread creation failed: ${JSON.stringify(created)}`)
   }
   const sent = await dispatchQualificationPrompt(core.request, {
     commandId: `${commandPrefix}:message`,
-    campId,
+    campId: threadId,
     prompt: body,
     execution: null
   })
   if (sent.commandResult?.status === 'rejected') {
     throw new Error(`benchmark evidence message failed: ${JSON.stringify(sent)}`)
   }
-  const snapshot = await core.request('camps.snapshot', { campId })
+  const snapshot = await core.request('threads.snapshot', { threadId })
   if (snapshot.messages.length !== 1 || snapshot.turns.length !== 0 || snapshot.agentRuns.length !== 0) {
-    throw new Error(`benchmark evidence Camp unexpectedly created execution: ${campId}`)
+    throw new Error(`benchmark evidence Thread unexpectedly created execution: ${threadId}`)
   }
-  return { campId, title: snapshot.camp.title }
+  return { threadId, title: snapshot.thread.title }
 }
 
 function startCore(executable, dataDirectory) {

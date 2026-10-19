@@ -187,7 +187,10 @@ impl ClaimedBatchContext {
     }
 
     pub(crate) fn payload_len(&self) -> Result<usize> {
-        let tasks = self_active_task_projection(&self.tasks, self.omitted_tasks);
+        let tasks = self
+            .tasks_enabled
+            .then(|| self_active_task_projection(&self.tasks, self.omitted_tasks))
+            .flatten();
         let facts = self.run_facts_for_session(true)?;
         let payload = render_payload(RenderPayloadInput {
             collaboration_state: Some(&self.collaboration_state),
@@ -217,7 +220,7 @@ pub(super) fn load(connection: &Connection, run_id: &str) -> Result<Option<Claim
     // Historical inputs retain their original materializer, including databases
     // exercised at intermediate migration boundaries.
     let current: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=?1 AND context_manifest_version IN (36, 37, 38, 39))",
+        "SELECT EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=?1 AND context_manifest_version IN (36, 37, 38, 39, 40))",
         [run_id], |row| row.get(0),
     )?;
     if !current {

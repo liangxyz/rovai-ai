@@ -17,7 +17,7 @@ pub struct ContextDeliveryProfile {
 
 impl ContextDeliveryProfile {
     pub fn validate(self) -> Result<Self> {
-        if !matches!(self.profile_version, 5..=14) {
+        if !matches!(self.profile_version, 5..=16) {
             anyhow::bail!("unsupported Context Delivery Profile version");
         }
         if self.max_public_messages == 0
@@ -43,7 +43,7 @@ impl ContextDeliveryProfile {
     }
 
     pub fn frozen_json(self) -> Result<Value> {
-        if matches!(self.profile_version, 9 | 10 | 11 | 13 | 14) {
+        if matches!(self.profile_version, 9 | 10 | 11 | 13 | 14 | 15) {
             self.validate()?;
             Ok(json!({
                 "profileVersion": self.profile_version,
@@ -56,7 +56,7 @@ impl ContextDeliveryProfile {
 
     pub fn from_frozen_json(value: &str) -> Result<Self> {
         let value: Value = serde_json::from_str(value)?;
-        if matches!(value.get("profileVersion"), Some(version) if version == &json!(9) || version == &json!(10) || version == &json!(11) || version == &json!(13) || version == &json!(14))
+        if matches!(value.get("profileVersion"), Some(version) if version == &json!(9) || version == &json!(10) || version == &json!(11) || version == &json!(13) || version == &json!(14) || version == &json!(15))
         {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -140,12 +140,22 @@ pub const CURRENT_CONTEXT_DELIVERY_PROFILE_V12: ContextDeliveryProfile = Context
     ..CURRENT_CONTEXT_DELIVERY_PROFILE_V7
 };
 
+pub const PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V15: ContextDeliveryProfile =
+    ContextDeliveryProfile {
+        profile_version: 15,
+        ..PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V14
+    };
+pub const CURRENT_CONTEXT_DELIVERY_PROFILE_V16: ContextDeliveryProfile = ContextDeliveryProfile {
+    profile_version: 16,
+    ..CURRENT_CONTEXT_DELIVERY_PROFILE_V12
+};
+
 pub fn current_context_delivery_profile() -> Result<ContextDeliveryProfile> {
-    CURRENT_CONTEXT_DELIVERY_PROFILE_V12.validate()
+    CURRENT_CONTEXT_DELIVERY_PROFILE_V16.validate()
 }
 
 pub fn current_public_camp_batch_context_delivery_profile() -> Result<ContextDeliveryProfile> {
-    PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V14.validate()
+    PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V15.validate()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,11 +194,11 @@ mod tests {
     fn current_profiles_preserve_frozen_legacy_profiles() {
         assert_eq!(
             current_context_delivery_profile().unwrap(),
-            CURRENT_CONTEXT_DELIVERY_PROFILE_V12
+            CURRENT_CONTEXT_DELIVERY_PROFILE_V16
         );
         assert_eq!(
             current_public_camp_batch_context_delivery_profile().unwrap(),
-            PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V14
+            PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V15
         );
         let frozen = PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V14
             .frozen_json()
@@ -211,7 +221,7 @@ mod tests {
     fn profile_validation_rejects_unknown_versions_and_invalid_limits() {
         for invalid in [
             ContextDeliveryProfile {
-                profile_version: 15,
+                profile_version: 17,
                 ..CONTEXT_DELIVERY_PROFILE_V6
             },
             ContextDeliveryProfile {

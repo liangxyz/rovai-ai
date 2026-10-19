@@ -26,6 +26,8 @@ use tokio::process::Command as TokioCommand;
 #[cfg(unix)]
 use uuid::Uuid;
 
+#[cfg(all(test, windows))]
+use crate::agent_runtime_adapter::executable_fingerprint;
 #[cfg(windows)]
 use crate::runtime_discovery_windows::{
     PackageManagerShimKind, WindowsRegistryPathValues, classify_package_manager_cmd_shim,
@@ -35,10 +37,14 @@ use crate::runtime_discovery_windows::{
 use crate::windows_runtime_entrypoint::{
     ResolvedWindowsCommandShimIdentity, capture_resolved_windows_command_shim,
 };
+
 use crate::{
-    agent_profile::{AdapterKind, InstallationSource, RuntimeEntrypointLocatorIdentity},
+    agent_profile::{
+        AdapterKind, InstallationSource, RuntimeEntrypointLocatorIdentity,
+        VerifiedDiscoveredRuntimeEntry,
+    },
     agent_runtime_adapter::{
-        executable_fingerprint, grok_build_minimum_version_satisfied, pi_minimum_version_satisfied,
+        ExecutableFileIdentity, grok_build_minimum_version_satisfied, pi_minimum_version_satisfied,
     },
     runtime_probe_process::{ProbeCommandLimits, run_bounded_command},
 };
@@ -410,6 +416,14 @@ impl RuntimeSearchEnvironment {
 
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub fn same_inputs(&self, other: &Self) -> bool {
+        self.path_value == other.path_value
+            && self.runtime_overrides == other.runtime_overrides
+            && self.zcode_default_executables == other.zcode_default_executables
+            && self.executable_suffixes == other.executable_suffixes
+            && self.startup_configurations == other.startup_configurations
     }
 
     pub fn path_value(&self) -> &OsStr {
@@ -941,6 +955,18 @@ fn discover_runtime_path_from_candidates(
     search: &RuntimeSearchEnvironment,
     candidates: impl IntoIterator<Item = RuntimeExecutableCandidate>,
 ) -> RuntimeDiscoveryObservation {
+    discover_runtime_entry_from_candidates(kind, search, candidates, None).0
+}
+
+pub fn discover_runtime_entry_from_candidates(
+    kind: AdapterKind,
+    search: &RuntimeSearchEnvironment,
+    candidates: impl IntoIterator<Item = RuntimeExecutableCandidate>,
+    previous: Option<(&str, &str, &ExecutableFileIdentity)>,
+) -> (
+    RuntimeDiscoveryObservation,
+    Option<VerifiedDiscoveredRuntimeEntry>,
+) {
     let observed_at = chrono::Utc::now().to_rfc3339();
     for candidate in candidates {
         if !is_runtime_entrypoint_file(&candidate.path) {
@@ -951,46 +977,63 @@ fn discover_runtime_path_from_candidates(
             .canonicalize()
             .unwrap_or_else(|_| candidate.path.clone());
         let canonical = runtime_visible_path(canonical);
-        match executable_fingerprint(&canonical) {
-            Ok(fingerprint) => {
-                return RuntimeDiscoveryObservation {
-                    runtime_kind: kind,
-                    discovery_status: RuntimeDiscoveryStatus::Found,
-                    executable_path: Some(canonical.to_string_lossy().to_string()),
-                    source: Some(candidate.source),
-                    reported_version: None,
-                    executable_fingerprint: Some(fingerprint),
-                    search_path_source: candidate.search_path_source,
-                    entrypoint_kind: Some(candidate.entrypoint_kind),
-                    candidate_extension: Some(candidate.candidate_extension),
-                    resolved_native_target: candidate.resolved_native_target,
-                    version_probe_succeeded: None,
-                    search_generation: search.generation,
-                    observed_at,
-                    diagnostic_code: None,
-                    entrypoint_locator_identity: candidate.entrypoint_locator_identity,
-                };
+        let path = canonical.to_string_lossy().to_string();
+        match VerifiedDiscoveredRuntimeEntry::discover(
+            kind,
+            path.clone(),
+            candidate.source,
+            candidate.entrypoint_locator_identity.clone(),
+            previous
+                .filter(|(previous_path, _, _)| *previous_path == path)
+                .map(|(_, fingerprint, identity)| (fingerprint, identity)),
+        ) {
+            Ok(verified) => {
+                return (
+                    RuntimeDiscoveryObservation {
+                        runtime_kind: kind,
+                        discovery_status: RuntimeDiscoveryStatus::Found,
+                        executable_path: Some(path),
+                        source: Some(candidate.source),
+                        reported_version: None,
+                        executable_fingerprint: Some(
+                            verified.entry().executable_fingerprint.clone(),
+                        ),
+                        search_path_source: candidate.search_path_source,
+                        entrypoint_kind: Some(candidate.entrypoint_kind),
+                        candidate_extension: Some(candidate.candidate_extension),
+                        resolved_native_target: candidate.resolved_native_target,
+                        version_probe_succeeded: None,
+                        search_generation: search.generation,
+                        observed_at,
+                        diagnostic_code: None,
+                        entrypoint_locator_identity: candidate.entrypoint_locator_identity,
+                    },
+                    Some(verified),
+                );
             }
             Err(_) => continue,
         }
     }
-    RuntimeDiscoveryObservation {
-        runtime_kind: kind,
-        discovery_status: RuntimeDiscoveryStatus::Missing,
-        executable_path: None,
-        source: None,
-        reported_version: None,
-        executable_fingerprint: None,
-        search_path_source: None,
-        entrypoint_kind: None,
-        candidate_extension: None,
-        resolved_native_target: false,
-        version_probe_succeeded: None,
-        search_generation: search.generation,
-        observed_at,
-        diagnostic_code: Some("runtime_not_found".to_string()),
-        entrypoint_locator_identity: None,
-    }
+    (
+        RuntimeDiscoveryObservation {
+            runtime_kind: kind,
+            discovery_status: RuntimeDiscoveryStatus::Missing,
+            executable_path: None,
+            source: None,
+            reported_version: None,
+            executable_fingerprint: None,
+            search_path_source: None,
+            entrypoint_kind: None,
+            candidate_extension: None,
+            resolved_native_target: false,
+            version_probe_succeeded: None,
+            search_generation: search.generation,
+            observed_at,
+            diagnostic_code: Some("runtime_not_found".to_string()),
+            entrypoint_locator_identity: None,
+        },
+        None,
+    )
 }
 
 pub async fn discover_runtime_version(
@@ -1725,6 +1768,7 @@ fn known_runtime_directories() -> Vec<PathBuf> {
     };
     for relative in [
         ".local/bin",
+        ".minimax-code/bin",
         ".npm-global/bin",
         ".volta/bin",
         ".cargo/bin",
@@ -2137,7 +2181,47 @@ mod tests {
             .filter(|kind| *kind != AdapterKind::ZcodeApp)
             .enumerate()
         {
-            let mut observation = discover_runtime_path(kind, &search);
+            use crate::agent_runtime_adapter::FULL_HASH_READS;
+            FULL_HASH_READS.set(0);
+            let (mut observation, verified) = discover_runtime_entry_from_candidates(
+                kind,
+                &search,
+                search.candidates(kind, std::iter::empty()),
+                None,
+            );
+            assert_eq!(FULL_HASH_READS.get(), 1, "first discovery hashes once");
+            let verified = verified.unwrap();
+            let previous = Some((
+                verified.entry().executable_path.as_str(),
+                verified.entry().executable_fingerprint.as_str(),
+                verified.executable_file_identity(),
+            ));
+            FULL_HASH_READS.set(0);
+            let (_, refreshed) = discover_runtime_entry_from_candidates(
+                kind,
+                &search,
+                search.candidates(kind, std::iter::empty()),
+                previous,
+            );
+            assert!(refreshed.is_some());
+            assert_eq!(
+                FULL_HASH_READS.get(),
+                0,
+                "unchanged discovery reuses the persisted identity"
+            );
+            let path = directory.join(kind.command_name());
+            let mut contents = fs::read_to_string(&path).unwrap();
+            contents.push_str("# upgraded installation\n");
+            fs::write(&path, contents).unwrap();
+            FULL_HASH_READS.set(0);
+            let (_, upgraded) = discover_runtime_entry_from_candidates(
+                kind,
+                &search,
+                search.candidates(kind, std::iter::empty()),
+                previous,
+            );
+            assert!(upgraded.is_some());
+            assert_eq!(FULL_HASH_READS.get(), 1, "upgraded discovery hashes once");
             assert_eq!(
                 observation.discovery_status,
                 RuntimeDiscoveryStatus::Found,

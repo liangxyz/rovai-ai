@@ -504,11 +504,11 @@ pub fn resolve_tool_project(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?
-        .context("Current Camp project is unavailable")?;
+        .context("Current Thread project is unavailable")?;
     match binding.0.as_str() {
         "quick_chat" => Ok(AutomationProjectRef::QuickChat),
         "directory" => Ok(AutomationProjectRef::Directory { path: binding.1 }),
-        _ => anyhow::bail!("Current Camp has no supported project binding"),
+        _ => anyhow::bail!("Current Thread has no supported project binding"),
     }
 }
 
@@ -1664,7 +1664,7 @@ fn settle_delivery_occurrence_in_tx(
     let delivery_id = state
         .trigger_delivery_id
         .as_deref()
-        .context("Automation occurrence has neither a Delivery nor a CampTurn")?;
+        .context("Automation occurrence has neither a Delivery nor a ThreadTurn")?;
     let (delivery_status, claimed_agent_run_id, delivery_failure): (
         String,
         Option<String>,
@@ -1877,7 +1877,7 @@ fn settle_terminal_turn_in_tx(
     let turn_id = state
         .camp_turn_id
         .as_deref()
-        .context("AutomationRun has no CampTurn")?;
+        .context("AutomationRun has no ThreadTurn")?;
     let turn_status: String = transaction.query_row(
         "SELECT status FROM camp_turn WHERE id = ?1",
         [turn_id],
@@ -3193,102 +3193,293 @@ mod tests {
         remove_test_database(database, directory);
     }
 
-    // A Camp produced by an Automation occurrence is referenced by the
-    // occurrence through trigger_message_id/trigger_delivery_id (NO ACTION).
-    // Permanently deleting that Camp must remove the occurrence with it and
-    // keep the Automation definition and its other occurrences.
+    // Owns Automation's FK/history boundary through the deletion service and
+    // cleanup journal. Extend the original failed/manual regression with the
+    // completed/daily case; both use isolated SQLite because rollback, CASCADE
+    // and accepted receipt survival cross persisted owners. No Runtime starts.
+    #[cfg(feature = "extended-tests")]
     #[test]
-    fn deleting_an_automation_camp_removes_its_occurrence_and_keeps_the_definition() {
-        let service = AutomationService::default();
-        let (mut database, directory, quick_chat_path) = test_database();
-        let (automation_id, _) = create_manual_automation(
-            &service,
-            &mut database,
-            "automation-delete-create",
-            "Summarize today's papers.",
-        );
-        let run_automation = |database: &mut Database, command_id: &str| -> (String, String) {
-            let started = service
-                .run_now(
-                    database,
-                    &user_command(
-                        command_id,
-                        RunAutomationCommand {
-                            automation_id: automation_id.clone(),
-                        },
-                    ),
-                    CURRENT_USER_ID,
-                    &quick_chat_path,
-                )
-                .expect("manual Automation should start");
-            (
-                started.result.payload["runId"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-                started.result.payload["threadId"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-            )
+    fn deleting_automation_threads_retries_to_completion_without_changing_schedule() {
+        use crate::{
+            camp_attachment::ThreadAttachmentStore,
+            camp_attachment_view::ThreadAttachmentViewStore,
+            camp_deletion::{RetryThreadDeletionCommand, ThreadDeletionService},
+            collaboration::{DeleteThreadCommand, MissionWorkspaceDisposition},
+            command::CommandResultStatus,
         };
-        let (deleted_run_id, deleted_camp_id) =
-            run_automation(&mut database, "automation-delete-run-1");
-        // A running occurrence makes the next one an overlap skip; settle it the
-        // way a failed scheduled run is left behind in a real store.
-        service
-            .interrupt_before_runtime(&mut database, &deleted_run_id)
-            .expect("first occurrence should settle");
-        let (kept_run_id, kept_camp_id) = run_automation(&mut database, "automation-delete-run-2");
 
-        let transaction = database.connection_mut().transaction().unwrap();
-        crate::collaboration::delete_camp_aggregate(&transaction, &deleted_camp_id)
-            .expect("an Automation-produced Camp must be deletable");
-        transaction.commit().unwrap();
-
-        let count = |sql: &str, id: &str| -> i64 {
+        let count = |database: &Database, sql: &str, id: &str| {
             database
                 .connection()
-                .query_row(sql, [id], |row| row.get(0))
+                .query_row(sql, [id], |row| row.get::<_, i64>(0))
                 .unwrap()
         };
-        assert_eq!(
-            count("SELECT COUNT(*) FROM camp WHERE id = ?1", &deleted_camp_id),
-            0
-        );
-        assert_eq!(
-            count(
-                "SELECT COUNT(*) FROM automation_run WHERE id = ?1",
-                &deleted_run_id
-            ),
-            0
-        );
-        assert_eq!(
-            count(
-                "SELECT COUNT(*) FROM automation WHERE id = ?1",
-                &automation_id
-            ),
-            1
-        );
-        assert_eq!(
-            count("SELECT COUNT(*) FROM camp WHERE id = ?1", &kept_camp_id),
-            1
-        );
-        assert_eq!(
-            count(
-                "SELECT COUNT(*) FROM automation_run WHERE id = ?1",
-                &kept_run_id
-            ),
-            1
-        );
-        let violations: i64 = database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
-                row.get(0)
-            })
+        for completed_daily in [false, true] {
+            let service = AutomationService::default();
+            let deletion = ThreadDeletionService::default();
+            let (mut database, directory, quick_chat_path) = test_database();
+            let created = service
+                .create(
+                    &mut database,
+                    &user_command(
+                        "automation-delete-create",
+                        CreateAutomationCommand {
+                            name: None,
+                            prompt: "Summarize today's papers.".to_string(),
+                            member_id: "agent_1".to_string(),
+                            project_ref: AutomationProjectRef::QuickChat,
+                            schedule: if completed_daily {
+                                AutomationSchedule::Daily { at: "09:00".into() }
+                            } else {
+                                AutomationSchedule::Manual
+                            },
+                            notify_channels: vec![
+                                AutomationNotifyChannel::Feishu,
+                                AutomationNotifyChannel::Lark,
+                                AutomationNotifyChannel::Dingtalk,
+                            ],
+                        },
+                    ),
+                )
+                .unwrap();
+            let automation_id = created.result.payload["automationId"].as_str().unwrap();
+            let run_manual = |database: &mut Database, command_id: &str| {
+                let started = service
+                    .run_now(
+                        database,
+                        &user_command(
+                            command_id,
+                            RunAutomationCommand {
+                                automation_id: automation_id.to_string(),
+                            },
+                        ),
+                        CURRENT_USER_ID,
+                        &quick_chat_path,
+                    )
+                    .unwrap();
+                assert_eq!(started.result.payload["status"], "started");
+                AutomationDispatch {
+                    automation_run_id: started.result.payload["runId"].as_str().unwrap().into(),
+                    camp_id: started.result.payload["threadId"].as_str().unwrap().into(),
+                }
+            };
+            let target = if completed_daily {
+                // Control the persisted deadline and tick explicitly; no sleep
+                // or dependency on the local time at which this test starts.
+                let due = Utc::now() - Duration::seconds(1);
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE automation SET next_run_at=?2 WHERE id=?1",
+                        params![automation_id, timestamp(due)],
+                    )
+                    .unwrap();
+                let mut due_runs = service
+                    .claim_due(
+                        &mut database,
+                        due,
+                        due - Duration::seconds(1),
+                        &quick_chat_path,
+                    )
+                    .unwrap();
+                assert_eq!(due_runs.len(), 1);
+                let target = due_runs.remove(0);
+                publish_automatic_result(&mut database, &target.automation_run_id, "Daily result");
+                assert!(service.settle_runs(&mut database, Utc::now()).unwrap());
+                target
+            } else {
+                let target = run_manual(&mut database, "automation-delete-run-1");
+                service
+                    .interrupt_before_runtime(&mut database, &target.automation_run_id)
+                    .unwrap();
+                target
+            };
+            let terminal: (String, String) = database
+                .connection()
+                .query_row(
+                    "SELECT status, trigger_kind FROM automation_run WHERE id=?1",
+                    [&target.automation_run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                terminal,
+                if completed_daily {
+                    ("completed".into(), "scheduled".into())
+                } else {
+                    ("failed".into(), "manual".into())
+                }
+            );
+            let kept = run_manual(&mut database, "automation-delete-run-2");
+            let definition = service.get(&database, automation_id).unwrap().unwrap();
+            assert_eq!(definition.next_run_at.is_some(), completed_daily);
+            let notification_count =
+                "SELECT COUNT(*) FROM automation_notification_delivery WHERE automation_run_id=?1";
+            assert_eq!(
+                count(&database, notification_count, &target.automation_run_id),
+                3
+            );
+
+            let views = ThreadAttachmentViewStore::for_test(&database).unwrap();
+            views
+                .ensure_empty_camp_ready(&mut database, &target.camp_id)
+                .unwrap();
+            let output =
+                crate::storage_layout::ThreadOutputDirectory::prepare(&database, &target.camp_id)
+                    .unwrap()
+                    .output_root;
+            std::fs::write(output.join("daily-result.txt"), b"Daily output").unwrap();
+            let version = database
+                .connection()
+                .query_row(
+                    "SELECT version FROM camp WHERE id=?1",
+                    [&target.camp_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let operation_id = Uuid::new_v4().to_string();
+            let mut envelope = user_command(
+                &operation_id,
+                DeleteThreadCommand {
+                    camp_id: target.camp_id.clone(),
+                    expected_version: version,
+                    force: false,
+                    workspace_disposition: MissionWorkspaceDisposition::Retain,
+                },
+            );
+            envelope.camp_id = Some(target.camp_id.clone());
+            let accepted = deletion.accept(&mut database, &envelope).unwrap();
+            assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+            assert_eq!(accepted.result.payload["operationId"], operation_id);
+            let candidate = deletion.due_camps(&database, 1).unwrap().remove(0);
+            let cleanup = views
+                .prepare_camp_delete_cleanup(&mut database, &target.camp_id, &operation_id)
+                .unwrap()
+                .unwrap();
+
+            // Fail after the occurrence/CASCADE deletes. Five attempts are
+            // required to prove rollback and the persisted attention threshold.
+            database
+                .connection()
+                .execute_batch(
+                    "CREATE TEMP TRIGGER fail_automation_thread_delete BEFORE DELETE ON camp
+                 BEGIN SELECT RAISE(ABORT, 'injected Thread deletion failure'); END;",
+                )
+                .unwrap();
+            for attempt in 1..=5 {
+                let error = deletion
+                    .commit_business_delete(&mut database, &views, &candidate, &cleanup)
+                    .unwrap_err();
+                assert!(
+                    format!("{error:#}").contains("injected Thread deletion failure"),
+                    "unexpected deletion error: {error:#}"
+                );
+                assert_eq!(
+                    deletion
+                        .record_camp_failure(&database, &candidate, "database_delete_failed",)
+                        .unwrap(),
+                    attempt == 5
+                );
+            }
+            assert_eq!(
+                count(&database, notification_count, &target.automation_run_id),
+                3
+            );
+            assert_eq!(
+                count(
+                    &database,
+                    "SELECT COUNT(*) FROM automation_run WHERE id=?1",
+                    &target.automation_run_id
+                ),
+                1
+            );
+            assert!(output.exists());
+            let issues = deletion.issues(&database).unwrap();
+            assert_eq!(issues.len(), 1);
+            assert_eq!(issues[0].operation_id, operation_id);
+            assert!(deletion.due_camps(&database, 1).unwrap().is_empty());
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER fail_automation_thread_delete")
+                .unwrap();
+
+            let retried = deletion
+                .retry(
+                    &mut database,
+                    &user_command(
+                        &Uuid::new_v4().to_string(),
+                        RetryThreadDeletionCommand {
+                            operation_id: operation_id.clone(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(retried.result.code, "camp.deletion_retry_accepted");
+            assert_eq!(retried.result.payload["operationId"], operation_id);
+            assert!(deletion.issues(&database).unwrap().is_empty());
+            let candidate = deletion.due_camps(&database, 1).unwrap().remove(0);
+            assert_eq!(candidate.operation_id, operation_id);
+            deletion
+                .commit_business_delete(&mut database, &views, &candidate, &cleanup)
+                .unwrap();
+            views
+                .complete_camp_delete_cleanup(
+                    &mut database,
+                    &ThreadAttachmentStore::new(&directory),
+                    &cleanup,
+                )
+                .unwrap();
+            assert!(!output.exists());
+
+            for (table, deleted_id, kept_id) in [
+                ("camp", &target.camp_id, &kept.camp_id),
+                (
+                    "automation_run",
+                    &target.automation_run_id,
+                    &kept.automation_run_id,
+                ),
+            ] {
+                let sql = format!("SELECT COUNT(*) FROM {table} WHERE id=?1");
+                assert_eq!(count(&database, &sql, deleted_id), 0);
+                assert_eq!(count(&database, &sql, kept_id), 1);
+            }
+            assert_eq!(
+                count(&database, notification_count, &target.automation_run_id),
+                0
+            );
+            let remaining_definition = service.get(&database, automation_id).unwrap().unwrap();
+            assert_eq!(remaining_definition.enabled, definition.enabled);
+            assert_eq!(remaining_definition.next_run_at, definition.next_run_at);
+            for event in ["camp.deleted", "camp.deletion_completed"] {
+                let events: i64 = database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM event_log WHERE camp_id=?1 AND event_type=?2",
+                        params![target.camp_id, event],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(events, 1);
+            }
+            let replay = deletion.accept(&mut database, &envelope).unwrap();
+            assert!(replay.replayed);
+            assert_eq!(replay.result.payload, accepted.result.payload);
+            let violations: i64 = database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(violations, 0);
+            // The View owner seals the shared camps directory after cleanup.
+            // Restore only this fixture's parent before removing the fixture.
+            crate::platform::private_storage::prepare_private_directory(
+                &views.root().join("camps"),
+            )
             .unwrap();
-        assert_eq!(violations, 0);
-        remove_test_database(database, directory);
+            drop(views);
+            remove_test_database(database, directory);
+        }
     }
 
     #[test]

@@ -1,38 +1,4 @@
-import type { AgentProfile, McpServerView, SkillView } from '@contracts'
-export function skillFixture(enabled: boolean): SkillView {
-  return {
-    id: 'skill-1',
-    name: 'skill-one',
-    origin: 'official',
-    managementPolicy: 'user_managed',
-    enabled,
-    lifecycleStatus: 'active',
-    currentRevision: {
-      id: 'revision-1',
-      skillId: 'skill-1',
-      revision: 1,
-      name: 'skill-one',
-      description: 'Skill fixture',
-      sourceType: 'bundled',
-      contentDigest: 'sha256:fixture',
-      sourceMetadata: {},
-      riskSummary: {
-        executableFileCount: 0,
-        scriptFileCount: 0,
-        binaryCandidateCount: 0,
-        declaredTools: []
-      },
-      fileCount: 1,
-      totalBytes: 128,
-      installedAt: '2026-08-11T00:00:00Z'
-    },
-    groupAssignments: [],
-    version: 7,
-    createdAt: '2026-08-11T00:00:00Z',
-    updatedAt: '2026-08-11T00:00:00Z',
-    deletionRequestedAt: null
-  }
-}
+import type { AgentProfile, McpServerView } from '@contracts'
 
 export function agent(index = 0): AgentProfile {
   return {

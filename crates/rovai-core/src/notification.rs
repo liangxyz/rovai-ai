@@ -449,6 +449,7 @@ pub struct NotificationEpisodeChangeBatch {
     pub requested_after_change_sequence: i64,
     pub next_change_sequence: i64,
     pub through_change_sequence: i64,
+    pub task_capability: crate::task_capability::TaskCapabilitySnapshot,
     pub reset_required: bool,
     pub has_more: bool,
     pub changes: Vec<NotificationEpisodeChange>,
@@ -638,6 +639,7 @@ impl NotificationEpisodeService {
         let limit = normalized_limit(limit);
         let transaction = database.connection_mut().transaction()?;
         let (through_change_sequence, retained_floor_sequence) = change_clock(&transaction)?;
+        let task_capability = crate::task_capability::snapshot(&transaction)?;
         let reset_required = after_change_sequence < retained_floor_sequence
             || after_change_sequence < 0
             || after_change_sequence > through_change_sequence;
@@ -648,6 +650,7 @@ impl NotificationEpisodeService {
                 requested_after_change_sequence: after_change_sequence,
                 next_change_sequence: through_change_sequence,
                 through_change_sequence,
+                task_capability,
                 reset_required: true,
                 has_more: false,
                 changes: Vec::new(),
@@ -662,6 +665,7 @@ impl NotificationEpisodeService {
                    cleared_through_attention_revision, changed_at
             FROM notification_change_journal
             WHERE change_sequence > ?1 AND change_sequence <= ?2
+              AND (?4 OR NOT EXISTS(SELECT 1 FROM notification_episode e WHERE e.id=notification_change_journal.episode_id AND e.kind='task'))
             ORDER BY change_sequence ASC
             LIMIT ?3
             "#,
@@ -670,7 +674,8 @@ impl NotificationEpisodeService {
             params![
                 after_change_sequence,
                 through_change_sequence,
-                (limit + 1) as i64
+                (limit + 1) as i64,
+                task_capability.enabled
             ],
             raw_change_from_row,
         )?;
@@ -744,6 +749,7 @@ impl NotificationEpisodeService {
             requested_after_change_sequence: after_change_sequence,
             next_change_sequence,
             through_change_sequence,
+            task_capability,
             reset_required: false,
             has_more,
             changes,
@@ -1317,6 +1323,7 @@ fn unread_episode_count(
         JOIN notification_episode_disposition AS episode_disposition
           ON episode_disposition.episode_id = episode.id
         WHERE episode.recipient_user_id = ?1
+          AND (?3 OR episode.kind <> 'task')
           AND episode.created_change_sequence <= ?2
           AND episode.attention_revision
               > episode_disposition.cleared_through_attention_revision
@@ -1337,7 +1344,11 @@ fn unread_episode_count(
                 )
           )
         "#,
-            params![recipient_user_id, through_change_sequence],
+            params![
+                recipient_user_id,
+                through_change_sequence,
+                crate::task_capability::enabled(connection)?
+            ],
             |row| row.get(0),
         )
         .context("failed to count unread Notification Episodes")
@@ -1435,6 +1446,7 @@ fn load_episode_page(
             LEFT JOIN channel_conversation
               ON channel_conversation.id = channel_binding.channel_conversation_id
             WHERE episode.recipient_user_id = :recipient
+              AND (:tasks_enabled OR episode.kind <> 'task')
               AND episode.created_change_sequence <= :through
               AND episode.attention_revision
                   > episode_disposition.cleared_through_attention_revision
@@ -1478,6 +1490,7 @@ fn load_episode_page(
     let rows = statement.query_map(
         named_params! {
             ":recipient": recipient_user_id,
+            ":tasks_enabled": crate::task_capability::enabled(transaction)?,
             ":through": through_change_sequence,
             ":filter": filter.as_str(),
             ":cursor_priority": cursor_priority,
@@ -1536,10 +1549,15 @@ fn load_raw_episode_by_id(
             LEFT JOIN channel_conversation
               ON channel_conversation.id = channel_binding.channel_conversation_id
             WHERE episode.id = ?1 AND episode.recipient_user_id = ?2
+              AND (?3 OR episode.kind <> 'task')
               AND episode.attention_revision
                   > disposition.cleared_through_attention_revision
             "#,
-            params![episode_id, recipient_user_id],
+            params![
+                episode_id,
+                recipient_user_id,
+                crate::task_capability::enabled(connection)?
+            ],
             raw_episode_from_row,
         )
         .optional()
@@ -2954,6 +2972,238 @@ mod slow_tests {
                 )
                 .is_err(),
             "a cursor must not be reused across filters"
+        );
+
+        // A hidden Task must not consume a page slot or contribute to counts.
+        // The same owner also checks admission and the filtered journal cursor.
+        crate::task_capability::set(database.connection(), true).unwrap();
+        let record_task = |database: &mut Database, id: &str| {
+            let tx = database.connection_mut().transaction().unwrap();
+            tx.execute("INSERT INTO task(id,camp_id,title,status,completion_summary,
+                created_by_type,created_by_id,closed_by_type,closed_by_id,created_at,updated_at,closed_at)
+                VALUES(?1,'camp-page-a','Task signal','completed','done','user','local_user','user','local_user',
+                '2026-08-01T00:00:00Z','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z')", [id]).unwrap();
+            record_status_transition(
+                &tx,
+                &ActorRef::System {
+                    component_id: "notification-test".into(),
+                },
+                StatusTransition {
+                    kind: "task",
+                    id,
+                    camp_id: "camp-page-a",
+                    status: "completed",
+                    source_message_id: None,
+                },
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        };
+        record_task(&mut database, "task-before-off");
+        let visible = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                10,
+            )
+            .unwrap();
+        assert_eq!(visible.items.len(), 4);
+        assert_eq!(visible.unread_count, 4);
+        crate::task_capability::set(database.connection(), false).unwrap();
+        record_task(&mut database, "task-while-off");
+        let hidden = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                1,
+            )
+            .unwrap();
+        assert_eq!(hidden.items.len(), 1);
+        assert_ne!(hidden.items[0].kind, NotificationEpisodeKind::Task);
+        assert_eq!(hidden.unread_count, 3);
+        assert!(hidden.next_cursor.is_some());
+        let changes = service
+            .changes_since(
+                &mut database,
+                CURRENT_USER_ID,
+                first_page.through_change_sequence,
+                100,
+            )
+            .unwrap();
+        assert!(changes.changes.iter().all(|change| {
+            change
+                .episode
+                .as_ref()
+                .is_none_or(|episode| episode.kind != NotificationEpisodeKind::Task)
+        }));
+        assert_eq!(
+            changes.next_change_sequence,
+            changes.through_change_sequence
+        );
+        assert!(!changes.task_capability.enabled);
+        assert_eq!(
+            changes.task_capability.observed_through_change_sequence,
+            changes.through_change_sequence
+        );
+        crate::task_capability::set(database.connection(), true).unwrap();
+        let restored = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                10,
+            )
+            .unwrap();
+        assert_eq!(
+            restored.items.len(),
+            4,
+            "off admission must not leave a new occurrence to replay"
+        );
+        assert_eq!(restored.unread_count, 4);
+
+        // The setting transaction fixes the Task enable boundary once. A late
+        // inbox response or a same-value repair must not consume newer signals.
+        let boundary = crate::task_capability::snapshot(database.connection()).unwrap();
+        assert_eq!(
+            boundary.heads_up_after_sequence,
+            changes.through_change_sequence
+        );
+        assert_eq!(
+            boundary.observed_through_change_sequence,
+            restored.through_change_sequence
+        );
+        assert!(
+            boundary.observed_through_change_sequence
+                > changes.task_capability.observed_through_change_sequence
+        );
+        record_task(&mut database, "task-after-enable");
+        assert!(!crate::task_capability::set(database.connection(), true).unwrap());
+        let late = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                10,
+            )
+            .unwrap();
+        assert!(late.through_change_sequence > boundary.heads_up_after_sequence);
+        assert_eq!(
+            crate::task_capability::snapshot(database.connection())
+                .unwrap()
+                .heads_up_after_sequence,
+            boundary.heads_up_after_sequence
+        );
+        let new_tasks = service
+            .changes_since(
+                &mut database,
+                CURRENT_USER_ID,
+                boundary.heads_up_after_sequence,
+                100,
+            )
+            .unwrap();
+        assert_eq!(
+            new_tasks.task_capability,
+            crate::task_capability::snapshot(database.connection()).unwrap()
+        );
+        assert_eq!(
+            new_tasks.task_capability.observed_through_change_sequence,
+            new_tasks.through_change_sequence
+        );
+        assert_eq!(
+            new_tasks
+                .changes
+                .iter()
+                .filter(
+                    |change| change.heads_up_signal.as_ref().is_some_and(
+                        |signal| signal.semantic == NotificationSemantic::TaskStatusChanged
+                    )
+                )
+                .count(),
+            1
+        );
+        drop(database);
+        let database = Database::open(&directory).unwrap();
+        assert_eq!(
+            crate::task_capability::snapshot(database.connection())
+                .unwrap()
+                .heads_up_after_sequence,
+            boundary.heads_up_after_sequence,
+            "reopening preserves the fixed boundary"
+        );
+
+        // An already-installed schema 155 upgrades without changing its flag or
+        // notification facts; existing history becomes the initial boundary.
+        database
+            .connection()
+            .execute_batch(
+                "ALTER TABLE task_preference DROP COLUMN heads_up_after_sequence;
+            DELETE FROM schema_migration WHERE version=206;
+            UPDATE rovai_data_contract SET projection_schema_version=155 WHERE singleton=1;",
+            )
+            .unwrap();
+        drop(database);
+        let mut database = Database::open(&directory).unwrap();
+        let upgraded = crate::task_capability::snapshot(database.connection()).unwrap();
+        assert!(upgraded.enabled);
+        assert_eq!(
+            upgraded.heads_up_after_sequence,
+            late.through_change_sequence
+        );
+        let retained = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                10,
+            )
+            .unwrap();
+        assert_eq!(retained.unread_count, late.unread_count);
+        assert_eq!(retained.items.len(), late.items.len());
+
+        // Toggle-only changes share the notification clock. Even with no new
+        // journal row, an older enabled response cannot override a later disable.
+        let tx = database.connection_mut().transaction().unwrap();
+        assert!(crate::task_capability::set(&tx, false).unwrap());
+        let disabled = crate::task_capability::snapshot(&tx).unwrap();
+        assert!(
+            disabled.observed_through_change_sequence > upgraded.observed_through_change_sequence
+        );
+        assert!(!crate::task_capability::set(&tx, false).unwrap());
+        assert_eq!(crate::task_capability::snapshot(&tx).unwrap(), disabled);
+        tx.commit().unwrap();
+        let empty = service
+            .changes_since(
+                &mut database,
+                CURRENT_USER_ID,
+                upgraded.observed_through_change_sequence,
+                1,
+            )
+            .unwrap();
+        assert!(empty.changes.is_empty());
+        assert_eq!(empty.task_capability, disabled);
+        assert_eq!(
+            empty.next_change_sequence,
+            disabled.observed_through_change_sequence
+        );
+        let reset = service
+            .changes_since(&mut database, CURRENT_USER_ID, -1, 1)
+            .unwrap();
+        assert!(reset.reset_required);
+        assert_eq!(reset.task_capability, disabled);
+        let tx = database.connection_mut().transaction().unwrap();
+        crate::task_capability::set(&tx, true).unwrap();
+        tx.rollback().unwrap();
+        assert_eq!(
+            crate::task_capability::snapshot(database.connection()).unwrap(),
+            disabled,
+            "flag, boundary and ordering clock roll back together"
         );
 
         drop(database);

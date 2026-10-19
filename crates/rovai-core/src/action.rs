@@ -645,7 +645,7 @@ impl ActionSafetyService {
         self.gateway.execute(database, envelope, |transaction| {
             let camp_id = match envelope.camp_id.as_deref() {
                 Some(camp_id) => camp_id,
-                None => return Ok(rejected("action.camp_required", "Action requires a Camp")),
+                None => return Ok(rejected("action.camp_required", "Action requires a Thread")),
             };
             let context = match match envelope.payload.control_mode {
                 ActionControlMode::Observed => agent_action_observation_context(
@@ -1089,7 +1089,7 @@ impl ActionSafetyService {
                 None => {
                     return Ok(rejected(
                         "action.camp_required",
-                        "Observed Action requires a Camp",
+                        "Observed Action requires a Thread",
                     ));
                 }
             };
@@ -1334,7 +1334,7 @@ impl ActionSafetyService {
                 return Ok(rejected("approval.not_found", "Action Approval does not exist"));
             };
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
-                return Ok(rejected("approval.camp_mismatch", "Approval is outside the Camp"));
+                return Ok(rejected("approval.camp_mismatch", "Approval is outside the Thread"));
             }
             if requested_for_user != *user_id {
                 return Ok(rejected(
@@ -1649,7 +1649,7 @@ impl ActionSafetyService {
                 return Ok(rejected("action.not_found", "Action does not exist"));
             };
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
-                return Ok(rejected("action.camp_mismatch", "Action is outside the Camp"));
+                return Ok(rejected("action.camp_mismatch", "Action is outside the Thread"));
             }
             if status != "prepared" || version != envelope.payload.expected_version {
                 return Ok(rejected(
@@ -1974,7 +1974,7 @@ impl ActionSafetyService {
                 return Ok(rejected("action.not_found", "Action does not exist"));
             };
             if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
-                return Ok(rejected("action.camp_mismatch", "Action is outside the Camp"));
+                return Ok(rejected("action.camp_mismatch", "Action is outside the Thread"));
             }
             let zcode_background_result: bool = if matches!(&envelope.actor, ActorRef::System { component_id } if component_id == "runtime-adapter:zcode-app") {
                 transaction.query_row("SELECT EXISTS(SELECT 1 FROM agent_run_execution_evidence AS e
@@ -2695,7 +2695,7 @@ impl ActionSafetyService {
             if invocation_kind == "single_chat" {
                 let camp_turn_id = camp_turn_id
                     .as_deref()
-                    .context("Single Chat AgentRun has no CampTurn")?;
+                    .context("Single Chat AgentRun has no ThreadTurn")?;
                 let settlement = settle_abortive_agent_run_in_tx(
                     transaction,
                     &envelope.payload.agent_run_id,

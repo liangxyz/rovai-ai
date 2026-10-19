@@ -690,7 +690,7 @@ impl ThreadAttachmentStore {
                 let source_attachments = parse_source_attachments(&source_attachments_json)?;
                 anyhow::ensure!(
                     prepared_attachments.is_empty() || source_attachments.is_empty(),
-                    "Camp Composer Draft mixes legacy Prepared and Source Attachments"
+                    "Thread Composer Draft mixes legacy Prepared and Source Attachments"
                 );
                 let attachments = if prepared_attachments.is_empty() {
                     source_attachments
@@ -1604,7 +1604,7 @@ impl ThreadAttachmentStore {
                 |row| row.get::<_, String>(0),
             )
             .optional()?
-            .context("Prepared Attachment does not exist in this Camp")?;
+            .context("Prepared Attachment does not exist in this Thread")?;
         let transaction = database.connection_mut().transaction()?;
         ensure_draft_revision(&self.client, &transaction, camp_id, expected_revision)?;
         transaction.execute(
@@ -1726,10 +1726,10 @@ impl ThreadAttachmentStore {
             .map(String::as_str)
             .collect::<Vec<_>>();
         if stored_ids != requested_ids {
-            anyhow::bail!("Camp Composer Draft attachments changed before send");
+            anyhow::bail!("Thread Composer Draft attachments changed before send");
         }
         if stored.len() > MAX_PREPARED_ATTACHMENTS {
-            anyhow::bail!("Camp Composer Draft exceeds the attachment count limit");
+            anyhow::bail!("Thread Composer Draft exceeds the attachment count limit");
         }
         let mut total = 0_u64;
         for row in stored {
@@ -1745,7 +1745,7 @@ impl ThreadAttachmentStore {
             )?;
         }
         if total > MAX_DRAFT_ATTACHMENT_BYTES {
-            anyhow::bail!("Camp Composer Draft exceeds the total attachment size limit");
+            anyhow::bail!("Thread Composer Draft exceeds the total attachment size limit");
         }
         Ok(())
     }
@@ -2089,7 +2089,7 @@ impl ThreadAttachmentStore {
             || copied.content_digest != expected_digest
             || (media_type == DIRECTORY_MEDIA_TYPE) != (copied.kind == "directory")
         {
-            anyhow::bail!("Camp Attachment Runtime View copy did not match Authority receipt");
+            anyhow::bail!("Thread Attachment Runtime View copy did not match Authority receipt");
         }
         Ok(RuntimeAttachmentCopyReceipt {
             authority_safe_leaf,
@@ -2137,7 +2137,7 @@ impl ThreadAttachmentStore {
         }
         let metadata = fs::symlink_metadata(&root)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            anyhow::bail!("Camp Attachment Directory is unsafe");
+            anyhow::bail!("Thread Attachment Directory is unsafe");
         }
         make_owned_tree_removable(&root)?;
         fs::remove_dir_all(root)?;
@@ -2937,7 +2937,7 @@ pub fn consume_prepared_attachments(
         .map(String::as_str)
         .collect::<Vec<_>>();
     if stored_ids != requested_ids {
-        anyhow::bail!("Camp Composer Draft attachments changed before commit");
+        anyhow::bail!("Thread Composer Draft attachments changed before commit");
     }
     for (position, row) in rows.into_iter().enumerate() {
         transaction.execute(
@@ -2987,7 +2987,7 @@ pub fn consume_prepared_attachments_for_managed_ingest(
         .map(String::as_str)
         .collect::<Vec<_>>();
     if stored_ids != requested_ids {
-        anyhow::bail!("Camp Composer Draft attachments changed before commit");
+        anyhow::bail!("Thread Composer Draft attachments changed before commit");
     }
     transaction.execute(
         "DELETE FROM camp_composer_draft WHERE camp_id = ?1 AND client_id = 'desktop'",
@@ -3308,7 +3308,7 @@ fn ensure_camp_exists(database: &Database, camp_id: &str) -> Result<()> {
         .connection()
         .query_row("SELECT 1 FROM camp WHERE id = ?1", [camp_id], |_| Ok(()))
         .optional()?
-        .context("Camp does not exist")?;
+        .context("Thread does not exist")?;
     Ok(())
 }
 
@@ -3487,13 +3487,13 @@ fn validate_managed_directory_node(
 
 fn validate_owned_path(root: &Path, path: &Path) -> Result<()> {
     if !path.is_absolute() {
-        anyhow::bail!("Attachment path is outside the Camp Attachment Directory");
+        anyhow::bail!("Attachment path is outside the Thread Attachment Directory");
     }
     let canonical_root =
-        fs::canonicalize(root).context("Camp Attachment Directory is unavailable")?;
-    let canonical_path = fs::canonicalize(path).context("Camp Attachment Path is unavailable")?;
+        fs::canonicalize(root).context("Thread Attachment Directory is unavailable")?;
+    let canonical_path = fs::canonicalize(path).context("Thread Attachment Path is unavailable")?;
     if !canonical_path.starts_with(canonical_root) {
-        anyhow::bail!("Attachment path is outside the Camp Attachment Directory");
+        anyhow::bail!("Attachment path is outside the Thread Attachment Directory");
     }
     Ok(())
 }
