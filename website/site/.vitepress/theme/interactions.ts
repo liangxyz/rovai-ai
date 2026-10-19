@@ -41,7 +41,7 @@ export function installInteractions() {
   document.addEventListener('change', (event) => {
     const select = event.target
     if (!(select instanceof HTMLSelectElement) || !select.closest('.mobile-doc-select')) return
-    const lang = document.body.dataset.lang === 'zh' ? '/zh' : ''
+    const lang = import.meta.env.BASE_URL.replace(/\/$/, '') + (document.body.dataset.lang === 'zh' ? '/zh' : '')
     window.location.href = select.value === 'index' ? `${lang}/docs/` : `${lang}/docs/${select.value}.html`
   })
 }

@@ -28,9 +28,13 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
       - uses: actions/configure-pages@v5
+        id: pages
       - name: Install website dependencies
         run: npm ci --prefix website
       - name: Build and check website
+        env:
+          WEBSITE_BASE: ${{ steps.pages.outputs.base_path }}
+          WEBSITE_ORIGIN: ${{ steps.pages.outputs.origin }}
         run: npm run check --prefix website
       - uses: actions/upload-pages-artifact@v4
         with:

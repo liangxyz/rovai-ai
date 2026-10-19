@@ -8,6 +8,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const source = join(root, 'scripts', 'source')
 const site = join(root, 'site')
 const origin = 'https://rovai.dev'
+// Deployment sub-path (for GitHub Pages project sites, e.g. /rovai-ai/). Default is the site root.
+const basePath = (process.env.WEBSITE_BASE || '/').replace(/\/*$/, '')
 const scripts = Object.fromEntries(await Promise.all(
   ['docs-content.js', 'docs-details.js', 'docs-tutorials.js', 'docs-deployment.js', 'site.js'].map(async name =>
     [name, await readFile(join(source, name), 'utf8')]
@@ -119,7 +121,7 @@ function makeWindow(page, lang, topic = '') {
 
 function rewriteLinks(dom, lang, page) {
   const doc = dom.window.document
-  const prefix = lang === 'zh' ? '/zh' : ''
+  const prefix = basePath + (lang === 'zh' ? '/zh' : '')
   const topicIds = new Set(Object.keys(dom.window.RovaiDocs?.topics || {}))
   for (const link of doc.querySelectorAll('a[href]')) {
     const original = link.getAttribute('href')
@@ -133,11 +135,11 @@ function rewriteLinks(dom, lang, page) {
     if (url.origin !== origin) continue
     const article = url.pathname.match(/^(\/zh)?\/docs\/index\.html$/)
     if (article && url.hash && topicIds.has(url.hash.slice(1))) {
-      link.setAttribute('href', `${article[1] || ''}/docs/${url.hash.slice(1)}.html`)
+      link.setAttribute('href', `${basePath}${article[1] || ''}/docs/${url.hash.slice(1)}.html`)
     } else if (url.pathname.endsWith('/index.html')) {
-      link.setAttribute('href', url.pathname.slice(0, -'index.html'.length) + url.hash)
+      link.setAttribute('href', basePath + url.pathname.slice(0, -'index.html'.length) + url.hash)
     } else {
-      link.setAttribute('href', url.pathname + url.hash)
+      link.setAttribute('href', basePath + url.pathname + url.hash)
     }
   }
   for (const image of doc.querySelectorAll('[src]')) {
@@ -146,12 +148,12 @@ function rewriteLinks(dom, lang, page) {
   }
   for (const element of doc.querySelectorAll('[data-image]')) {
     const src = new URL(element.getAttribute('data-image'), dom.window.location.href)
-    if (src.origin === origin) element.setAttribute('data-image', src.pathname)
+    if (src.origin === origin) element.setAttribute('data-image', basePath + src.pathname)
   }
   const localeLink = doc.querySelector('.language-link')
   if (localeLink && page === 'docs') {
     const current = dom.window.location.hash.slice(1)
-    localeLink.setAttribute('href', `${lang === 'zh' ? '' : '/zh'}/docs/${current ? `${current}.html` : ''}`)
+    localeLink.setAttribute('href', `${basePath}${lang === 'zh' ? '' : '/zh'}/docs/${current ? `${current}.html` : ''}`)
   }
 }
 

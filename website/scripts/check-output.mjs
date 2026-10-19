@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const dist = join(root, 'site', '.vitepress', 'dist')
+const basePath = (process.env.WEBSITE_BASE || '/').replace(/\/*$/, '')
 const htmlFiles = []
 const problems = []
 
@@ -31,14 +32,19 @@ for (const path of htmlFiles) {
     for (const name of ['href', 'src', 'data-image']) {
       const value = element.getAttribute(name)
       if (!value || value.startsWith('data:') || value.startsWith('mailto:')) continue
-      const url = new URL(value, `https://rovai.dev${route}`)
+      const url = new URL(value, `https://rovai.dev${basePath}${route}`)
       if (url.origin !== 'https://rovai.dev') continue
-      const target = resolve(dist, '.' + url.pathname, url.pathname.endsWith('/') ? 'index.html' : '')
+      if (basePath && url.pathname !== basePath && !url.pathname.startsWith(basePath + '/')) {
+        problems.push(`${route}: link is outside the deployment base ${basePath}: ${value}`)
+        continue
+      }
+      const sitePath = url.pathname.slice(basePath.length) || '/'
+      const target = resolve(dist, '.' + sitePath, sitePath.endsWith('/') ? 'index.html' : '')
       if (!target.startsWith(dist + '/') && target !== dist) {
         problems.push(`${route}: link escapes the site: ${value}`)
       } else if (!existsSync(target)) {
         problems.push(`${route}: missing ${name} target ${value}`)
-      } else if (url.hash && target.endsWith('.html') && !url.pathname.includes('/examples/')) {
+      } else if (url.hash && target.endsWith('.html') && !sitePath.includes('/examples/')) {
         const targetDoc = target === path ? doc : new JSDOM(readFileSync(target, 'utf8')).window.document
         if (!targetDoc.getElementById(decodeURIComponent(url.hash.slice(1)))) problems.push(`${route}: missing anchor ${value}`)
       }
@@ -58,7 +64,7 @@ for (const lang of ['', '/zh']) {
   }
   for (const topic of ['agents','agent-setup','multiple-providers','remote','desktop-web','server-install','lan-access','tailscale','public-https','server-maintenance']) {
     const article = new JSDOM(readFileSync(join(dist, lang, 'docs', topic + '.html'), 'utf8')).window.document
-    const counterpart = `${lang ? '' : '/zh'}/docs/${topic}.html`
+    const counterpart = `${basePath}${lang ? '' : '/zh'}/docs/${topic}.html`
     if (article.querySelector('.language-link')?.getAttribute('href') !== counterpart) problems.push(`${lang}/docs/${topic}: locale counterpart missing`)
   }
   const install = new JSDOM(readFileSync(join(dist, lang, 'docs', 'server-install.html'), 'utf8')).window.document
