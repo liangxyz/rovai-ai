@@ -58,8 +58,19 @@ for attempt in $(seq 1 120); do
   sleep 2
 done
 if [[ "$ready" != 1 ]]; then tail -80 "$fixture/console.log"; exit 1; fi
-scp "${ssh_options[@]}" -P "$port" -r "$assets" rovai@127.0.0.1:assets
-scp "${ssh_options[@]}" -P "$port" "$repository/scripts/install-server.sh" "$repository/scripts/smoke-linux-server.py" rovai@127.0.0.1:
+# sshd can still be restarted by cloud-init right after the first successful probe, which
+# resets the next connection. Retry transport-level failures; the guest commands are idempotent.
+retry() {
+  local n
+  for n in 1 2 3 4 5 6; do
+    if "$@"; then return 0; fi
+    echo "retrying after SSH transport failure ($n/6): $1" >&2
+    sleep 5
+  done
+  return 1
+}
+retry scp "${ssh_options[@]}" -P "$port" -r "$assets" rovai@127.0.0.1:assets
+retry scp "${ssh_options[@]}" -P "$port" "$repository/scripts/install-server.sh" "$repository/scripts/smoke-linux-server.py" rovai@127.0.0.1:
 version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repository/package.json")
 [[ "$version" =~ ^[0-9A-Za-z.+-]+$ && "$source_sha" =~ ^[0-9a-f]{40}$ ]]
 ssh "${ssh_options[@]}" -p "$port" rovai@127.0.0.1 \
