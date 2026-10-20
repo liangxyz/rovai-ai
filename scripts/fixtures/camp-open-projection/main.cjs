@@ -895,10 +895,10 @@ app.whenReady().then(async () => {
     assert.equal(attachmentState.composerImageCount, 3)
     assert.equal(attachmentState.userFileCount, 6)
     assert.deepEqual(attachmentState.userFileHeights, [46, 46, 46, 46, 46, 46])
-    assert.ok(attachmentState.userFileWidths.every(width => width <= 220))
+    assert.ok(attachmentState.userFileWidths.every(width => width <= 280))
     assert.ok(new Set(attachmentState.userFileWidths).size > 1, 'User files use content-sized widths')
     assert.ok(attachmentState.longUserFile, 'Long user attachment fixture is present')
-    assert.equal(attachmentState.longUserFile.cardWidth, 220)
+    assert.equal(attachmentState.longUserFile.cardWidth, 280)
     assert.equal(
       attachmentState.longUserFile.title,
       'rovai-file-reference-and-tab-icons-md-doc-code-larger.html'
@@ -918,9 +918,9 @@ app.whenReady().then(async () => {
     ]))
     assert.deepEqual(attachmentState.composerHeights, [48, 48, 48, 48, 48, 48, 48, 48, 48])
     assert.deepEqual(attachmentState.composerImageWidths, [48, 48, 48])
-    assert.ok(attachmentState.composerFileWidths.every(width => width >= 172 && width <= 308))
-    assert.ok(attachmentState.composerFileWidths.some(width => width !== 220),
-      'Composer files no longer use the old fixed width')
+    assert.ok(attachmentState.composerFileWidths.every(width => width >= 128 && width <= 280))
+    assert.ok(new Set(attachmentState.composerFileWidths).size > 1,
+      'Composer files use content-sized widths')
     assert.equal(attachmentState.composerText, '请按交互稿核对附件尺寸、顺序、图标和视觉层级。')
     assert.equal(attachmentState.composerOverflow, true)
     assert.equal(attachmentState.composerScrollbar, 'none')

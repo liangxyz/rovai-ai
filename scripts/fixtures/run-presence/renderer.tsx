@@ -76,14 +76,6 @@ function Workbench() {
     nav.reset({ kind: 'camp', threadId: state.snapshot.thread.id } as any)
     return nav
   }, [])
-  const openMotionSettings = async () => {
-    await navigation.push({ kind: 'settings', section: 'appearance' })
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const control = document.querySelector<HTMLSelectElement>('#appearance-motion')
-      control?.scrollIntoView({ block: 'center', behavior: 'instant' })
-      control?.focus({ preventScroll: true })
-    }))
-  }
   const changeAppearance = async (preferences: AppearancePreferences): Promise<AppearanceSnapshot> => {
     const next = { ...preferences, resolvedTheme: theme as 'day' | 'night' }
     setAppearance(next)
@@ -129,7 +121,7 @@ function Workbench() {
           uniqueRuns: rows.length === new Set(rows.map(e => e.dataset.presenceRun)).size,
           anchoredOrder: JSON.stringify(actualOrder) === JSON.stringify(expectedOrder),
           independentActivityRows: rows.every(e => !e.closest('.message-actions')),
-          compactRows: rows.every((e, i) => e.querySelectorAll('.run-presence-line button').length === (slots[i].run.status === 'failed' && slots[i].run.failure?.retryable === false ? 1 : 2) && !e.querySelector('.presence-elapsed')),
+          compactRows: rows.every((e, i) => e.querySelectorAll('.run-presence-line button').length === (slots[i].run.status === 'failed' && slots[i].run.failure?.retryable === false ? 1 : 2) && !e.querySelector('.run-presence-guide')),
           commandIconsMatchContent: rows.every(e => Boolean(e.querySelector('.tool-call-icon')) === (e.querySelector('.run-presence-open')?.getAttribute('data-preview-kind') === 'command')),
           retryOnlyOnFailure: rows.every(e => !e.querySelector('.run-presence-retry') || e.dataset.presenceState === 'failed'),
           identityMatchesRun: rows.every((e, i) => Boolean(e.querySelector('.member-avatar')) === !slots[i].continuation),
@@ -167,7 +159,6 @@ function Workbench() {
             worldMapEnabled={false} inspectorVisible={inspector !== null} inspectorTab={inspector ?? 'members'}
             detailEntryHost={detailHost} onOpenInspector={setInspector} onCloseInspector={() => setInspector(null)} onInspectorTabChange={setInspector}
             onOpenSingleChat={() => unsupported('单聊')} onConfigureRuntime={() => unsupported('运行配置')}
-            onOpenMotionSettings={() => { void openMotionSettings() }}
             suppressExecutionAutoOpen onNotify={model.note} onNotifyError={model.note} />
         </main>
         {settings && <main className="content settings-content"><div className="settings-workbench"><div className="settings-panel settings-panel-appearance">
@@ -175,7 +166,7 @@ function Workbench() {
         </div></div></main>}
       </NavigationShell>
       {controls && <section className="prototype-control-bar" aria-label="交互稿演示控制">
-        <div className="prototype-label"><strong>队员占位</strong><span>停止区分隔 · 模拟数据</span></div>
+        <div className="prototype-label"><strong>队员占位</strong><span>整行执行条 · 模拟数据</span></div>
         <label className="sr-only" htmlFor="prototype-scenario">演示场景</label>
         <select id="prototype-scenario" value={state.scenario} onChange={e => { setInspector(null); model.setScenario(e.target.value) }}>
           {Object.entries(scenarios).map(([id, scenario]) => <option key={id} value={id}>{scenario.name}</option>)}
@@ -197,10 +188,10 @@ function Workbench() {
       {!proposal && <div className="prototype-baseline-label">现有界面</div>}
     </div>
     <Dialog.Root open={info} onOpenChange={setInfo}><AppDialogContent className="app-dialog prototype-info-dialog">
-      <AppDialogHeader title="跟着消息向下，继续处理" description="群聊中的队员占位 · 停止区分隔" />
+      <AppDialogHeader title="跟着消息向下，继续处理" description="群聊中的队员占位 · 整行执行条" />
       <AppDialogBody>
         <p>发送前固定在本次输入锚点；自己的公开消息发送成功后，才接到这条消息下面。其他人的消息和追加输入不移动这个位置。紧接同一 Run 的消息或产物时沿用身份。</p>
-        <div className="prototype-info-rule"><strong>RunCard 高亮、单行正文、停止</strong><p>正文按原文已有换行在同一行内逐行推进，未换行的长内容静态省略。运行中复用 RunCard 文字高亮，命令保留原工具图标。右侧短竖线分隔停止区，按钮默认中性色、悬浮变红，点击后确认。点击内容打开现有执行台，查看全文与耗时。</p></div>
+        <div className="prototype-info-rule"><strong>转圈、单行正文与运行时间</strong><p>正文按原文已有换行在同一行内逐行推进，未换行的长内容静态省略。运行中显示独立转圈，命令保留原工具图标。浅灰整行没有分隔线，时间可点击到对应执行卡片。停止图标默认无底、悬浮整行变浅红，点击后确认。</p></div>
         <div className="prototype-info-rule"><strong>中断可重试，结束就收起</strong><p>中断行保留原因入口和重试按钮。重试受理后收起旧提示，切群和刷新也保持收起；新执行开始后恢复占位，再失败时重试新执行。原失败记录与继续执行按钮保留在执行台。排队不占位，结束不保留完成行。复制／回复继续使用现有规则。</p></div>
         <div className="prototype-info-rule"><strong>直接复用当前前端</strong><p>侧栏、顶栏、消息气泡、头像、Composer、队员列表与执行台均由当前仓库的生产 React 组件渲染。日夜主题使用原有 token。</p>
           <code>ThreadWorkspace · ThreadNavigation · NavigationShell<br />AppHeader · MemberAvatar · styles.css · theme.css</code>

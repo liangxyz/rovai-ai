@@ -642,7 +642,8 @@ impl Bridge {
                 // model. The first input remains the Core-owned Bootstrap.
                 let snapshot = if method == "session/new" {
                     let mut create = json!({"workspace":self.workspace(),"persistence":"deferred",
-                        "mode":self.mode,"mcpServers":servers,"titleGenerationEnabled":false});
+                        "mode":self.mode,"mcpServers":servers,"titleGenerationEnabled":false,
+                        "toolDenylist":["AskUserQuestion"]});
                     if self.config.protocol() == NativeProtocol::ProviderRegistry {
                         if !runtime_model["model"].is_null() {
                             create["model"] = runtime_model["model"].clone();
@@ -660,7 +661,8 @@ impl Bridge {
                     }
                     self.call("session/create", create).await?
                 } else {
-                    let mut resume = json!({"sessionId":params["sessionId"],"workspace":self.workspace(),"mcpServers":servers});
+                    let mut resume = json!({"sessionId":params["sessionId"],"workspace":self.workspace(),
+                        "mcpServers":servers,"toolDenylist":["AskUserQuestion"]});
                     if self.config.protocol() == NativeProtocol::Legacy {
                         resume["runtimeModel"] = runtime_model;
                     }
@@ -1787,7 +1789,14 @@ mod tests {
     // separately verifies its model catalog and process startup.
     #[tokio::test]
     async fn provider_registry_protocol_uses_native_model_selection() {
-        for probe in [false, true] {
+        // The questionnaire restriction is independent of permission mode and
+        // must be sent again when the native Session is resumed.
+        for (probe, mode) in [
+            (false, "build"),
+            (false, "plan"),
+            (false, "yolo"),
+            (true, "build"),
+        ] {
             let calls = Arc::new(Mutex::new(Vec::new()));
             let observed = calls.clone();
             let config = NativeConfig {
@@ -1820,13 +1829,15 @@ mod tests {
                             json!({"workspace":params["workspace"],"mode":"build","slashCommands":[]})
                         }
                         "session/create" => {
-                            assert_eq!(params["mode"], "build");
+                            assert_eq!(params["toolDenylist"], json!(["AskUserQuestion"]));
+                            assert_eq!(params["mode"], mode);
                             assert!(params.get("runtimeModel").is_none());
                             assert_eq!(params["model"]["options"]["reasoningLevel"], "disabled");
                             assert_eq!(params["thoughtLevel"], "disabled");
                             snapshot.clone()
                         }
                         "session/resume" => {
+                            assert_eq!(params["toolDenylist"], json!(["AskUserQuestion"]));
                             assert!(params.get("runtimeModel").is_none());
                             assert_eq!(params["sessionId"], "s1");
                             snapshot.clone()
@@ -1837,7 +1848,10 @@ mod tests {
                             json!({"settings":{"model":{"current":model}}})
                         }
                         "session/subscribe" => json!({"eventSeq":0}),
-                        "session/setMode" => json!({}),
+                        "session/setMode" => {
+                            assert_eq!(params["mode"], mode);
+                            json!({})
+                        }
                         method => panic!("unexpected modern native method {method}"),
                     };
                     write_frame(&writer, &json!({"id":request["id"],"result":result}))
@@ -1850,7 +1864,7 @@ mod tests {
                 adapter_read,
                 config,
                 PathBuf::from("/fixture"),
-                "build".into(),
+                mode.into(),
                 probe,
             );
             let (read, write) = tokio::io::split(stream);

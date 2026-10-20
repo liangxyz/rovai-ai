@@ -1676,7 +1676,6 @@ export function ThreadWorkspace({
   firstRunThreadId = null,
   onConfigureRuntime,
   onOpenMembers,
-  onOpenMotionSettings,
   onDismissRuntimeRecovery,
   onNotify = () => undefined,
   onNotifyError
@@ -1741,7 +1740,6 @@ export function ThreadWorkspace({
   firstRunThreadId?: string | null
   onConfigureRuntime?(agentId: string): void
   onOpenMembers?(): void
-  onOpenMotionSettings?(): void
   onDismissRuntimeRecovery?(): void
   onNotify?(message: string): void
   onNotifyError?(message: string): void
@@ -5141,7 +5139,7 @@ export function ThreadWorkspace({
                         confirming: confirmingRunIds.has(run.id),
                         turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
                       })}
-                      onStop={onCancelAgentRun} onOpen={openExecutionProcess} onOpenMotionSettings={onOpenMotionSettings} onError={notifyError} />)
+                      onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
                     continue
                   }
                   const dayKey = localDayKey(timelineItem.createdAt)
@@ -5744,6 +5742,12 @@ export function ThreadWorkspace({
               </div>
             )}
             {snapshot.thread.activationState === 'active' && <ThreadDetailPopover
+              executionActions={executionPlacement === 'inspector' ? <ExecutionPlacementControl
+                placement="inspector" placementButtonRef={inspectorPlacementButtonRef}
+                onPlacementMenuIntent={captureExecutionPlacementMenuReadingPosition}
+                onPlacementMenuOpenChange={trackExecutionPlacementMenu}
+                onMovePlacement={moveExecution} placementPending={executionPlacementPending}
+                placementError={executionPlacementError} /> : undefined}
               entryHost={detailEntryHost}
               activeTab={inspectorSurfaceTab}
               visible={inspectorVisible}
@@ -5777,7 +5781,7 @@ export function ThreadWorkspace({
               }}
               onClose={mobile && inspectorSurfaceTab !== 'execution' ? closeMobileSecondaryPanel : onCloseInspector}
             >
-            <section className="camp-detail-content execution-sidecar-panel" hidden={inspectorSurfaceTab !== 'execution'}>
+            <section className="camp-detail-content execution-sidecar-panel" data-empty={executionProcesses.length === 0} hidden={inspectorSurfaceTab !== 'execution'}>
               {executionPlacement === 'inspector' && (
                 <RunPulse
                   key={snapshot.thread.id}
@@ -5806,17 +5810,7 @@ export function ThreadWorkspace({
                 {!executionDrawerPortal && executionPlacement === 'inspector' && executionDrawer}
                 {executionPlacement === 'inspector' && !executionDrawer && (
                   <div className="execution-sidecar-empty">
-                    {executionProcesses.length > 0 ? uiAttribute("选择一位队员，查看连续执行历史。") : <>
-                      <span><UiText zh={"暂无执行记录"} /></span>
-                      <button
-                        ref={inspectorPlacementButtonRef}
-                        className="quiet-button compact"
-                        type="button"
-                        disabled={executionPlacementPending}
-                        onClick={() => void moveExecution('bottom')}
-                      >{executionPlacementPending ? uiAttribute("正在保存…") : uiAttribute("移到底部")}</button>
-                      {executionPlacementError && <span role="alert">{executionPlacementError.message}</span>}
-                    </>}
+                    {executionProcesses.length > 0 ? uiAttribute("选择一位队员，查看连续执行历史。") : uiAttribute("暂无执行记录")}
                   </div>
                 )}
               </div>
@@ -5873,6 +5867,7 @@ export function ThreadWorkspace({
           {executionPlacement === 'bottom' && (
             <RunPulse
               placement="bottom"
+              showEmpty={snapshot.thread.activationState === 'active'}
               placementButtonRef={bottomPlacementButtonRef}
               processes={executionProcesses}
               memberById={memberById}
@@ -6351,9 +6346,10 @@ export function ThreadWorkspace({
       )}
       {executionPlacement === 'right' && executionPreviewHost && createPortal(
         <>
-          {executionProcesses.length > 0 && <RunPulse
+          <RunPulse
             key={snapshot.thread.id}
             placement="right"
+            showEmpty={snapshot.thread.activationState === 'active'}
             placementButtonRef={rightPlacementButtonRef}
             processes={executionProcesses}
             memberById={memberById}
@@ -6368,7 +6364,7 @@ export function ThreadWorkspace({
             onMovePlacement={moveExecution}
             placementPending={executionPlacementPending}
             placementError={executionPlacementError}
-          />}
+          />
           {!executionDrawer && (
             <div className="execution-sidecar-empty execution-preview-empty">
               {executionProcesses.length > 0 ? uiAttribute("选择一位队员，查看连续执行历史。") : uiAttribute("暂无执行记录")}
@@ -6508,6 +6504,7 @@ function runPulseProcessState(
 
 function RunPulse({
   placement,
+  showEmpty = false,
   placementButtonRef,
   processes,
   memberById,
@@ -6524,6 +6521,7 @@ function RunPulse({
   placementPending,
   placementError
 }: {
+  showEmpty?: boolean
   placement: ExecutionConsolePlacement
   placementButtonRef: RefObject<HTMLButtonElement | null>
   processes: AgentExecutionProcess[]
@@ -6549,12 +6547,17 @@ function RunPulse({
   const activeProcessCount = visibleProcesses.filter((process) =>
     process.runs.some(agentRunCountsAsExecuting) || process.waitingDeliveries.length > 0
   ).length
-  if (visibleProcesses.length === 0) return <></>
-  const placementLabel = placement === 'right'
-    ? uiAttribute('固定到右侧')
-    : placement === 'inspector'
-      ? uiAttribute('浮层')
-      : uiAttribute('底部')
+  if (visibleProcesses.length === 0) return showEmpty && placement !== 'inspector' ? (
+    <div className={`run-pulse run-pulse-${placement} run-pulse-empty`}>
+      {placement === 'bottom' && <>
+        <span className="run-pulse-bottom-caption"><ExecutionIcon /><span><UiText zh={"执行"} /></span></span>
+        <span className="run-pulse-empty-label"><UiText zh={"暂无执行记录"} /></span>
+      </>}
+      <ExecutionPlacementControl placement={placement} placementButtonRef={placementButtonRef}
+          onPlacementMenuIntent={onPlacementMenuIntent} onPlacementMenuOpenChange={onPlacementMenuOpenChange}
+          onMovePlacement={onMovePlacement} placementPending={placementPending} placementError={placementError} />
+    </div>
+  ) : <></>
   return (
     <div className={`run-pulse run-pulse-${placement}${placement === 'right' ? ' run-pulse-inspector' : ''}`} aria-label={uiAttribute("Agent 执行台")}>
       {placement === 'bottom' && <span className="run-pulse-bottom-caption">
@@ -6648,57 +6651,9 @@ function RunPulse({
           )
         })}
       </ul>}
-      <div className="execution-placement-control">
-        <DropdownMenu.Root onOpenChange={onPlacementMenuOpenChange}>
-          <DropdownMenu.Trigger asChild>
-            <button
-              ref={placementButtonRef}
-              className="execution-placement-button"
-              type="button"
-              aria-label={uiAttribute("切换执行台位置，当前{0}", String(placementLabel))}
-              aria-busy={placementPending}
-              title={placementPending ? uiAttribute("正在保存执行台位置") : uiAttribute("切换执行台位置 · {0}", String(placementLabel))}
-              disabled={placementPending}
-              onPointerDownCapture={onPlacementMenuIntent}
-              onKeyDownCapture={(event) => {
-                if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
-                  onPlacementMenuIntent()
-                }
-              }}
-            >
-              <ExecutionPlacementSwitchIcon />
-            </button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content className="execution-placement-menu" sideOffset={6} align="end">
-              <div className="execution-placement-menu-heading"><UiText zh={"切换执行台位置"} /></div>
-              {([
-                ['right', '固定到右侧', '与会话并排，不遮挡正文'],
-                ['inspector', '浮层', '保持会话宽度，按需展开'],
-                ['bottom', '底部', '宽幅查看过程与工具输出']
-              ] as const).map(([target, title, description]) => (
-                <DropdownMenu.Item
-                  className={`execution-placement-option${placement === target ? ' is-selected' : ''}`}
-                  data-placement={target}
-                  key={target}
-                  disabled={placementPending}
-                  onSelect={() => { void onMovePlacement(target) }}
-                >
-                  <ExecutionPlacementIcon target={target} />
-                  <span><strong>{uiAttribute(title)}</strong><small>{uiAttribute(description)}</small></span>
-                  {placement === target && <svg className="execution-placement-check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6" /></svg>}
-                </DropdownMenu.Item>
-              ))}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
-        {placementError && (
-          <span className="execution-placement-feedback" role="alert" title={placementError.detail ?? undefined}>
-            <span>{placementError.message}</span>
-            <button type="button" onClick={() => void onMovePlacement(placementError.target)}><UiText zh={"重试"} /></button>
-          </span>
-        )}
-      </div>
+      {placement !== 'inspector' && <ExecutionPlacementControl placement={placement} placementButtonRef={placementButtonRef}
+          onPlacementMenuIntent={onPlacementMenuIntent} onPlacementMenuOpenChange={onPlacementMenuOpenChange}
+          onMovePlacement={onMovePlacement} placementPending={placementPending} placementError={placementError} />}
       {placement === 'bottom' && <button
         className="execution-bottom-collapse-button"
         type="button"
@@ -6715,6 +6670,78 @@ function RunPulse({
           <path d={selectedAgentId === null ? 'm5 15 7-7 7 7' : 'm5 9 7 7 7-7'} />
         </svg>
       </button>}
+    </div>
+  )
+}
+
+function ExecutionPlacementControl({
+  placement, placementButtonRef, onPlacementMenuIntent, onPlacementMenuOpenChange,
+  onMovePlacement, placementPending, placementError
+}: {
+  placement: ExecutionConsolePlacement
+  placementButtonRef: RefObject<HTMLButtonElement | null>
+  onPlacementMenuIntent(): void
+  onPlacementMenuOpenChange(open: boolean): void
+  onMovePlacement(target: ExecutionConsolePlacement): Promise<void>
+  placementPending: boolean
+  placementError: { message: string; detail: string | null; target: ExecutionConsolePlacement } | null
+}): JSX.Element {
+  const placementLabel = placement === 'right'
+    ? uiAttribute('固定到右侧')
+    : placement === 'inspector'
+      ? uiAttribute('浮层')
+      : uiAttribute('底部')
+  return (
+    <div className="execution-placement-control">
+      <DropdownMenu.Root onOpenChange={onPlacementMenuOpenChange}>
+        <DropdownMenu.Trigger asChild>
+          <button
+            ref={placementButtonRef}
+            className="execution-placement-button"
+            type="button"
+            aria-label={uiAttribute("切换执行台位置，当前{0}", String(placementLabel))}
+            aria-busy={placementPending}
+            title={placementPending ? uiAttribute("正在保存执行台位置") : uiAttribute("切换执行台位置 · {0}", String(placementLabel))}
+            disabled={placementPending}
+            onPointerDownCapture={onPlacementMenuIntent}
+            onKeyDownCapture={(event) => {
+              if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+                onPlacementMenuIntent()
+              }
+            }}
+          >
+            <ExecutionPlacementSwitchIcon />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content className="execution-placement-menu" sideOffset={6} align="end">
+            <div className="execution-placement-menu-heading"><UiText zh={"切换执行台位置"} /></div>
+            {([
+              ['right', '固定到右侧', '与会话并排，不遮挡正文'],
+              ['inspector', '浮层', '保持会话宽度，按需展开'],
+              ['bottom', '底部', '宽幅查看过程与工具输出']
+            ] as const).map(([target, title, description]) => (
+              <DropdownMenu.Item
+                className={`execution-placement-option${placement === target ? ' is-selected' : ''}`}
+                data-placement={target}
+                key={target}
+                disabled={placementPending}
+                onSelect={() => { void onMovePlacement(target) }}
+              >
+                <ExecutionPlacementIcon target={target} />
+                <span><strong>{uiAttribute(title)}</strong><small>{uiAttribute(description)}</small></span>
+                {placement === target && <svg className="execution-placement-check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6" /></svg>}
+              </DropdownMenu.Item>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      {placementError && (
+        <span className="execution-placement-feedback" role="alert" title={placementError.detail ?? undefined}>
+          <span>{placementError.message}</span>
+          <button type="button" onClick={() => void onMovePlacement(placementError.target)}><UiText zh={"重试"} /></button>
+        </span>
+      )}
     </div>
   )
 }

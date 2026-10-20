@@ -43,6 +43,7 @@ struct ControlState {
     closed: bool,
     closing: bool,
     pending: HashMap<String, PendingPermission>,
+    questionnaire_requests: HashSet<String>,
     session_state: Option<String>,
     has_result: bool,
     turn_in_progress: bool,
@@ -262,6 +263,10 @@ impl ClaudeControl {
             .await
     }
 
+    pub(crate) fn has_unsupported_questionnaire(&self) -> bool {
+        !self.state.lock().unwrap().questionnaire_requests.is_empty()
+    }
+
     /// Routes controls synchronously. Approval waiting happens in Core; this
     /// function never awaits a user decision or a stdin write.
     pub(crate) fn route(&self, frame: &Value) -> Result<bool> {
@@ -309,6 +314,9 @@ impl ClaudeControl {
                 if state.pending.contains_key(id) {
                     bail!("Claude Code repeated a pending request_id");
                 }
+                if state.questionnaire_requests.contains(id) {
+                    return Ok(true);
+                }
                 if request.get("subtype").and_then(Value::as_str) != Some("can_use_tool") {
                     drop(state);
                     self.enqueue(json!({"type":"control_response","response":{
@@ -337,6 +345,23 @@ impl ClaudeControl {
                         json!({"diagnosticId":"claude-permission",
                         "code":"runtime_permission_incompatible","status":"failed",
                         "summary":"Claude Code 原生权限请求不兼容，操作已拒绝"}),
+                    );
+                    return Ok(true);
+                }
+                if request["tool_name"] == "AskUserQuestion" {
+                    state.questionnaire_requests.insert(id.to_string());
+                    drop(state);
+                    self.enqueue(success_response(
+                        id,
+                        crate::claude_permission::deny_decision(
+                            "暂不支持原生问卷，请通过对话询问用户",
+                        ),
+                    ))?;
+                    self.emit(
+                        "runtime.diagnostic",
+                        json!({"diagnosticId":"claude-questionnaire",
+                            "code":"runtime_questionnaire_unsupported","status":"failed",
+                            "summary":"客户端不支持原生问卷，未提交答案"}),
                     );
                     return Ok(true);
                 }
@@ -721,6 +746,56 @@ mod tests {
 
     #[test]
     fn incompatible_initialization_and_missing_tool_identity_never_admit_permission() {
+        for mode in [
+            "manual",
+            "acceptEdits",
+            "bypassPermissions",
+            "dontAsk",
+            "plan",
+            "auto",
+        ] {
+            let (events, mut received) = mpsc::unbounded_channel();
+            let (control, _ready, mut writes) =
+                ClaudeControl::new("session".into(), mode.into(), Some(events));
+            control
+                .route(&json!({"type":"control_response","response":{
+                "subtype":"success","request_id":control.initialize_id,"response":{}}}))
+                .unwrap();
+            control.state.lock().unwrap().prompt_sent = true;
+            let mut question = permission("question", json!("tool-question"));
+            question["request"]["tool_name"] = json!("AskUserQuestion");
+            question["request"]["input"] = json!({"questions":[]});
+            question["session_id"] = json!("foreign-session");
+            control.route(&question).unwrap();
+            assert_eq!(
+                writes.try_recv().unwrap().frame.unwrap()["response"]["response"]["behavior"],
+                "deny"
+            );
+            assert!(
+                !control.has_unsupported_questionnaire(),
+                "foreign input cannot poison this Run"
+            );
+            assert_eq!(
+                received.try_recv().unwrap().payload["code"],
+                "runtime_permission_incompatible"
+            );
+            question["session_id"] = json!("session");
+            control.route(&question).unwrap();
+            control.route(&question).unwrap();
+            assert!(control.has_unsupported_questionnaire());
+            let denied = writes.try_recv().unwrap().frame.unwrap();
+            assert_eq!(denied["response"]["response"]["behavior"], "deny");
+            assert!(denied["response"]["response"].get("updatedInput").is_none());
+            assert!(writes.try_recv().is_err(), "one receipt per questionnaire");
+            assert_eq!(
+                received.try_recv().unwrap().payload["code"],
+                "runtime_questionnaire_unsupported"
+            );
+            assert!(
+                received.try_recv().is_err(),
+                "questionnaires create no permission Action"
+            );
+        }
         for response in [
             json!({"subtype":"error","error":"unsupported"}),
             json!({"subtype":"success","response":{"current_permission_mode":"bypassPermissions"}}),

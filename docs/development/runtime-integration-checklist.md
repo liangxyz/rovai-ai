@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-10-18
+last_updated: 2026-10-20
 ---
 
 # Agent Runtime 一等接入与准入 Checklist
@@ -20,6 +20,20 @@ last_updated: 2026-10-18
 - [Contracts Index](../contracts/README.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
+
+## 原生提问能力检查
+
+新增或升级适配器必须单独验证原生提问能力与执行审批，不从自动审批成功推导问卷支持：
+
+- 记录实际版本、协议模式、工具身份、问卷选项及专用元数据；保留最小脱敏回归夹具。
+- 有禁用开关时覆盖正式新建、恢复、Host 复用与重启，并验证实际工具集合，不能只检查参数字符串。
+- 没有 UI 承接能力时验证原生取消或文本降级；不得选默认项、Submit、空 answers 或合成用户回复。
+- 已识别的损坏问卷不回落自动允许；普通文件、命令和 MCP 授权保持原选项及输入保护。
+- 验证请求归属、重复/迟到回执、原生错误/取消优先级、已发送消息和文件保留、真实后继输入继续。
+- 状态区分工具已禁用、请求已取消、原生降级已验证、验证范围内未暴露、尚未验证；原生冒烟与确定性测试分开记录。
+
+当前原生问卷治理见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)，
+版本证据见 [v1.72 验证记录](../versions/v1.72/native-questionnaire-verification.md)。
 
 ## 1. 完成定义
 

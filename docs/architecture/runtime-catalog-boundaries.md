@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 ---
 
 # Runtime Catalog Boundaries
@@ -14,8 +14,17 @@ last_updated: 2026-10-19
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v64](../contracts/runtime-launch-and-verification-v64.md)。实测版本和能力只由
+[Runtime Launch and Verification v65](../contracts/runtime-launch-and-verification-v65.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
+
+## 原生提问边界
+
+问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
+提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
+Prompt 观察与终态，先识别并取消，再让普通权限进入现有审批。已识别但损坏的问卷也不能自动允许。
+Claude 控制通道拒绝意外问卷并把观察传到现有整轮结果校验；不新增用户回复或自动重跑机制。
+具体字段与优先级见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
+MiniMax 保留现有行为，不以修改用户配置关闭问卷；本轮不扩大到其他适配器。
 
 ## Antigravity 执行边界
 
@@ -188,7 +197,9 @@ OpenCode 保持一个产品与 Adapter。显式路径或现有发现顺序确定
 V1/V2 未知且无法确定必需配置时报告初始化错误；握手冲突在正文前停止，不修补冻结身份或重发。
 Host 的程序指纹与 Native Session 的协议／存储来源分别判断，普通补丁更新不自动丢弃会话。
 权限保留一般 allow/ask/deny 与 Shell、Skill 放行例外，V2 用原生有序规则覆盖 build/plan，
-其他自定义／子 agent 仍有原生规则。细节与测试边界见
+全局和这两个 Agent 的规则末尾统一拒绝 `question`，由原生过滤模型工具集合；V1 不变。
+其他自定义／子 agent 仍有原生规则。问卷策略只进入 V2 Host compatibility，不改变会话绑定。
+细节与测试边界见
 [OpenCode V1/V2 实施记录](../versions/v1.72/opencode-v1-v2-implementation.md)。
 
 启动与 rescan 只解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity；
@@ -619,6 +630,11 @@ Start Plan 的验证回调仍显式报告未应用并给出操作指引。
 图片沿用授权附件路径，由原生 Read 转为模型图片内容；Read 保持读取活动，不形成 Files Changed 或修改 Diff。原生配置变化 fence Host 与 Binding。MCP 合并遵从原生用户/项目优先级，再叠加当前 Rovai Assignment；
 warm resume 不刷新 MCP，所以集合变化不能沿用旧 Host。协议、FirstPayload、权限、Usage 与保留能力见
 [Runtime Launch v44](../contracts/runtime-launch-and-verification-v44.md)。平台资格与 Machine Ready 分开维护。
+
+托管 `session/create` 和 `session/resume` 均传入 `toolDenylist: ["AskUserQuestion"]`；
+这与仅控制无人作答时自动继续的偏好分开。问卷策略只进入 Host compatibility，
+不改原生配置或会话绑定；旧 Host 在安全获取时替换，普通权限及计划交互不扩大拦截。
+禁用证据与适用版本见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
 
 Windows x64 与 macOS arm64 分别以平台专属冻结证据标记 Qualified；macOS x64 同时开放为可执行 Preview，
 没有 Intel Mac 真机资格。管理页不显示测试、试运行或实验性标签，保留机器检查、错误和具体能力限制；

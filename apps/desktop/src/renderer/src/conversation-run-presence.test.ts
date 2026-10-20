@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunView, ThreadMessageView } from '@contracts'
-import { conversationRunPresenceTimeline, runPresencePreview } from './conversation-run-presence'
+import { conversationRunPresenceTimeline, formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview } from './conversation-run-presence'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
 import type { LiveRuntimeEvent } from './ui-model'
+import { changeInterfaceLanguage } from './interface-language'
+import type { GeneralPreferencesApi } from '@contracts'
 
 const run = (id: string, agentId = id, patch: Partial<AgentRunView> = {}): AgentRunView => ({
   id, agentId, status: 'running', invocationKind: 'batch', createdAt: '2026-10-10T12:00:00Z',
@@ -164,14 +166,16 @@ describe('conversation Run presence', () => {
   it('shows current-epoch activity before a late ACK while keeping old evidence behind the connection fence', () => {
     const initializing = run('a', 'alice', { waitReason: 'runtime_initializing' })
     const accepted = { ...initializing, waitReason: null }
+    const connecting = expect.stringMatching(/^正在(?:和alice接上线|联系alice|与alice会合)…$/)
+    const working = expect.stringMatching(/^alice(?:正在为你推进|正在推进这项任务|正与你一起推进)…$/)
     const thinking: LiveRuntimeEvent = { id: 'phase', agentRunId: 'a', executionEpoch: 1,
       eventType: 'agent_run.runtime_phase_changed', payload: { phase: 'thinking' }, createdAt: '2026-10-10T12:00:00Z' }
-    expect(runPresencePreview(initializing)).toEqual({ kind: 'status', text: '正在连接智能体…' })
-    expect(runPresencePreview(accepted)).toEqual({ kind: 'status', text: '正在处理你的请求…' })
-    expect(runPresencePreview(accepted, [thinking])).toEqual({ kind: 'status', text: '正在处理你的请求…' })
+    expect(runPresencePreview(initializing)).toEqual({ kind: 'status', text: connecting })
+    expect(runPresencePreview(accepted)).toEqual({ kind: 'status', text: working })
+    expect(runPresencePreview(accepted, [thinking])).toEqual({ kind: 'status', text: working })
     const titled = { ...thinking, payload: { phase: 'thinking', thinkingTitle: '核对现有边界' } }
     expect(runPresencePreview(accepted, [titled]).text).toBe('核对现有边界')
-    expect(runPresencePreview(initializing, [titled]).text).toBe('正在连接智能体…')
+    expect(runPresencePreview(initializing, [titled]).text).toEqual(connecting)
 
     const text: LiveRuntimeEvent = {
       id: 'text', agentRunId: 'a', executionEpoch: 1, eventType: 'agent.text.delta',
@@ -184,15 +188,74 @@ describe('conversation Run presence', () => {
       expect(runPresencePreview(initializing, [current])).toEqual(runPresencePreview(accepted, [current]))
       for (const untrusted of [{ ...current, executionEpoch: 0 }, { ...current, executionEpoch: null },
         { ...current, executionEpoch: undefined }, { ...current, executionEpoch: 2 }, { ...current, agentRunId: 'another-run' }]) {
-        expect(runPresencePreview(initializing, [untrusted]).text).toBe('正在连接智能体…')
+        expect(runPresencePreview(initializing, [untrusted]).text).toEqual(connecting)
       }
     }
     expect(runPresencePreview(initializing, [text, { ...command, executionEpoch: 0 }])).toEqual({ kind: 'narration', text: '已经开始处理' })
-    expect(runPresencePreview(initializing, [{ ...text, payload: { itemId: 'text', delta: '  ' } }]).text).toBe('正在连接智能体…')
+    expect(runPresencePreview(initializing, [{ ...text, payload: { itemId: 'text', delta: '  ' } }]).text).toEqual(connecting)
     // A reconnect can still have earlier evidence; it must describe the new initialization.
-    expect(runPresencePreview({ ...initializing, executionEpoch: 2 }, [text, command]).text).toBe('正在连接智能体…')
+    expect(runPresencePreview({ ...initializing, executionEpoch: 2 }, [text, command]).text).toEqual(connecting)
     expect(runPresencePreview({ ...initializing, cancelRequestedAt: 'now' }, [text, command]).text).toBe('正在停止…')
     expect(runPresencePreview({ ...initializing, status: 'failed' }, [text, command]).kind).toBe('error')
     expect(runPresencePreview({ ...initializing, status: 'waiting', waitReason: 'approval' }, [text, command]).text).toBe('等待审批')
+  })
+})
+
+
+describe('conversation presence copy and duration', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('draws independent choices, allows repeats and retains them across snapshots and locales', async () => {
+    const samples = [0, 0, 0, 0, 1 / 3 - Number.EPSILON, 1 / 3,
+      2 / 3 - Number.EPSILON, 2 / 3, 1 - Number.EPSILON, 1 - Number.EPSILON]
+    let draw = 0
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => samples[draw++ % samples.length])
+    const connecting = ['正在和爱丽丝接上线…', '正在联系爱丽丝…', '正在与爱丽丝会合…']
+    const working = ['爱丽丝正在为你推进…', '爱丽丝正在推进这项任务…', '爱丽丝正与你一起推进…']
+    const englishConnecting = ['Connecting with 爱丽丝…', 'Reaching 爱丽丝…', 'Joining up with 爱丽丝…']
+    const englishWorking = ['爱丽丝 is moving this forward…', '爱丽丝 is working on this task…', '爱丽丝 is working through this with you…']
+    const runs = Array.from({ length: 30 }, (_, index) => run(`choice-${index}`, 'alice'))
+    const preview = (run: AgentRunView, waitReason: string | null) => runPresencePreview({ ...run, waitReason }, [], '爱丽丝').text
+    const chinese = runs.map(run => [preview(run, 'runtime_initializing'), preview(run, null)])
+    expect(random).toHaveBeenCalledTimes(runs.length * 2)
+    expect(chinese.slice(0, 5)).toEqual([
+      [connecting[0], working[0]], [connecting[0], working[0]],
+      [connecting[0], working[1]], [connecting[1], working[2]], [connecting[2], working[2]]
+    ])
+    expect(new Set(chinese.map(pair => pair[0]))).toEqual(new Set(connecting))
+    expect(new Set(chinese.map(pair => pair[1]))).toEqual(new Set(working))
+    expect(runs.map(run => [preview(structuredClone(run), 'runtime_initializing'), preview(structuredClone(run), null)])).toEqual(chinese)
+    expect(random).toHaveBeenCalledTimes(runs.length * 2)
+    const api = { setInterfaceLanguage: async (interfaceLanguage: string) => ({ interfaceLanguage }) } as GeneralPreferencesApi
+    try {
+      await changeInterfaceLanguage(api, 'en')
+      runs.forEach((run, index) => {
+        expect(preview(run, 'runtime_initializing')).toBe(englishConnecting[connecting.indexOf(chinese[index][0])])
+        expect(preview(run, null)).toBe(englishWorking[working.indexOf(chinese[index][1])])
+      })
+      expect(formatRunPresenceDuration(88)).toBe('1m 28s')
+      expect(formatRunPresenceDuration(3858)).toBe('1h 04m 18s')
+    } finally {
+      await changeInterfaceLanguage(api, 'zh-CN')
+    }
+    expect(runs.map(run => [preview(run, 'runtime_initializing'), preview(run, null)])).toEqual(chinese)
+    expect(runPresencePreview(runs[0], [], '另一位队员').text).toContain('另一位队员')
+    expect(random).toHaveBeenCalledTimes(runs.length * 2)
+  })
+
+  it('uses real start/end facts, clamps clock reversal and omits unknown durations', () => {
+    const current = run('clock')
+    const now = Date.parse('2026-10-10T12:01:29Z')
+    expect(runPresenceElapsedSeconds(current, now)).toBe(88)
+    expect(runPresenceElapsedSeconds(current, now + 2000)).toBe(90)
+    expect(runPresenceElapsedSeconds({ ...current, status: 'waiting' }, now)).toBe(88)
+    expect(runPresenceElapsedSeconds({ ...current, status: 'failed', endedAt: '2026-10-10T12:01:00Z' }, now)).toBe(59)
+    expect(runPresenceElapsedSeconds({ ...current, status: 'failed', endedAt: null }, now)).toBeNull()
+    for (const startedAt of [null, 'invalid']) expect(runPresenceElapsedSeconds({ ...current, startedAt }, now)).toBeNull()
+    expect(runPresenceElapsedSeconds({ ...current, endedAt: 'invalid' }, now)).toBeNull()
+    expect(runPresenceElapsedSeconds(current, Date.parse('2026-10-10T12:00:00Z'))).toBe(0)
+    expect(formatRunPresenceDuration(6)).toBe('6秒')
+    expect(formatRunPresenceDuration(88)).toBe('1分 28秒')
+    expect(formatRunPresenceDuration(3858)).toBe('1时 04分 18秒')
   })
 })

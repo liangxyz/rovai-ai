@@ -6,10 +6,41 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 会话执行条（2026-10-20）
+
+按 User 确认的浅灰整行与无底停止图标实现，增加可点击运行时间，以独立转圈替换文字扫光。
+连接和处理反馈分别从选定的三组中英文候选中独立随机抽取，允许重复；Renderer 临时保留同一 Run 的阶段选项，避免计时触发换句。执行条不再连接外观动态设置；
+其余会话和执行台样式保持不变。边界见[会话工作区](../../ui/components/conversation-workspace.md#会话中的队员占位)，
+实现与验证见[实施记录](implementation-plan.md#会话执行条2026-10-20)。
+
+## Claude 执行结束后的失败收口（2026-10-20）
+
+Claude one-shot worker 返回普通运输错误后，Core 复用 Runtime loss 结算，避免已绑定的 launch handoff
+使 Run 永久停在运行中。原输入不可重放，旧执行清理确认后才领取下一条消息。范围与验证见
+[实施记录](implementation-plan.md#claude-执行结束后的失败收口2026-10-20)，当前恢复边界见
+[AgentRun Recovery](../../architecture/agent-run-recovery.md)。
+
+## 执行入口与空状态（2026-10-20）
+
+按 User 确认的交互稿移除执行入口的运行名单气泡，浮层标题栏统一承载既有位置菜单。
+空记录只显示“暂无执行记录”，三个承载位置均可切回；未激活草稿保持隐藏执行控件。
+范围与验收见[实施记录](implementation-plan.md#执行入口与空状态2026-10-20)。
+
+## 四适配器原生问卷（2026-10-20）
+
+Claude Code、Copilot、Qwen 正式启动禁用提问工具；Kimi 与 Qwen 的意外问卷在普通审批与自动允许之前取消，
+沿用当前 Prompt/Run 观察、终态与真实用户后继消息。MiniMax 本机配置不修改。
+合同见 [Runtime Launch v67](../../contracts/runtime-launch-and-verification-v67.md)，
+实施范围、测试与原生证据见[验证记录](native-questionnaire-verification.md)。
+
+后续按 User 授权补齐 ZCode `toolDenylist` 与 OpenCode V2 `question` 拒绝规则；
+策略只更新对应 Host 兼容摘要，保留原会话。范围与验收见同一记录的
+[ZCode/OpenCode 增量](native-questionnaire-verification.md#zcodeopencode-v2-禁用增量2026-10-20)。
 
 ## 主动停止后的会话蓝点（2026-10-19）
 

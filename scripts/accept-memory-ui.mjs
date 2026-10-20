@@ -28,19 +28,19 @@ try {
   await assertNoMemoryOnboarding(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
   dayHeaderGeometry = await assertMemoryPageHeaderGeometry(first.cdp, '1440×920 Memory')
-  await assertReviewDrawerClose(first.cdp, 'day')
+  await assertReviewDialogClose(first.cdp, 'day')
   await assertMemoryCreateForm(first.cdp, 'day')
 
   await createHearthMemory(first.cdp, initialBody)
   await chooseMemoryTab(first.cdp, '共同')
-  await waitForText(first.cdp, '.memory-catalog-item > strong', initialBody)
+  await waitForText(first.cdp, '.memory-catalog-copy > strong', initialBody)
   await assertNoHorizontalOverflow(first.cdp, 'day Memory Library')
 
   await clickMemoryAction(first.cdp, initialBody, '修订')
   await waitForSelector(first.cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(first.cdp, revisedBody)
   await clickButton(first.cdp, '.memory-editor-dialog button', '保存修订')
-  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-copy > strong', revisedBody)
 
   const revisedRecord = await request(first.cdp, 'memory.list')
   const durable = revisedRecord.memories.find((memory) => memory.currentBody === revisedBody)
@@ -141,7 +141,7 @@ try {
   await capture(first.cdp, reviewDialogZoomCapture)
   await pressKey(first.cdp, 'Escape', 'Escape')
   await waitForExpression(first.cdp, `!document.querySelector('.memory-review-schedule-dialog')`)
-  await assertReviewDrawerClose(first.cdp, 'zoom-200')
+  await assertReviewDialogClose(first.cdp, 'zoom-200')
   await assertMemoryCreateForm(first.cdp, 'zoom-200')
   await setPageZoom(first.cdp, 100)
 
@@ -161,12 +161,12 @@ try {
   'Retired Memory conflict did not block review schedule submission')
   await clickButton(first.cdp, '.memory-review-schedule-dialog button', '取消')
   await waitForExpression(first.cdp, `!document.querySelector('.memory-review-schedule-dialog')`)
-  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-copy > strong', revisedBody)
   await clickMemoryAction(first.cdp, revisedBody, '重新沿用')
-  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-copy > strong', revisedBody)
   await chooseMemoryTab(first.cdp, '全部')
   await chooseMemoryTab(first.cdp, '共同')
-  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-copy > strong', revisedBody)
 
   scheduledMemory = (await request(first.cdp, 'memory.list')).memories
     .find((memory) => memory.currentBody === revisedBody)
@@ -174,14 +174,14 @@ try {
   await scheduleMemoryDirect(first.cdp, scheduledMemory, dueSelection.iso)
 
   await createHearthMemory(first.cdp, forgottenBody)
-  await waitForText(first.cdp, '.memory-catalog-item > strong', forgottenBody)
+  await waitForText(first.cdp, '.memory-catalog-copy > strong', forgottenBody)
   await clickMemoryAction(first.cdp, forgottenBody, '永久遗忘')
   await waitForSelector(first.cdp, '.memory-confirm-dialog')
   assert((await hasText(first.cdp, '.memory-confirm-dialog', '无法恢复'))
       || (await hasText(first.cdp, '.memory-confirm-dialog', '不可撤销')),
     'Forget confirmation did not communicate irreversibility')
   await clickButton(first.cdp, '.memory-confirm-dialog button', '永久遗忘')
-  await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', forgottenBody)
+  await waitForTextToDisappear(first.cdp, '.memory-catalog-copy > strong', forgottenBody)
   const forgottenRecord = (await request(first.cdp, 'memory.list')).memories
     .find((memory) => memory.lifecycle === 'forgotten')
   assert(forgottenRecord?.currentBody === null
@@ -197,17 +197,17 @@ try {
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
   compactHeaderGeometry = await assertMemoryPageHeaderGeometry(second.cdp, '1040×700 Memory')
-  await assertReviewDrawerClose(second.cdp, 'night-compact')
+  await assertReviewDialogClose(second.cdp, 'night-compact')
   await assertMemoryCreateForm(second.cdp, 'night-compact')
   const restartedLibrary = await request(second.cdp, 'memory.list')
   const restartedMemory = restartedLibrary.memories.find((memory) => memory.currentBody === revisedBody)
   assert(restartedMemory?.lifecycle === 'active' && restartedMemory.reviewDue === true,
     'Packaged Core did not return the active Memory after App restart')
   await chooseMemoryTab(second.cdp, '共同')
-  await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(second.cdp, '.memory-catalog-copy > strong', revisedBody)
   await chooseMemoryTab(second.cdp, '全部')
   await chooseMemoryTab(second.cdp, '共同')
-  await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
+  await waitForText(second.cdp, '.memory-catalog-copy > strong', revisedBody)
   await openReviewSchedule(second.cdp, revisedBody)
   await assertReviewScheduleDialogContract(second.cdp, { hasReminder: true })
   const reviewDialogNightCapture = join(outputDir, 'memory-review-schedule-night.png')
@@ -268,12 +268,12 @@ try {
   if (second) await closeApp(second)
 }
 
-async function assertReviewDrawerClose(cdp, label) {
+async function assertReviewDialogClose(cdp, label) {
   await evaluate(cdp, `document.querySelector('.memory-review-entry').click()`)
-  await waitForSelector(cdp, '.memory-review-drawer')
+  await waitForSelector(cdp, '.memory-review-dialog')
   const state = await evaluate(cdp, `(() => {
-    const drawer = document.querySelector('.memory-review-drawer');
-    const overlay = document.querySelector('.memory-drawer-overlay');
+    const drawer = document.querySelector('.memory-review-dialog');
+    const overlay = document.querySelector('.memory-review-overlay');
     const close = drawer.querySelector('button[aria-label="关闭共同记忆审核"]');
     const r = close.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2,
@@ -287,11 +287,11 @@ async function assertReviewDrawerClose(cdp, label) {
   await capture(cdp, join(outputDir, `memory-review-close-${label}.png`))
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: state.x, y: state.y, button: 'left', clickCount: 1 })
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: state.x, y: state.y, button: 'left', clickCount: 1 })
-  await waitForExpression(cdp, `!document.querySelector('.memory-review-drawer')`)
+  await waitForExpression(cdp, `!document.querySelector('.memory-review-dialog')`)
   await evaluate(cdp, `document.querySelector('.memory-review-entry').click()`)
-  await waitForSelector(cdp, '.memory-review-drawer')
+  await waitForSelector(cdp, '.memory-review-dialog')
   await pressKey(cdp, 'Escape', 'Escape')
-  await waitForExpression(cdp, `!document.querySelector('.memory-review-drawer')`)
+  await waitForExpression(cdp, `!document.querySelector('.memory-review-dialog')`)
 }
 
 async function assertMemoryCreateForm(cdp, label) {
@@ -599,7 +599,7 @@ async function chooseMemoryTab(cdp, label) {
 async function clickMemoryAction(cdp, body, label) {
   const selected = await evaluate(cdp, `(() => {
     const row = [...document.querySelectorAll('.memory-catalog-item')]
-      .find((candidate) => candidate.querySelector(':scope > strong')?.textContent
+      .find((candidate) => candidate.querySelector('.memory-catalog-copy > strong')?.textContent
         === ${JSON.stringify(body)})
     if (!row) return false
     row.click()

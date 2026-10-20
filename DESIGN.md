@@ -157,7 +157,7 @@ without extra focus outlines or halos; higher contrast preferences restore the s
   Conversation teammate selection and saving the default team use the same neutral action family for checked controls.
 - **Inputs:** use the raised/input surface and a perceivable control boundary. DOM focus supports typing, IME and keyboard navigation without extra outlines, halos or focus-only border changes. Search inputs do not add a focus underline.
 - **Navigation:** rows and selection surfaces establish location. Selected conversation and teammate rows omit
-  the left rail and use neutral text. Memory uses the achromatic `--memory-*` family for its workspace, notices and dialogs; Automation uses `--neutral-selected` and `--neutral-hover`; Memory also applies its neutral rail variant while active; other sidebar backgrounds stay unchanged. Hover is supplementary;
+  the left rail and use neutral text. Memory uses the achromatic `--memory-*` family for its workspace, notices and dialogs; Automation uses `--neutral-selected` and `--neutral-hover`; the shared sidebar keeps its production theme on the Memory route, including logo and navigation colors. Memory neutral overrides stay inside the content and dialog surfaces. Hover is supplementary;
   selected state and actions remain understandable from text, icons and placement.
 - **Resizable boundaries:** navigation, member roster, file preview, MCP/Skills, Automation and execution-panel splitters
   share a single `1px` line. Hover and dragging change the entire boundary to neutral `--resize-line`,

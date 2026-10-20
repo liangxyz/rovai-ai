@@ -369,7 +369,7 @@ export function AttachmentCard({
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content
-                      className="attachment-context-menu"
+                      className={`attachment-context-menu${agentPresentation ? '' : ' user-attachment-context-menu'}`}
                       aria-label={uiAttribute("附件操作：{0}", String(attachment.displayName))}
                       align="start"
                       side="right"
@@ -378,6 +378,7 @@ export function AttachmentCard({
                       loop
                       onCloseAutoFocus={(event) => {
                         event.preventDefault()
+                        attachmentButtonRef.current?.focus()
                       }}
                     >
                       <DropdownMenu.Label className="attachment-context-menu-label">

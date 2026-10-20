@@ -335,12 +335,12 @@
   --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
   --approval-line: #8f7447;
   --inline-code-canvas: #353b3f;
-  --conversation-inline-code-canvas: #30373b;
+  --conversation-inline-code-canvas: #343536;
   --dialog-field-label: #a6abb2;
   --dialog-field-line: #3b434a;
   --dialog-field-line-hover: #697983;
-  --conversation-code-block-canvas: #252c30;
-  --conversation-code-line: #3e494f;
+  --conversation-code-block-canvas: #28292a;
+  --conversation-code-line: #3d3f41;
   --shell-result-canvas: #373f43;
   --code-block-canvas: #1d252b;
   --evidence-canvas: #12191d;

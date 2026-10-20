@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-native-turn-and-isolation-boundaries
-last_updated: 2026-10-08
+last_updated: 2026-10-20
 ---
 
 # AgentRun Recovery
@@ -50,6 +50,12 @@ Runtime 已接受输入但最终结果无法对账时，Core：
 
 主界面把它作为普通红色执行失败展示，不要求用户理解 “unknown” 状态，提供用户主动继续图标；不提供手工释放清理门禁。
 新的用户消息只创建新的 waiting Delivery；它不替代对旧结果的事实判断。
+
+Claude 的 one-shot worker 已返回错误后，不能只因 launch handoff 已绑定就继续等待原生终态。
+Adapter 用内部类型化标记证明 worker 已结束；Core 对没有可信原生终态的错误复用 Runtime loss
+结算，保留 unknown input 和独立 cleanup 门禁。该标记不证明 CLI 成功、旧进程树已空或输入未执行；
+只有普通运输错误而没有 worker 结束证据时，不据此抢走仍在执行的 owner。计划关闭继续由其既有
+settlement 路径处理。
 
 Core 重启执行同一分类。pending planned-shutdown cycle 先按其 durable cancel-all intent 收口；其余非终态 Run 再按
 Input Delivery 与 effect evidence 判断。重复启动不得增加执行次数、改写旧终态、重分页上下文或把 accepted 输入重新入队。

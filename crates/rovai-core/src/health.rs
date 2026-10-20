@@ -2730,7 +2730,7 @@ async fn run_trae_prompt_probe(
                 validate_trae_permission_request(params, session_id, &mut observation)?;
                 let result =
                     if mode == TraePromptProbeMode::AllowThenCancel && !observation.cancel_sent {
-                        crate::acp::legacy_approval_result(params, true)?
+                        crate::acp::legacy_approval_result(AdapterKind::TraeCnCli, params, true)?
                     } else {
                         crate::acp::rejection_result(params)?
                     };

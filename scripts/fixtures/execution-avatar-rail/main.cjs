@@ -42,7 +42,8 @@ app.whenReady().then(async () => {
     const count = document.querySelector('.run-pulse-count')
     const selected = allChips.find(chip => chip.getAttribute('aria-pressed') === 'true')
     const dock = document.querySelector('.run-pulse-inspector')
-    const placement = dock?.querySelector('.execution-placement-control')
+    const heading = document.querySelector('.camp-detail-heading')
+    const placement = heading?.querySelector('.execution-placement-control') ?? dock?.querySelector('.execution-placement-control')
     return {
       left: rail?.scrollLeft ?? 0, maximum: rail ? rail.scrollWidth - rail.clientWidth : 0,
       count: chips.length, ids: chips.map(chip => chip.dataset.agentId),
@@ -55,7 +56,7 @@ app.whenReady().then(async () => {
       title: rect(title), countRect: rect(count), tooltip: document.querySelector('[role="tooltip"]')?.textContent?.trim() ?? null,
       tooltipRect: rect(document.querySelector('[role="tooltip"]')),
       header: document.querySelector('.execution-drawer-header')?.textContent,
-      dock: rect(dock), placement: rect(placement),
+      dock: rect(dock), heading: rect(heading), placement: rect(placement),
       panel: rect(document.querySelector('.camp-detail-popover')), composer: rect(document.querySelector('.conversation-controls .composer-box')),
       pageOverflow: document.documentElement.scrollWidth > innerWidth,
       timelineTop: document.querySelector('.camp-timeline')?.scrollTop,
@@ -135,9 +136,9 @@ app.whenReady().then(async () => {
     assert.equal(value.overviewCount, 1, 'The avatar rail keeps one explicit overview entry')
     assert.ok(value.dock.left >= value.panel.left - 1 && value.dock.right <= value.panel.right + 1,
       'The one-row execution rail stays inside the popover')
-    assert.ok(Math.abs((value.rail.top + value.rail.height / 2)
+    assert.ok(Math.abs((value.heading.top + value.heading.height / 2)
       - (value.placement.top + value.placement.height / 2)) <= 1,
-    'The avatar rail and placement control share one vertical center')
+    'The placement control stays aligned in the floating header')
     assert.ok(value.rects.every(rect => Math.abs(rect.y - value.rects[0].y) < 1), 'All avatars stay on one row')
     assert.ok(value.rects.every(rect => Math.abs(rect.width - 38) < 1 && Math.abs(rect.height - 38) < 1))
     assert.equal(value.scrollbar, 'none')
@@ -216,7 +217,13 @@ app.whenReady().then(async () => {
     assert.equal((await entryState()).arcs.length, 2, 'Closing the popover does not end the running indicator')
     await run("document.querySelector('.camp-execution-entry').blur(); document.querySelector('.camp-execution-entry').focus()")
     await settle()
-    assert.ok((await entryState()).tooltip.includes('言川'), 'Keyboard focus exposes names beyond the three displayed avatars')
+    assert.equal((await entryState()).tooltip, null, 'Keyboard focus does not add a running-member tooltip')
+    assert.ok((await entryState()).label.includes('言川'), 'Accessible names include members beyond the three displayed avatars')
+    const entryPoint = await run(`(() => { const r = document.querySelector('.camp-execution-entry').getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`)
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...entryPoint })
+    await settle()
+    assert.equal((await entryState()).tooltip, null, 'Hovering the execution entry does not add a running-member tooltip')
     await key('Escape')
     assert.equal((await entryState()).tooltip, null)
     await key('Enter')
@@ -519,8 +526,7 @@ app.whenReady().then(async () => {
 
     await click('[data-count="8"]')
     value = await openDetail('execution')
-    assert.ok(value.maximum > 0 && (value.leftEnabled || value.rightEnabled),
-      'Eight members plus overview remain scrollable when the placement control shares the row')
+    assert.equal(value.maximum, 0, 'Eight members plus overview fit after the placement control moves to the header')
     assertLayout(value)
     await capture('avatar-rail-eight-members')
 
@@ -550,7 +556,7 @@ app.whenReady().then(async () => {
     await key('Home')
     await key('Right')
     await key('Enter')
-    await click('.run-pulse-inspector .execution-placement-button')
+    await click('.camp-detail-heading .execution-placement-button')
     await click('.execution-placement-option[data-placement="bottom"]')
     assert.equal(await run("document.querySelectorAll('.run-pulse-bottom .run-pulse-chip-copy').length"), 13,
       'The bottom dock keeps Overview plus all twelve member cards')
@@ -751,7 +757,7 @@ app.whenReady().then(async () => {
     })()`)
     for (const placement of ['inspector', 'right', 'bottom']) {
       if (await run("document.querySelector('.execution-drawer')?.dataset.placement") !== placement) {
-        await click('.run-pulse .execution-placement-button')
+        await click('.execution-placement-button')
         await click(`.execution-placement-option[data-placement="${placement}"]`)
       }
       for (const theme of ['day', 'night']) {
@@ -942,8 +948,44 @@ app.whenReady().then(async () => {
       }
     }
 
+    await run('window.configureEmptyExecution()')
+    await settle()
+    await openDetail('execution')
+    assert.equal(await run("document.querySelector('.execution-sidecar-empty').textContent.trim()"), '暂无执行记录')
+    assert.equal(await run("document.querySelectorAll('.execution-sidecar-empty button').length"), 0)
+    assert.equal(await run("document.querySelectorAll('.camp-detail-heading .execution-placement-button').length"), 1)
+    await capture('execution-empty-inspector')
+    await click('.execution-placement-button')
+    await key('Escape')
+    assert.equal(await run("document.querySelector('.camp-detail-popover').hidden"), false, 'Escape closes the position menu before the empty panel')
+    await run('window.failNextExecutionPlacement()')
+    await click('.execution-placement-button')
+    await click('.execution-placement-option[data-placement="bottom"]')
+    assert.equal(await run("document.querySelector('.camp-detail-popover').hidden"), false, 'Failed persistence keeps the empty panel in place')
+    assert.equal(await run("document.querySelectorAll('.execution-placement-feedback[role=\"alert\"]').length"), 1)
+    await click('.execution-placement-feedback button')
+    for (const placement of ['bottom', 'right', 'inspector']) {
+      const selector = placement === 'inspector' ? '.camp-detail-heading .execution-placement-button' : `.run-pulse-${placement} .execution-placement-button`
+      assert.equal(await run(`!!document.querySelector(${JSON.stringify(selector)})?.checkVisibility()`), true,
+        `Empty ${placement} retains a way to switch back`)
+      assert.equal(await run("document.querySelectorAll('.execution-placement-feedback').length"), 0)
+      assert.equal(await run("!!document.querySelector('.execution-drawer')"), false, 'No records do not fabricate a drawer')
+      await capture(`execution-empty-${placement}`)
+      const next = placement === 'bottom' ? 'right' : 'inspector'
+      if (placement !== 'inspector') {
+        await click(selector)
+        await click(`.execution-placement-option[data-placement="${next}"]`)
+      }
+    }
+    for (const placement of ['inspector', 'right', 'bottom']) {
+      await run(`window.configureEmptyExecution(true, '${placement}')`)
+      await settle()
+      assert.equal(await run("!!document.querySelector('.camp-execution-entry, .run-pulse, .execution-placement-button')"), false,
+        `A pending draft stays free of execution controls with saved ${placement} placement`)
+    }
+
     console.log(JSON.stringify({ ok: true, cases: ['0/1/2/3/5 running entry members and duplicate runs', 'two equal brand orbits',
-      'idle history with executed member count', 'entry names and keyboard focus', 'collapsed running state',
+      'idle history with executed member count', 'no hover/focus tooltip with accessible member names', 'collapsed running state',
       '12/20-member overflow', '176px steps and overlap', 'mouse wheel/trackpad', 'keyboard and long-name tooltip',
       'persistent outside pointer/focus', 'explicit close and Escape focus return',
       'selection and node retention', 'status refresh/reopen', 'Task navigation/repeated target', '8-member no overflow',
@@ -956,7 +998,9 @@ app.whenReady().then(async () => {
       'sticky title in three placements and two themes/sizes', 'default elapsed/title-only hover/bordered controls/red stop',
       'terminal cancellation precedence', 'focus not obscured', 'Run-bounded sticky and exact stop',
       'D3 interruption geometry in Day/Night', 'interrupted Run with a running successor in three placements',
-      'interruption keyboard activation and bottom detail focus return'] }))
+      'interruption keyboard activation and bottom detail focus return',
+      'empty execution in all three placements and return path', 'empty placement failure/retry and nested Escape',
+      'pending drafts hide execution controls for every saved placement'] }))
     window.destroy()
     app.quit()
   } catch (error) {

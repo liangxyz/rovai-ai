@@ -57,13 +57,13 @@ function computedZIndex(classNames: string[]): number | null {
   return winner?.value ?? null
 }
 
-describe('memory review drawer layering', () => {
-  it('keeps the modal overlay below the interactive review drawer', () => {
-    const overlayZIndex = computedZIndex(['dialog-overlay', 'memory-drawer-overlay'])
-    const drawerZIndex = computedZIndex(['memory-review-drawer'])
+describe('memory review dialog layering', () => {
+  it('keeps the modal overlay below the interactive review dialog', () => {
+    const overlayZIndex = computedZIndex(['dialog-overlay', 'app-dialog-overlay', 'memory-review-overlay'])
+    const dialogZIndex = computedZIndex(['dialog-content', 'app-dialog', 'memory-review-dialog'])
 
     expect(overlayZIndex).not.toBeNull()
-    expect(drawerZIndex).not.toBeNull()
-    expect(overlayZIndex).toBeLessThan(drawerZIndex as number)
+    expect(dialogZIndex).not.toBeNull()
+    expect(overlayZIndex).toBeLessThan(dialogZIndex as number)
   })
 })

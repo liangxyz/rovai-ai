@@ -3,10 +3,151 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 ---
 
 # v1.72 实施与验收
+
+## 会话执行条（2026-10-20）
+
+User 确认第七版交互稿的 01 浅灰、C 无底图标和转圈，并授权独立 worktree、PR 到 main 后合并。
+分支 `rovai/conversation-execution-bar`，基线 `923f9919b669b5d0c5fba8654f852106806deae0`，
+worktree 为同级 `rovai-ai-execution-bar`；没有治理先行要求。
+
+实现限于会话执行条及其设置导航接线：42px 浅灰完整单行、28px 常驻中性停止图标、整行悬浮浅红底，
+移除停止区竖线与 RunningText。运行时间由真实 start/end 计算，未知时省略，并与正文共用精确 Run 入口。
+连接候选采用 02／03／05，处理候选采用 02／04／05；Run ID 与阶段决定稳定选项，中英文共用选择，
+真实正文、命令与合法思考标题优先。独立圆环不受系统／应用减少动态设置影响，forced-colors 保留静态图形。
+执行台、设置控件、消息、头像、输入区和其他界面不移植交互稿样式；停止确认、来源定位、重试与执行证据路径保持原有语义。
+
+保持 v1.72；这是局部可逆的 Renderer 变化，没有协议、存储、Runtime 或 Rust 测试变更，不新增 Version Decision。
+扩展现有单元测试与生产 ThreadWorkspace 浏览器夹具，覆盖候选稳定性、中英文切换、时间事实、计时导航及动效独立性。
+删除旧可选 HTML 分隔区对照入口，以当前生产组件的几何、交互与截图验证取代。
+
+验证：`pnpm typecheck`、`pnpm test`（246 个 Vitest 文件／2,803 项；Node 357 通过、2 项平台跳过）、
+`pnpm build:desktop`、`pnpm docs:test` 与基于实际 main 基线的 `docs:check:ci` 通过。
+`pnpm test:run-presence-ui` 在独立 Chrome profile 中通过 38 个场景状态、37 项交互记录及日夜主题的 6 组桌面尺寸；
+另覆盖 200% 等效缩放、粗指针、系统／应用减少动态效果、forced-colors 组合、中英文即时切换、时间精确 Run 导航和终态收口。
+人工浏览器核对了生产组件在 1440×920 下的日夜主题、28px 无底停止、整行悬浮浅红底及既有停止确认；控制台无错误。
+夹具只替换 transport，不启动 Core 或真实 Runtime，不修改日常 App 数据。
+
+后续 User 要求完全随机：分支 `rovai/execution-copy-random` 从 `9d3a9ed67767b8351142f3b7ef9bd27758b41a22`
+创建同级 worktree `rovai-ai-execution-copy-random`。选句改为每个 Run/阶段独立、等概率随机，允许连续重复，
+不再由 Run ID 哈希决定。Renderer 仅临时保留最近 512 个阶段选项，避免计时、快照更新、重挂载和切换语言
+触发换句；完整页面重载可重新抽取。不新增持久设置，不修改样式、动效或真实进度优先级。
+既有候选测试改用受控随机样本验证三个区间、连续重复、阶段独立性和中英文一致性，避免概率性断言。
+后续验证：12 项定向单测、`pnpm typecheck`、`pnpm test`（2,803 项 Vitest，Node 357 通过／2 项平台跳过）、
+`pnpm build:desktop`、文档门禁及 `pnpm test:rust:pr`（474 通过／1 项既有忽略）均通过。
+独立 Chrome 的 `pnpm test:run-presence-ui` 继续通过 38 个场景状态、37 项交互记录和 6 组桌面尺寸。
+
+## Claude 执行结束后的失败收口（2026-10-20）
+
+User 报告 Claude 子进程已退出、Run 长期运行中且后续消息排队。当前源码核查发现：
+`execution_lease_expires_at` 只在领取时写入，没有周期续租，因此它和 `agent_run.updated_at`
+都不能单独作为执行器失联时间；Claude Adapter 已监听进程退出并限制退出后的输出收集。
+但 stdin writer、退出后输出收集和进程等待的部分普通错误返回后，已绑定的 handoff 会使
+上层提前返回，跳过 Run 失败结算。现场尚缺可追溯构建身份、Core 错误链与进程退出码，
+不能认定该报告命中此分支，也不能仅凭会话没有 error 或系统没有 crash report 排除原生错误。
+
+分支 `rovai/fix-claude-ended-run`，基线 `1da9da7ccafa8fc896ca82958029c0f48770c41f`。
+复用现有 Adapter result、Runtime loss 和 cleanup worker：内部 `ClaudeCodeRunEnded` 只标记
+已返回结果的 worker，不标记仍可能运行的 caller-abort 或结果通道意外丢失。可信原生终态继续
+走原有结算；没有可信终态且 handoff 已绑定时，按 Run/epoch 收口 unknown input。保留精确
+取消、计划关闭、旧执行隔离与后继 FIFO，不增加租约轮询、运行时长上限、重放或新的持久状态。
+这是实现对齐现有恢复合同的局部修复，不新增 Version Decision、协议、Schema 或模型上下文。
+
+回归 owner：
+
+- 既有 `claude::tests::output_failure_terminates_the_still_running_process_before_cleanup`
+  增加内部结束标记断言，验证真实协议进程的错误保留原公开原因且能传递 worker 结束证据。
+- 新增 slow owner
+  `application::tests::ended_claude_run_fails_unknown_input_before_releasing_queued_delivery`，
+  使用既有隔离 Core/SQLite fixture 验证 bound handoff 下的普通错误不夺取 owner、已结束错误
+  结算为 `accepted_input_outcome_unknown`、输入不重放、cleanup 前不领取、确认后单次领取与迟到
+  结果 fencing。Adapter owner 无法观察持久队列；domain owner 不经过 Core 的错误路由，因此需要此
+  跨模块 owner，不增加平行 Runtime/网络夹具。
+- 最小命令：
+  `cargo test -p rovai-core --lib --features slow-tests ended_claude_run_fails_unknown_input_before_releasing_queued_delivery`。
+
+47 项定向 Rust 回归通过：上述新 owner 1 项、Claude Adapter 34 项、现有 Runtime loss owner
+1 项、Planned Shutdown 11 项。`pnpm typecheck`、`pnpm test`（Vitest 2801 项及 Node suites）、
+`cargo fmt --all --check`、`cargo check --workspace`、`pnpm docs:test`、`pnpm docs:check`
+及使用上述基线的 `docs:check:ci` 均通过。
+
+首次默认 Rust 回归为 427 passed / 1 failed / 1 ignored；失败是兼容性文档摘要常量与当前文件不符。
+在未修改的基线以 `platform_evidence_revisions_bind_their_frozen_source_bytes` 单独复现同一失败。
+主线 `5c70ee814` 更新 Qwen 问卷证据后遗漏了摘要同步，本分支将该常量同步到实际文件 SHA-256，
+不改变准入集合或任何资格测试断言；作为独立修正提交。重跑 `pnpm test:rust:pr` 通过：
+workspace 共 474 passed / 0 failed / 1 ignored；保留原有手动验收跳过项。
+本次不启动真实模型、不修改故障电脑或日常实例数据。
+
+User 后续授权 PR 到 main 并合入。交付前同步主线
+`923f9919b669b5d0c5fba8654f852106806deae0`，采用其最新兼容性证据摘要；最终相对 main
+不再修改平台准入常量。仓库规范与需求一致性两路静态审查均为 0 项 findings。
+交付与最终检查状态见 [PR #834](https://github.com/murray17/rovai-ai/pull/834)。
+
+后续现场报告（2026-10-20，User 转述；未取得原始数据库和日志独立复核）：
+
+- 故障机报告 Rovai App/Host `0.4.14`、实际运行的 Claude Code `2.1.212`；故障窗口为
+  `07:33:30–07:42:07 UTC`。App/Host 版本号尚不能唯一映射构建提交；现场报告 Core/Host
+  在此窗口没有退出、重启或计划关闭迹象。
+- 数据库副本显示旧 Run 为 `running`，输入为 `accepted`，
+  `accepted_at = resolved_at = 07:33:36.916 UTC`，错误字段和取消请求/确认字段均为空。
+  `resolved_at` 在输入接受时写入，不证明模型完成或 Run 已结算；取消字段为空也不支持
+  “已进入 cleanup、只是确认迟到”的判断。
+- 现场未保留 Core stderr，Claude 的实际退出码/信号未知；当前无残留进程不能证明退出时刻
+  没有子进程持有输出管道。会话停在工具成功输出、UI XPC 连接活动均不能唯一定位退出原因。
+  结论保持为“已接受输入的 Run 未写入终态，症状与本次修复路径一致但未确认命中”，不把
+  “跳过失败分支”或“执行器失联”提升为现场已证事实。
+- 修复后的复现不能要求旧 `preserving unresolved accepted input` 日志作为成功判据：
+  已标记的结束错误会在打印该行之前结算。应保留新 Run/epoch、构建身份、
+  `last_error_code`、`last_error_details_ref` 和 `agent_run.failed` 事件的 `errorDetail`；
+  对本次路径预期为 `accepted_input_outcome_unknown`，错误链含
+  `Claude Code managed run has ended` 及底层原因，再核对清理请求、确认和后继领取。
+  这仍不能保证取得每种底层退出的实际退出码。
+- 当前基线已有精确 Stop、Core 重启恢复与 cleanup 路径；本次补的是运行期间特定错误返回后的
+  失败收口，并非新增全部回收能力。现场恢复需等待旧执行清理确认；后续复现须使用新的明确
+  输入，先核对原任务已产生的效果。日志持久化开关未包含在本补丁中。
+
+## 执行入口与空状态（2026-10-20）
+
+User 确认 HTML 交互稿后授权独立 worktree、PR 到 main 并合并。分支 `rovai/execution-entry-cleanup`，
+基线 `1da9da7ccafa8fc896ca82958029c0f48770c41f`，worktree 为同级 `rovai-ai-execution-entry`。
+
+生产变更只涉及 `ThreadDetailPopover.tsx`、`ThreadWorkspace.tsx` 和 `styles.css`：
+移除入口 Hover/Focus 名单气泡，保留可访问人数／姓名、头像、双弧与原尺寸；将原位置菜单提取为同文件控件，
+放到浮层标题栏，删除空状态中的独立“移到底部”。底部／右侧空记录保留位置控件，以便返回；
+未激活草稿在三种已保存位置下都不新增执行控件。有记录时底部／右侧布局及稳定 Drawer host 继续复用。
+
+保持 v1.72，属于局部可逆的 Renderer 调整；同步现有 UI 规范。没有新增协议、存储、Version Decision、
+Runtime 或 Rust 测试变更。验收扩展既有执行台原生输入夹具，覆盖无名单气泡、可访问姓名、
+空状态三位置往返、保存失败与重试、嵌套 Escape，以及未激活草稿；原有执行详情场景继续完整运行。
+
+验证：`pnpm typecheck`、`pnpm test`（246 个 Vitest 文件／2,801 项、Node 357 通过／2 项平台跳过）
+与真实基线的 `docs:check:ci` 通过。生产执行台原生输入夹具和状态切换夹具均通过；覆盖日夜主题、
+1040／1440／2560 宽度、200% 缩放、完整过程阅读、Drawer identity、键盘焦点及空状态。
+首次全量前端回归出现三项超时；对应 37 项单 worker 复核及完整 `pnpm test` 重跑均通过。
+
+额外检查保留两个基线问题：手机执行夹具在 844×390 横屏断言详情高度应大于 40px，原始基线与本次
+均测得 33px；`pnpm test:rust:pr` 的平台证据 owner 因 `docs/runtime-compatibility.md` 哈希不匹配失败
+（Core library 427 通过、1 失败、1 项既有忽略）。直接读取基线 Git 对象得到文档 SHA-256
+`9d3e34b827046ad071c350638c3317182e7061373eaf1a8fb31e89ea90fda6c2`，
+基线常量仍为 `596f26ee3fdf0a6812737967e0e2f97cecb34a70595cf52a58d2309cdd93c3a5`。
+本次不修改这两处既有行为或放宽断言；没有将这些检查声明为通过。
+
+## 四适配器原生问卷（2026-10-20）
+
+按 User 确认的四适配器范围在独立 worktree 实施。启动参数、接收端问卷分流、Host 兼容、
+未承接问卷终态与测试证据统一记录于[原生问卷验证](native-questionnaire-verification.md)。
+不改 MiniMax 用户配置，不扩大到 Codex 或其他适配器。
+
+后续按 User 范围仅补 Qwen `--exclude-tools=ask_user_question` 与 Host compatibility，
+保留既有问卷取消兜底；Kimi 仅核实 Skip/取消不终止原生执行，未改策略。
+增量版本、生产路径与门禁证据见同一验证记录的 [Qwen 增量](native-questionnaire-verification.md#qwen-启动禁用增量2026-10-20)。
+
+本轮按 User 授权禁用 ZCode、OpenCode V2 的问卷工具，生产改动限于原生配置和 Host compatibility。
+不增加通用交互取消、Run 终态或重放处理；保持 v1.72，不新增 Version Decision。
+基线、worktree 和验收见 [ZCode/OpenCode 增量](native-questionnaire-verification.md#zcodeopencode-v2-禁用增量2026-10-20)。
 
 ## 主动停止后的会话蓝点（2026-10-19）
 

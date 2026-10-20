@@ -76,7 +76,8 @@ impl Generation {
                 let rules = json!([
                     {"action": "*", "resource": "*", "effect": permission},
                     {"action": "shell", "resource": "*", "effect": "allow"},
-                    {"action": "skill", "resource": "*", "effect": "allow"}
+                    {"action": "skill", "resource": "*", "effect": "allow"},
+                    {"action": "question", "resource": "*", "effect": "deny"}
                 ]);
                 json!({"update": "disable", "permissions": rules,
                     "agents": {"build": {"permissions": rules}, "plan": {"permissions": rules}}})

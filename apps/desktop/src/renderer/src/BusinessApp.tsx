@@ -2978,21 +2978,6 @@ export function BusinessApp({
     else void navigateToSettings(rememberedSection)
   }
 
-  const openMotionSettings = async (): Promise<void> => {
-    try {
-      if (!await navigateToSettings('appearance')) return
-      await afterNextPaint()
-      const { entries, index } = desktopNavigation.getSnapshot()
-      const target = entries[index]
-      if (target?.kind !== 'settings' || target.section !== 'appearance') return
-      const control = document.querySelector<HTMLSelectElement>('#appearance-motion')
-      control?.scrollIntoView({ block: 'center', behavior: 'instant' })
-      control?.focus({ preventScroll: true })
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    }
-  }
-
   const returnToMobileSettings = (): void => {
     const { entries, index } = desktopNavigation.getSnapshot()
     const previous = entries[index - 1]
@@ -4327,7 +4312,7 @@ export function BusinessApp({
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
     <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
-    <NavigationShell platform={client.platform} settings={view === 'settings'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'memory' ? 'app-shell-memory' : view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
+    <NavigationShell platform={client.platform} settings={view === 'settings'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!mobile && renderNavigation()}
       {!startupGateVisible && mobile && ['compose', 'members', 'memory', 'automations'].includes(view) && <MobilePageHeader
         title={({ compose:uiAttribute("新对话"), members:uiAttribute("队员"), memory:uiAttribute("记忆"), automations:uiAttribute("定时任务") } as Record<string, string>)[view]}
@@ -4452,7 +4437,6 @@ export function BusinessApp({
             firstRunThreadId={firstRunThreadId}
             onConfigureRuntime={configureMemberRuntime}
             onOpenMembers={() => chooseView('members')}
-            onOpenMotionSettings={() => { void openMotionSettings() }}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
             onNotify={notify}
             onNotifyError={notifyError}

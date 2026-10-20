@@ -9,9 +9,7 @@ import { ToolCallIcon } from './ExecutionToolGroup'
 import { MemberAvatar } from './MemberAvatar'
 import { MessageAuthorProfileTrigger } from './MessageAuthorProfileTrigger'
 import { RunModelSummary } from './ThreadModelInformation'
-import { NavigationIcon } from './NavigationIcon'
-import { RunningText } from './RunningText'
-import { runPresencePreview, type ConversationRunPresenceSlot } from './conversation-run-presence'
+import { formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview, type ConversationRunPresenceSlot } from './conversation-run-presence'
 import { identityColorToken } from './theme'
 import { uiAttribute, useInterfaceLanguage } from './interface-language'
 import type { LiveRuntimeEvent } from './ui-model'
@@ -21,7 +19,7 @@ import { useNavigationPressMenu } from './useNavigationPressMenu'
 import type { AgentRunStopViewState } from './ThreadWorkspace'
 import './conversation-run-presence.css'
 
-export function ConversationRunPresence({ snapshot, slot, profiles, installations, source, onActivateMember, eventsByRunId, windowedEvidence, stopState, onStop, onOpen, onOpenMotionSettings, onError }: {
+export function ConversationRunPresence({ snapshot, slot, profiles, installations, source, onActivateMember, eventsByRunId, windowedEvidence, stopState, onStop, onOpen, onError }: {
   snapshot: ThreadSnapshot
   slot: ConversationRunPresenceSlot
   profiles: readonly AgentProfile[]
@@ -33,7 +31,6 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
   stopState(run: AgentRunView): AgentRunStopViewState
   onStop(run: AgentRunView): Promise<void>
   onOpen(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
-  onOpenMotionSettings?(): void
   onError(message: string): void
 }): React.JSX.Element | null {
   useInterfaceLanguage()
@@ -121,8 +118,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
             <div className="run-presence-line">
               <RunPresenceOpen threadId={snapshot.thread.id} run={run} name={name} description={description}
                 windowedEvidence={windowedEvidence} events={eventsByRunId.get(run.id)}
-                stopping={state === 'stopping' || state === 'confirming'} onOpen={onOpen} onOpenMotionSettings={onOpenMotionSettings} />
-              {(canStop || canRetry) && <span className="run-presence-guide" aria-hidden="true" />}
+                stopping={state === 'stopping' || state === 'confirming'} onOpen={onOpen} />
               {canStop && <Popover.Anchor asChild><button className="run-presence-stop" type="button" disabled={state !== 'available'}
                 aria-haspopup="dialog" aria-expanded={stopId === run.id} aria-controls={stopId === run.id ? confirmationId : undefined}
                 title={state === 'confirming' ? uiAttribute('正在确认停止结果') : uiAttribute('停止{0}的本次执行', name)}
@@ -195,7 +191,27 @@ function leaveStopConfirmation(event: KeyboardEvent<HTMLElement>, anchor: HTMLBu
   if (next) { event.preventDefault(); next.focus(); onLeave() }
 }
 
-function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, events, stopping, onOpen, onOpenMotionSettings }: {
+function RunPresenceTime({ run, id }: { run: AgentRunView, id: string }): React.JSX.Element | null {
+  useInterfaceLanguage()
+  const [now, setNow] = useState(Date.now)
+  const live = (run.status === 'running' || run.status === 'waiting') && !run.endedAt
+    && Boolean(run.startedAt && Number.isFinite(Date.parse(run.startedAt)))
+  useEffect(() => {
+    if (!live) return
+    const tick = (): void => setNow(Date.now())
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [live, run.startedAt])
+  const seconds = runPresenceElapsedSeconds(run, now)
+  if (seconds === null) return null
+  const duration = formatRunPresenceDuration(seconds)
+  return <time id={id} className="run-presence-time" dateTime={`PT${seconds}S`} title={uiAttribute('已运行 {0}', duration)}>
+    <span className="sr-only">{uiAttribute('已运行')}</span>{duration}
+  </time>
+}
+
+function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, events, stopping, onOpen }: {
   threadId: string
   run: AgentRunView
   name: string
@@ -204,12 +220,13 @@ function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, e
   events?: LiveRuntimeEvent[]
   stopping: boolean
   onOpen(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
-  onOpenMotionSettings?(): void
 }): React.JSX.Element {
+  const language = useInterfaceLanguage()
   const trigger = useRef<HTMLButtonElement>(null)
   const restoreFocusOnClose = useRef(false)
   const menuId = useId()
-  const menu = useNavigationPressMenu(Boolean(onOpenMotionSettings))
+  const elapsedId = useId()
+  const menu = useNavigationPressMenu(true)
   const tail = useExecutionWindow(windowedEvidence && run.status === 'running', threadId, run, events, null, true)
   const mergedEvents = useMemo(() => {
     // Reconcile evidence by identity/revision before projecting a line. A late
@@ -217,17 +234,18 @@ function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, e
     const merged = groupExecutionEventsByRunId([{ id: run.id }], tail.evidence, windowedEvidence ? events?.slice(-48) ?? [] : events ?? [])
     return merged.get(run.id) ?? []
   }, [tail.evidence, events, run.id, windowedEvidence])
-  const preview = useMemo(() => runPresencePreview(run, mergedEvents), [run, mergedEvents])
+  const preview = useMemo(() => runPresencePreview(run, mergedEvents, name), [run, mergedEvents, name, language])
   const running = run.status === 'running' && !run.cancelRequestedAt && !stopping
   const button = <button ref={trigger} {...menu.rowProps} className={`run-presence-open is-${preview.kind}`} type="button" data-preview-kind={preview.kind}
     title={uiAttribute('查看执行过程')} aria-label={`${name}，${preview.text}，${description}`}
-    aria-expanded={onOpenMotionSettings ? menu.open : undefined} aria-controls={menu.open ? menuId : undefined}
+    aria-describedby={elapsedId} aria-expanded={menu.open} aria-controls={menu.open ? menuId : undefined}
     onClick={event => onOpen(run.agentId, event.currentTarget, { runId: run.id })}>
+    {running && <span className="run-presence-spinner" aria-hidden="true"><ExecutionStatusGlyph status="cancelling" /></span>}
     {!running && <span className={`run-presence-status is-${run.status}`} aria-hidden="true"><ExecutionStatusGlyph status={run.status} /></span>}
     {preview.iconKind && <ToolCallIcon iconKind={preview.iconKind} />}
-    <RunningText className={`run-presence-preview is-${preview.kind}`} text={preview.text} active={running} />
+    <span className={`run-presence-preview is-${preview.kind}`}>{preview.text}</span>
+    <RunPresenceTime run={run} id={elapsedId} />
   </button>
-  if (!onOpenMotionSettings) return button
   const bounds = menu.open ? trigger.current?.getBoundingClientRect() : undefined
   const point = menu.contextPoint ?? { x: bounds?.left ?? 0, y: bounds?.bottom ?? 0 }
   return <DropdownMenu.Root open={menu.open} onOpenChange={menu.setOpen}>
@@ -248,10 +266,6 @@ function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, e
           if (trigger.current) onOpen(run.agentId, trigger.current, { runId: run.id })
         }}>
           <ExecutionIcon className="sidebar-action-menu-icon" /><span>{uiAttribute('查看执行过程')}</span>
-        </DropdownMenu.Item>
-        <DropdownMenu.Separator className="sidebar-action-menu-separator" />
-        <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onOpenMotionSettings}>
-          <NavigationIcon name="sun-moon" /><span>{uiAttribute('减少动态效果…')}</span>
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Portal>

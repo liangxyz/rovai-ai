@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-09-20
+last_updated: 2026-10-20
 ---
 
 # Porcelain Day
@@ -304,4 +304,4 @@ source. This document is a reviewable contract, not a second CSS source.
 Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
 `1040×700`, `1440×920`, `2560×1440`, keyboard focus, 200% zoom and reduced motion.
 
-Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. Memory uses the achromatic `--memory-*` surface, input and text family, with the same neutral primary-action hierarchy. Add/revise actions use Memory ink on canvas (inverted at night); other workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns retain their existing tokens; the Memory route applies its neutral rail variant without changing other routes. Focus tokens do not require an extra outline, halo or focused input border.
+Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. Memory uses the achromatic `--memory-*` surface, input and text family, with the same neutral primary-action hierarchy. Add/revise actions use Memory ink on canvas (inverted at night); other workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns retain their existing tokens; the shared sidebar retains the production theme on the Memory route. Memory neutral overrides are scoped to content, notices and dialog portals, never the global navigation. Focus tokens do not require an extra outline, halo or focused input border.

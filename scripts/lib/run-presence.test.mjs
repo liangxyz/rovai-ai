@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { verifyRunSources } from './run-presence-source-cases.mjs'
 
-test('production conversation presence matches the divider design and durable retry recovery', {timeout:180_000}, async t => {
+test('production conversation presence matches the continuous execution bar and durable retry recovery', {timeout:180_000}, async t => {
 const chrome = process.env.ROVAI_TEST_CHROME ?? process.env.ROVAI_REVIEW_CHROME ?? (process.platform === 'darwin'
   ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : process.platform === 'win32'
     ? join(process.env.PROGRAMFILES ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe') : '/usr/bin/google-chrome')
@@ -196,22 +196,41 @@ try {
     assert.equal(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),expected)
     assert.deepEqual(await lineGeometry(),geometry)
   }
-  assert.equal(await b.evaluate('document.querySelectorAll(".run-presence-status.is-running").length'),0)
-  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-preview .running-text-highlight")).animationName'),'running-text-sweep')
-  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-preview .running-text-highlight")).animationDuration'),'4.8s')
+  assert.equal(await b.evaluate('document.querySelectorAll(".run-presence-spinner").length'),1)
+  assert.equal(await b.evaluate('document.querySelectorAll(".run-presence-guide, .run-presence-preview .running-text-highlight").length'),0)
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationName'),'run-presence-stop-turn')
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationDuration'),'1.8s')
   await b.click('.run-presence-open'); await settle()
   const complete = await b.evaluate('document.querySelector(".camp-detail-popover").textContent')
   for (const text of ['第一行正在输出','第二行继续','第三行']) assert.ok(complete.includes(text))
   await b.key('Escape'); await settle()
-  report.interactions.push('original LF/CRLF and blank lines advance narration in the same fixed row; RunningText replaces the circle; details preserve the complete source')
+  report.interactions.push('original LF/CRLF and blank lines advance narration in the same fixed row; the activity circle replaces RunningText; details preserve the complete source')
 
   await b.evaluate('__presence.showStartupStatus("runtime_initializing")'); await settle()
   const startupGeometry = await lineGeometry()
-  assert.equal(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),'正在连接智能体…')
+  assert.match(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),/^正在(?:和爱丽丝接上线|联系爱丽丝|与爱丽丝会合)…$/)
   await b.evaluate('__presence.showStartupStatus(null)'); await settle()
-  assert.equal(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),'正在处理你的请求…')
+  assert.match(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),/^爱丽丝(?:正在为你推进|正在推进这项任务|正与你一起推进)…$/)
   assert.deepEqual(await lineGeometry(),startupGeometry)
   report.interactions.push('authoritative initialization changes to accepted-request fallback in the same row')
+  const chineseCopy = await b.evaluate('document.querySelector(".run-presence-preview").textContent')
+  const durationBefore = await b.evaluate('document.querySelector(".run-presence-time").dateTime')
+  const timePosition = await b.evaluate('document.querySelector(".run-presence-time").getBoundingClientRect().x')
+  await b.evaluate('__presence.resync()'); await pause(1100)
+  assert.equal(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),chineseCopy)
+  assert.notEqual(await b.evaluate('document.querySelector(".run-presence-time").dateTime'),durationBefore)
+  await b.click('.run-presence-time'); await settle()
+  assert.equal(await b.evaluate('document.querySelector(".camp-detail-popover [data-agent-run-id=run-alice]")?.getAttribute("data-agent-run-id")'), 'run-alice')
+  await b.key('Escape'); await settle()
+  assert.equal(await b.evaluate('document.querySelector(".run-presence-time").getBoundingClientRect().x'),timePosition)
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-time")).textDecorationLine'),'none')
+  await b.evaluate('__presence.setLanguage("en")'); await settle()
+  assert.match(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),/^爱丽丝 is (?:moving this forward|working on this task|working through this with you)…$/)
+  assert.match(await b.evaluate('document.querySelector(".run-presence-time").textContent'),/Running for .*s$/)
+  await b.evaluate('__presence.setLanguage("zh-CN")'); await settle()
+  assert.equal(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),chineseCopy)
+  report.interactions.push('time updates from Run start, opens that exact card and stays fixed on hover; fallback choice survives refresh and language switching')
+
 
   await scenario('stream',1)
   const activeCommand = await b.evaluate('document.querySelector(".run-presence-preview").textContent')
@@ -230,7 +249,7 @@ try {
     await b.wait('!!document.querySelector(".run-presence-menu")')
   }
   await openContext()
-  assert.deepEqual(await b.evaluate('Array.from(document.querySelectorAll(".run-presence-menu [role=menuitem]")).map(e=>e.textContent)'),['查看执行过程','减少动态效果…'])
+  assert.deepEqual(await b.evaluate('Array.from(document.querySelectorAll(".run-presence-menu [role=menuitem]")).map(e=>e.textContent)'),['查看执行过程'])
   assert.equal(await b.evaluate('Array.from(document.querySelectorAll(".camp-detail-popover,.run-presence-stop-confirmation")).some(e=>e.getClientRects().length>0)'),false)
   await b.capture(join(out,'motion-context-day.png'))
   await b.key('Escape'); await settle()
@@ -242,30 +261,31 @@ try {
   assert.ok(await b.evaluate('document.querySelectorAll(".camp-detail-popover .running-text-highlight").length'))
   assert.equal(await b.evaluate('Array.from(document.querySelectorAll(".camp-detail-popover .running-text-highlight")).every(e=>getComputedStyle(e).animationDuration==="4.8s")'),true)
   await b.key('Escape'); await settle()
-  report.interactions.push('right click and Shift+F10 open two actions, Escape restores row focus; left/detail action remains Run-specific and RunCard shares 4.8s')
+  report.interactions.push('right click and Shift+F10 open the details action without a motion-settings shortcut, Escape restores row focus; left/detail action remains Run-specific and RunCard shares 4.8s')
 
   await b.click('[contenteditable=true]'); await b.send('Input.insertText',{text:'返回后继续写这条草稿'}); await settle()
   const motionDraft = await b.evaluate('document.querySelector("[contenteditable=true]").textContent')
-  await openContext(); await b.click('.run-presence-menu [role=menuitem]:last-child')
-  await b.wait('document.activeElement?.id === "appearance-motion"')
+  await b.click('.sidebar-settings-entry button')
+  await b.wait('!!document.querySelector("#appearance-motion")')
   assert.deepEqual(await b.evaluate('Array.from(document.querySelector("#appearance-motion").options).map(o=>o.text)'),['跟随系统','始终减少'])
-  assert.equal(await b.evaluate('(() => {const r=document.activeElement.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()'),true)
+  assert.equal(await b.evaluate('!!document.querySelector("#appearance-motion")'),true)
   await b.capture(join(out,'motion-settings-focus.png'))
   await b.evaluate('(() => {const e=document.querySelector("#appearance-motion");e.value="reduce";e.dispatchEvent(new Event("change",{bubbles:true}))})()')
   await b.wait('document.documentElement.dataset.motionPreference === "reduce"')
   await b.click('.settings-sidebar-back'); await settle()
   assert.equal(await b.evaluate('document.querySelector("[contenteditable=true]").textContent'),motionDraft)
-  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-preview .running-text-highlight")).display'),'none')
+  assert.equal(await b.evaluate('document.querySelectorAll(".run-presence-preview .running-text-highlight").length'),0)
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationName'),'run-presence-stop-turn')
   await b.click('.run-presence-open'); await settle()
   assert.equal(await b.evaluate('Array.from(document.querySelectorAll(".camp-detail-popover .running-text-highlight")).every(e=>getComputedStyle(e).display==="none")'),true)
   await b.key('Escape'); await settle()
-  await openContext(); await b.click('.run-presence-menu [role=menuitem]:last-child')
-  await b.wait('document.activeElement?.id === "appearance-motion"')
+  await b.click('.sidebar-settings-entry button')
+  await b.wait('!!document.querySelector("#appearance-motion")')
   await b.evaluate('(() => {const e=document.querySelector("#appearance-motion");e.value="system";e.dispatchEvent(new Event("change",{bubbles:true}))})()')
   await b.wait('document.documentElement.dataset.motionPreference === "system"')
   await b.click('.settings-sidebar-back'); await settle()
-  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-preview .running-text-highlight")).animationDuration'),'4.8s')
-  report.interactions.push('menu reaches and focuses the actual Appearance select; app reduction hides row and RunCard highlights, returning preserves the fixture draft and switching back resumes 4.8s')
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationDuration'),'1.8s')
+  report.interactions.push('ordinary settings still reduce RunCard highlights and preserve the draft; the conversation activity spinner is independent of the setting')
 
   // A stays below its own reply while B speaks; only another A send moves A.
   await scenario('interleaved',2)
@@ -565,7 +585,7 @@ try {
   await b.evaluate('document.querySelector(".run-presence-stop-confirmation .danger-button").click()')
   await b.key('Escape');assert.equal(await b.evaluate('!!document.querySelector(".run-presence-stop-confirmation")'),true)
   assert.equal(await b.evaluate('__presence.controls.stopAttempts.length'),stopCount+1)
-  assert.equal(await b.evaluate('document.querySelectorAll(\"[data-presence-run=run-alice] .running-text-highlight\").length'),0,'stop submission pauses the activity highlight')
+  assert.equal(await b.evaluate('document.querySelectorAll(\"[data-presence-run=run-alice] .run-presence-spinner\").length'),0,'stop submission pauses the activity spinner')
   assert.deepEqual(await b.evaluate('__presence.controls.stopAttempts.at(-1)'),await b.evaluate('({id:"run-alice",version:__presence.getState().snapshot.agentRuns[0].version})'))
   await b.evaluate('__presence.controls.stopError=true;__presence.controls.holdStop=false')
   await b.wait('!document.querySelector(".run-presence-stop-confirmation .danger-button").disabled')
@@ -595,7 +615,7 @@ try {
       await b.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false})
       await scenario('stream',1)
       const layout=await b.evaluate(`(() => {const rail=document.querySelector('.unified-sidebar').getBoundingClientRect(),head=document.querySelector('.camp-topbar').getBoundingClientRect(),bar=document.querySelector('.prototype-control-bar').getBoundingClientRect(),composer=document.querySelector('.composer-box').getBoundingClientRect(),line=document.querySelector('.run-presence-open');return {rail:rail.width,header:head.height,overflow:document.documentElement.scrollWidth>innerWidth,composerVisible:composer.bottom<=bar.top,lineHeight:line.getBoundingClientRect().height,controls:line.querySelectorAll('button').length,viewport:[innerWidth,innerHeight]}})()`)
-      assert.equal(layout.rail,270);assert.equal(layout.header,38);assert.equal(layout.overflow,false);assert.equal(layout.composerVisible,true);assert.equal(layout.lineHeight,34)
+      assert.equal(layout.rail,270);assert.equal(layout.header,38);assert.equal(layout.overflow,false);assert.equal(layout.composerVisible,true);assert.equal(layout.lineHeight,42)
       report.viewports.push({theme,...layout});await b.capture(join(out,`${theme}-${width}x${height}.png`))
       await b.evaluate('__presence.setMemberName("负责会话与视觉验收的爱丽丝")')
       await b.click('.run-presence-stop'); await settle()
@@ -611,7 +631,7 @@ try {
     await scenario('stream',1)
     await b.evaluate(`__presence.setRunModel({adapterKind:'claude-code-cli',modelId:'long-provider-model-'.repeat(8),reasoningEffort:'max'})`); await settle()
     const zoom=await b.evaluate(`(() => {const timeline=document.querySelector('.camp-timeline'),row=document.querySelector('.run-presence-line'),stop=row.querySelector('.run-presence-stop'),r=row.getBoundingClientRect(),s=stop.getBoundingClientRect();return {overflow:document.documentElement.scrollWidth>innerWidth,timelineOverflow:timeline.scrollWidth>timeline.clientWidth+1,lineHeight:r.height,inside:s.left>=r.left&&s.right<=r.right+1,stopWidth:s.width}})()`)
-    assert.equal(zoom.overflow,false);assert.equal(zoom.timelineOverflow,false);assert.equal(zoom.lineHeight,36);assert.equal(zoom.inside,true);assert.equal(zoom.stopWidth,26)
+    assert.equal(zoom.overflow,false);assert.equal(zoom.timelineOverflow,false);assert.equal(zoom.lineHeight,42);assert.equal(zoom.inside,true);assert.equal(zoom.stopWidth,28)
     await b.capture(join(out,`zoom-200-${width*2}x${height*2}.png`))
     report.interactions.push({zoom200Equivalent:[width,height],...zoom})
     await b.click('.run-presence-stop'); await settle()
@@ -638,15 +658,20 @@ try {
   report.interactions.push('coarse pointers retain a single line and 44px Stop target; long press opens the menu without selecting on release')
   await b.send('Emulation.setDeviceMetricsOverride',{width:1440,height:920,deviceScaleFactor:1,mobile:false})
   await scenario('stream',0);await b.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await settle()
-  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-preview .running-text-highlight")).display'),'none')
+  assert.equal(await b.evaluate('document.querySelectorAll(".run-presence-preview .running-text-highlight").length'),0)
   const reducedBefore=await b.evaluate('document.querySelector(".run-presence-preview").textContent');await pause(300)
   assert.notEqual(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),reducedBefore)
-  report.interactions.push('reduced motion hides the RunCard highlight while real streamed text still updates')
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationName'),'run-presence-stop-turn')
+  report.interactions.push('the compact spinner and streamed text keep updating independently of reduced motion')
   await b.send('Emulation.setEmulatedMedia',{features:[{name:'forced-colors',value:'active'}]});await settle()
   assert.equal(await b.evaluate('matchMedia("(prefers-reduced-motion: reduce)").matches'),false)
-  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-preview .running-text-highlight")).display'),'none')
+  assert.equal(await b.evaluate('document.querySelectorAll(".run-presence-preview .running-text-highlight").length'),0)
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationName'),'none')
+  await b.evaluate('document.documentElement.dataset.motionPreference="reduce"'); await settle()
+  assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".run-presence-spinner svg")).animationName'),'none')
+  await b.evaluate('document.documentElement.dataset.motionPreference="system"')
   await b.send('Emulation.setEmulatedMedia',{features:[]});await settle()
-  report.interactions.push('forced colors independently hides the highlight')
+  report.interactions.push('forced colors retain a static, legible activity glyph with either motion preference')
   await b.capture(join(out,'night-stream.png'))
   await b.click('[aria-label="设计说明与源码依据"]');await settle();await b.capture(join(out,'notes.png'));await b.key('Escape')
 
@@ -704,29 +729,6 @@ try {
   report.interactions.push('slow initial page retains its invalidation and catches up once; newer live narration stays visible while both page and trailing changes are delayed')
   await b.send('Page.navigate',{url:pathToFileURL(join(root,'rovai-teammate-presence.html')).href})
   await b.wait('!!window.__presence && !!document.querySelector(".composer-box")')
-
-  if (process.env.ROVAI_PRESENCE_REFERENCE_HTML) {
-    const metrics=async (prefix,rootSelector) => b.evaluate(`(() => {
-      const row=document.querySelector('${rootSelector}'),line=row.querySelector('${prefix}line'),preview=row.querySelector('${prefix}preview'),stop=row.querySelector('${prefix}stop'),rect=row.getBoundingClientRect();
-      const offset=e=>{const r=e.getBoundingClientRect();return [Math.round((r.left-rect.left)*100)/100,Math.round((r.top-rect.top)*100)/100,r.width,r.height]};
-      const font=getComputedStyle(preview);return {row:[rect.width,rect.height],line:offset(line),preview:offset(preview),stop:offset(stop),divider:offset(row.querySelector('.run-presence-guide')),font:[font.fontSize,font.fontFamily,font.fontWeight,font.whiteSpace,font.textOverflow],ink:font.color,stopBorder:getComputedStyle(stop).borderWidth}
-    })()`)
-    const actual=[]
-    for(const theme of ['day','night']) for(const size of [[1040,700],[1440,920],[2560,1440]]) {
-      await b.send('Emulation.setDeviceMetricsOverride',{width:size[0],height:size[1],deviceScaleFactor:1,mobile:false})
-      await b.evaluate(`__presence.setTheme('${theme}')`);await scenario('stream',1)
-      actual.push({theme,size,metrics:await metrics('.run-presence-','.conversation-run-presence')})
-    }
-    const referenceUrl = pathToFileURL(process.env.ROVAI_PRESENCE_REFERENCE_HTML); referenceUrl.search = 'row=divider'
-    await b.send('Page.navigate',{url:referenceUrl.href})
-    await b.wait('!!window.__presence && !!document.querySelector(".composer-box")')
-    for(const expected of actual) {
-      await b.send('Emulation.setDeviceMetricsOverride',{width:expected.size[0],height:expected.size[1],deviceScaleFactor:1,mobile:false})
-      await b.evaluate(`__presence.setTheme('${expected.theme}')`);await scenario('stream',1)
-      assert.deepEqual(expected.metrics,await metrics('.run-presence-','.conversation-run-presence'),`v10 divider reference ${expected.theme}/${expected.size}`)
-    }
-    report.reference={path:process.env.ROVAI_PRESENCE_REFERENCE_HTML,comparisons:actual}
-  }
 
   assert.deepEqual(b.errors,[])
   Object.assign(report,{result:'passed',errors:b.errors})

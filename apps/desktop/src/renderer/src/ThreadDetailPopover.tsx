@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useMobileLayout } from './MobileLayout'
@@ -26,16 +26,8 @@ function ThreadExecutionEntry({ members, executionCount, expanded, panelId, mobi
   mobile?: boolean
   onSelect(tab: ThreadDetailTab, trigger: HTMLButtonElement, keyboard: boolean): void
 }): React.JSX.Element {
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const tooltipRef = useRef<HTMLSpanElement>(null)
-  const tooltipId = useId()
-  const [hovered, setHovered] = useState(false)
-  const [focused, setFocused] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
   const [pageHidden, setPageHidden] = useState(false)
-  const [anchor, setAnchor] = useState({ top: 0, right: 12 })
   const running = members.length > 0
-  const showNames = !mobile && running && (hovered || focused) && !dismissed
   const avatarLimit = mobile ? 2 : 3
   const names = members.map(member => member.displayName).join('、')
   const description = running
@@ -49,21 +41,6 @@ function ThreadExecutionEntry({ members, executionCount, expanded, panelId, mobi
     document.addEventListener('visibilitychange', update)
     return () => document.removeEventListener('visibilitychange', update)
   }, [running])
-
-  useLayoutEffect(() => {
-    if (!showNames) return
-    const update = (): void => {
-      const rect = triggerRef.current?.getBoundingClientRect()
-      const width = tooltipRef.current?.offsetWidth ?? 0
-      if (rect) setAnchor({ top: rect.bottom + 6,
-        right: Math.max(12, Math.min(window.innerWidth - rect.right, window.innerWidth - width - 12)) })
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    if (triggerRef.current) observer.observe(triggerRef.current)
-    window.addEventListener('resize', update)
-    return () => { observer.disconnect(); window.removeEventListener('resize', update) }
-  }, [showNames, members.length, names])
 
   const face = <>
     {!mobile && <ThreadDetailIcon tab="execution" />}
@@ -85,40 +62,22 @@ function ThreadExecutionEntry({ members, executionCount, expanded, panelId, mobi
     </>}
   </>
 
-  return <>
-    <button
-      ref={triggerRef}
-      className="camp-detail-entry camp-execution-entry"
-      type="button"
-      data-detail="execution"
-      data-running={running}
-      aria-label={uiAttribute("执行，{0}", String(description))}
-      aria-expanded={expanded}
-      aria-pressed={mobile ? expanded : undefined}
-      aria-controls={panelId}
-      aria-haspopup={mobile ? undefined : 'dialog'}
-      aria-describedby={showNames ? tooltipId : undefined}
-      onPointerEnter={() => { setHovered(true); setDismissed(false) }}
-      onPointerLeave={() => setHovered(false)}
-      onFocus={() => { setFocused(true); setDismissed(false) }}
-      onBlur={() => setFocused(false)}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape' || !showNames) return
-        event.preventDefault()
-        event.stopPropagation()
-        setDismissed(true)
-      }}
-      onClick={(event) => {
-        setDismissed(true)
-        onSelect('execution', event.currentTarget, event.detail === 0)
-      }}
-    >
-      {mobile ? <span className="mobile-execution-face">{face}</span> : face}
-    </button>
-    {showNames && createPortal(<span ref={tooltipRef} id={tooltipId} role="tooltip" className="camp-execution-tooltip" style={anchor}>
-      {description}
-    </span>, document.body)}
-  </>
+  return <button
+    className="camp-detail-entry camp-execution-entry"
+    type="button"
+    data-detail="execution"
+    data-running={running}
+    aria-label={uiAttribute("执行，{0}", String(description))}
+    aria-expanded={expanded}
+    aria-pressed={mobile ? expanded : undefined}
+    aria-controls={panelId}
+    aria-haspopup={mobile ? undefined : 'dialog'}
+    onClick={(event) => {
+      onSelect('execution', event.currentTarget, event.detail === 0)
+    }}
+  >
+    {mobile ? <span className="mobile-execution-face">{face}</span> : face}
+  </button>
 }
 
 export function ThreadDetailEntries({
@@ -187,6 +146,7 @@ export function ThreadDetailEntries({
 }
 
 export function ThreadDetailPopover({
+  executionActions,
   entryHost,
   tasksEnabled = true,
   activeTab,
@@ -206,6 +166,7 @@ export function ThreadDetailPopover({
   onOpenMissionActivity,
   children
 }: {
+  executionActions?: ReactNode
   entryHost?: HTMLElement | null
   tasksEnabled?: boolean
   activeTab: ThreadDetailTab
@@ -354,6 +315,7 @@ export function ThreadDetailPopover({
       <header className="camp-detail-heading">
         <ThreadDetailIcon tab={activeTab} />
         <strong id={`${panelId}-title`}>{copy[activeTab]}</strong>
+        {!mobile && activeTab === 'execution' && executionActions && <div className="camp-detail-heading-actions">{executionActions}</div>}
         {mobile && activeTab === 'execution' && onToggleMobileExecutionMaximized && <button
           className="mobile-execution-expand"
           type="button"

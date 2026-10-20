@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 
-test('Memory workspace: production components, mutations, notifications and responsive layout', { timeout: 180_000 }, async () => {
+test('Memory workspace: production components, mutations, notifications and responsive layout', { timeout: 300_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'rovai-memory-ui-'))
   const output = process.env.ROVAI_MEMORY_UI_OUTPUT ?? join(root, 'screenshots')
   await mkdir(output, { recursive: true })
@@ -42,6 +42,9 @@ test('Memory workspace: production components, mutations, notifications and resp
     const row = dot?.closest('button'), dialog = document.querySelector('.memory-editor-dialog');
     return { overflow: document.documentElement.scrollWidth > innerWidth,
       detailOverflow: [...document.querySelectorAll('.memory-detail,.memory-library,.memory-editor-dialog .app-dialog-body')].some(e => e.scrollWidth > e.clientWidth + 1),
+      workspace: rect(document.querySelector('.memory-library')), add: rect(document.querySelector('.memory-header-actions .primary-button')),
+      rail: document.querySelector('.unified-sidebar') && getComputedStyle(document.querySelector('.unified-sidebar')).getPropertyValue('--rail').trim(),
+      globalRail: getComputedStyle(document.documentElement).getPropertyValue('--rail').trim(),
       revise: revise && rect(revise), more: more && rect(more), dot: dot && rect(dot), row: row && rect(row), dialog: dialog && rect(dialog),
       canvas: getComputedStyle(document.querySelector(".memory-content")).backgroundColor,
       primary: revise && getComputedStyle(revise).backgroundColor,
@@ -74,13 +77,19 @@ test('Memory workspace: production components, mutations, notifications and resp
     await navigate({ scope: 'all', memoryId: 'shared-1' }); await b.evaluate('__memoryFixture.setNotice(true)'); await settle()
     report.interactions.push('all scopes; legacy filter ignored; full content/history; search and retired record; truthful update notice view/dismiss')
 
-    for (const [width, height] of [[1440,920],[1040,700],[375,812],[320,700],[740,390]]) for (const theme of ['day','night']) {
+    for (const [width, height] of [[2560,1440],[2048,1152],[1707,960],[1440,920],[1280,720],[1040,700],[375,812],[320,700],[740,390]]) for (const theme of ['day','night']) {
       await viewport(width,height); await b.evaluate(`__memoryFixture.setTheme('${theme}')`); await navigate({ scope: 'all', memoryId: width < 768 ? null : 'shared-1' })
       const list = await geometry(); assert.equal(list.overflow,false); assert.equal(list.detailOverflow,false)
       await b.capture(join(output, `memory-${theme}-${width}-list.png`))
       if (width < 768) await click('.memory-catalog-item')
       const g = await geometry(); assert.equal(g.overflow,false); assert.equal(g.detailOverflow,false)
       assert.ok(Math.abs(g.revise.y-g.more.y)<1); assert.equal(g.revise.height,g.more.height)
+      if (width >= 768) {
+        assert.ok(Math.abs(g.revise.right-g.add.right)<1, 'Add and Revise share the right edge')
+        assert.equal(g.revise.height,g.add.height, 'Add and Revise share the control height')
+        assert.equal(g.rail,g.globalRail, 'Memory must not override the shared rail theme')
+      }
+      if (width === 2560) assert.ok(g.workspace.width >= 1800 && g.workspace.width <= 1920, '2K uses the approved wider workspace')
       if (g.dot) assert.ok(Math.abs(g.dot.y+g.dot.height/2-g.row.y-g.row.height/2)<1, 'pending dot vertically centered')
       for (const color of [g.primary,g.canvas,g.selected]) { const channels = color.match(/\d+/g).map(Number); assert.equal(Math.max(...channels)-Math.min(...channels),0, 'achromatic memory surfaces and actions') }
       await b.capture(join(output, `memory-${theme}-${width}-detail.png`))
@@ -89,10 +98,10 @@ test('Memory workspace: production components, mutations, notifications and resp
       assert.ok(e.dialog.x >= 0 && e.dialog.right <= width && e.dialog.y >= 0 && e.dialog.bottom <= height)
       await b.capture(join(output, `memory-${theme}-${width}-editor.png`)); await closeEditor()
       if (width < 768) await click('.mobile-memory-back button')
-      await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-drawer")')
+      await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-dialog")')
       const close = await b.evaluate(`(() => {
-        const drawer = document.querySelector('.memory-review-drawer');
-        const overlay = document.querySelector('.memory-drawer-overlay');
+        const drawer = document.querySelector('.memory-review-dialog');
+        const overlay = document.querySelector('.memory-review-overlay');
         const button = drawer.querySelector('button[aria-label="关闭共同记忆审核"]');
         const r = button.getBoundingClientRect();
         const points = [[r.x+6,r.y+6],[r.right-6,r.y+6],[r.x+6,r.bottom-6],[r.right-6,r.bottom-6],[r.x+r.width/2,r.y+r.height/2]];
@@ -105,8 +114,11 @@ test('Memory workspace: production components, mutations, notifications and resp
       assert.equal(close.drawerRegion, 'no-drag', 'review drawer excludes the native titlebar drag region')
       assert.equal(close.overlayRegion, 'no-drag', 'modal backdrop blocks window dragging')
       await b.capture(join(output, `review-${theme}-${width}.png`))
-      await click('.memory-review-drawer button[aria-label="关闭共同记忆审核"]')
-      await b.wait('!document.querySelector(".memory-review-drawer")')
+      const footer = await b.evaluate(`(() => { const e = document.querySelector('.memory-review-return'), r = e.getBoundingClientRect(); return r.y>=0 && r.bottom<=innerHeight && e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)); })()`)
+      assert.ok(footer, 'Return remains visible and clickable at every viewport')
+      await click('.memory-review-dialog button[aria-label="关闭共同记忆审核"]')
+      await b.wait('!document.querySelector(".memory-review-dialog")')
+      assert.ok(await b.evaluate('document.activeElement.matches(".memory-review-entry")'), 'closing restores the review trigger focus')
       assert.equal(await b.evaluate('__memoryFixture.get().reviews[0].status'), 'pending', 'closing does not resolve the review')
       await button('新增')
       const form = await b.evaluate(`(() => {
@@ -143,11 +155,11 @@ test('Memory workspace: production components, mutations, notifications and resp
     await b.wait('document.documentElement.dataset.rovaiPlatform === "win32" && !!document.querySelector(".windows-application-menu")')
     for (const [width,height] of [[1440,920],[1040,700],[720,460]]) for (const theme of ['day','night']) {
       await viewport(width,height); await b.evaluate(`__memoryFixture.setTheme('${theme}')`); await navigate({ scope: 'all' })
-      await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-drawer")')
+      await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-dialog")')
       const layout = await b.evaluate(`(() => {
         const titlebar = document.querySelector('.windows-application-menu').getBoundingClientRect();
-        const drawer = document.querySelector('.memory-review-drawer').getBoundingClientRect();
-        const close = document.querySelector('.memory-review-drawer button[aria-label="关闭共同记忆审核"]');
+        const drawer = document.querySelector('.memory-review-dialog').getBoundingClientRect();
+        const close = document.querySelector('.memory-review-dialog button[aria-label="关闭共同记忆审核"]');
         const r = close.getBoundingClientRect();
         return { titlebarBottom: titlebar.bottom, drawerTop:drawer.top, drawerBottom:drawer.bottom,
           closeTop:r.top, closeBottom:r.bottom, viewportHeight:innerHeight,
@@ -157,7 +169,7 @@ test('Memory workspace: production components, mutations, notifications and resp
         `Windows review controls must clear the native title bar: ${JSON.stringify(layout)}`)
       assert.ok(layout.drawerBottom <= height && layout.closeBottom <= height && layout.hit)
       await b.capture(join(output, `review-windows-${theme}-${width}.png`))
-      await click('.memory-review-drawer button[aria-label="关闭共同记忆审核"]'); await b.wait('!document.querySelector(".memory-review-drawer")')
+      await click('.memory-review-dialog button[aria-label="关闭共同记忆审核"]'); await b.wait('!document.querySelector(".memory-review-dialog")')
       assert.equal(await b.evaluate('__memoryFixture.get().reviews[0].status'),'pending')
       report.windowsReviewViewports.push({ width,height,theme,...layout,nativeWindowsVerified:false })
     }
@@ -194,12 +206,12 @@ test('Memory workspace: production components, mutations, notifications and resp
     await click('.memory-more-button'); await button('永久遗忘'); await b.wait('!!document.querySelector(".memory-confirm-dialog")')
     await button('取消', 'document.querySelector(".memory-confirm-dialog")')
     assert.ok(await b.evaluate('__memoryFixture.get().memories.some(m => m.currentBody === "从全部新增的记忆。" && m.lifecycle === "active")'))
-    await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-drawer")')
-    await b.capture(join(output,'review-drawer.png')); await button('接受', 'document.querySelector(".memory-review-drawer")')
+    await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-dialog")')
+    await b.capture(join(output,'review-dialog.png')); await button('接受', 'document.querySelector(".memory-review-dialog")')
     assert.match(await text('.memory-review-entry'),/审核记录/)
     assert.equal(await b.evaluate('__memoryFixture.get().reviews[0].candidateBody'),null)
     report.interactions.push('create from all targets new identity and submits typed keys; retire/reactivate; schedule; forget cancel; review acceptance and body-free history')
-    await click('.memory-review-drawer button[aria-label="关闭共同记忆审核"]')
+    await click('.memory-review-dialog button[aria-label="关闭共同记忆审核"]')
     await click('[data-memory-scope="all"]'); await button('新增')
     await fill('textarea','成员范围验证。'); await fill('#memory-key-input','范围验证')
     await b.click(choiceTrigger('范围')); await b.wait('!!document.querySelector(".memory-choice-menu")')
@@ -229,7 +241,100 @@ test('Memory workspace: production components, mutations, notifications and resp
     assert.deepEqual([...relationship.relationshipAgentIds].sort(),['member-a','member-b'])
     assert.equal(relationship.direction,'directed'); assert.equal(relationship.directedActorAgentId,'member-b')
     report.interactions.push('aligned neutral create form; pointer/keyboard menus; scope changes retain drafts; exact shared/member/relationship commands and participant constraints')
-    await click('.memory-review-entry'); await b.wait('!!document.querySelector(".memory-review-drawer")')
+    // The review owner stays open while candidates change; only explicit commands mutate data.
+    await navigate({ scope: 'hearth', search: '工作', memoryId: 'shared-2' })
+    const originalTarget = await b.evaluate('__memoryFixture.get().target')
+    await b.evaluate('__memoryFixture.seedReviews()'); await settle()
+    await click('.memory-review-entry'); await b.wait('document.querySelectorAll(".memory-review-selection").length === 3')
+    await button('编辑后接受', 'document.querySelector(".memory-review-dialog")')
+    await fill('#memory-review-body-input', '长'.repeat(700))
+    assert.ok(await b.evaluate('[...document.querySelectorAll(".memory-review-actions button")].find(e => e.textContent === "接受最终内容").disabled'))
+    await fill('#memory-review-body-input', '审核中保留的最终草稿。')
+    await button('返回记忆', 'document.querySelector(".memory-review-dialog")')
+    assert.deepEqual(await b.evaluate('__memoryFixture.get().target'), originalTarget)
+    await click('.memory-review-entry')
+    assert.equal(await b.evaluate('document.querySelector("#memory-review-body-input").value'), '审核中保留的最终草稿。')
+    await b.click('document.querySelectorAll(".memory-review-selection")[1]'); await settle()
+    assert.match(await text('.memory-review-existing'), /工作完成后同步/)
+    await b.click('document.querySelectorAll(".memory-review-selection")[0]'); await settle()
+    assert.equal(await b.evaluate('document.querySelector("#memory-review-body-input").value'), '审核中保留的最终草稿。')
+    await b.key('Escape'); await b.wait('!document.querySelector(".memory-review-dialog")')
+    await click('.memory-review-entry')
+    await b.send('Input.dispatchMouseEvent',{type:'mousePressed',x:5,y:100,button:'left',clickCount:1})
+    await b.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:5,y:100,button:'left',clickCount:1})
+    await b.wait('!document.querySelector(".memory-review-dialog")')
+    await click('.memory-review-entry')
+    await b.evaluate('__memoryFixture.conflictReview("review-2"); __memoryFixture.failReads()')
+    await button('接受最终内容', 'document.querySelector(".memory-review-dialog")')
+    assert.match(await text('.memory-review-error'), /无法确认最新审核状态/)
+    assert.ok(await b.evaluate('[...document.querySelectorAll(".memory-review-actions button")].every(e => e.disabled)'))
+    await button('刷新列表', 'document.querySelector(".memory-review-dialog")')
+    assert.equal(await b.evaluate('document.querySelector("#memory-review-body-input").value'), '审核中保留的最终草稿。')
+    await button('接受最终内容', 'document.querySelector(".memory-review-dialog")')
+    const edited = await b.evaluate('__memoryFixture.get().calls.at(-1).command')
+    assert.equal(edited.expectedReviewItemVersion,2)
+    assert.equal(edited.finalBody,'审核中保留的最终草稿。')
+    assert.deepEqual(edited.finalRetrievalKeys,['新增候选'])
+    assert.equal(await text('.memory-review-detail .memory-detail-body'),'修订候选正文。')
+    assert.deepEqual(await b.evaluate('__memoryFixture.get().target'),originalTarget,'acceptance keeps formal selection/scope/search')
+    report.interactions.push('review inline validation; per-candidate draft survives selection/Return/Escape/backdrop; conflict refresh recovery; explicit CAS retry; formal context preserved')
+
+    // Acknowledged writes whose read fails must not be sent twice.
+    await b.evaluate('__memoryFixture.failReviewRefresh()')
+    await button('接受', 'document.querySelector(".memory-review-dialog")')
+    assert.match(await text('.memory-review-error'),/处理已完成，但列表刷新失败/)
+    const afterApplied = await b.evaluate('__memoryFixture.get().calls.length')
+    assert.ok(await b.evaluate('[...document.querySelectorAll(".memory-review-actions button")].every(e => e.disabled)'))
+    assert.equal(await b.evaluate('document.querySelector(".memory-review-dialog").textContent.includes("修订候选正文。")'),false)
+    await button('返回记忆', 'document.querySelector(".memory-review-dialog")'); await click('.memory-review-entry')
+    assert.match(await text('.memory-review-error'),/处理已完成/)
+    await button('刷新列表', 'document.querySelector(".memory-review-dialog")')
+    assert.equal(await b.evaluate('__memoryFixture.get().calls.length'),afterApplied, 'refresh is read-only')
+    assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".memory-review-actions button")].map(e=>e.textContent)'),['拒绝'],'stale revision has no accept/edit action')
+    await b.evaluate('__memoryFixture.holdReview()')
+    await button('拒绝', 'document.querySelector(".memory-review-dialog")')
+    assert.equal(await b.evaluate('document.querySelector(".memory-review-dialog .app-dialog-close").disabled'),false)
+    await click('.memory-review-dialog .app-dialog-close')
+    await b.wait('!document.querySelector(".memory-review-dialog")')
+    await b.evaluate('__memoryFixture.releaseReview()'); await settle()
+    await click('.memory-review-entry')
+    await b.wait('!!document.querySelector(".memory-review-complete")')
+    assert.equal(await b.evaluate('__memoryFixture.get().reviews.every(r => r.status !== "pending" && r.candidateBody === null && r.candidateRetrievalKeys === null && r.candidateKind === null)'),true)
+    assert.equal(await b.evaluate('/审核中保留的最终草稿|修订候选正文|已过时的候选正文/.test(document.querySelector(".memory-review-dialog").textContent)'),false,'terminal history never reconstructs content')
+    await button('返回记忆', 'document.querySelector(".memory-review-dialog")')
+    report.interactions.push('applied/refresh-failed blocks duplicate commands; stale reject only; exit during submission; next candidate and completion; terminal body/keys/kind cleared')
+
+    // An external terminal event also clears a closed draft; a lost response requires a read first.
+    await b.evaluate('__memoryFixture.seedReviews()'); await settle(); await click('.memory-review-entry')
+    await button('编辑后接受', 'document.querySelector(".memory-review-dialog")')
+    await fill('#memory-review-body-input','不应保留的失效草稿。')
+    await button('返回记忆', 'document.querySelector(".memory-review-dialog")')
+    await b.evaluate('__memoryFixture.invalidateReview("review-2")'); await settle(); await click('.memory-review-entry')
+    assert.equal(await b.evaluate('!!document.querySelector("#memory-review-body-input")'),false)
+    assert.equal(await b.evaluate('document.querySelector(".memory-review-dialog").textContent.includes("不应保留的失效草稿")'),false)
+    await b.evaluate('__memoryFixture.failNext()'); await button('接受', 'document.querySelector(".memory-review-dialog")')
+    assert.match(await text('.memory-review-error'),/无法确认最新审核状态/)
+    await button('刷新列表', 'document.querySelector(".memory-review-dialog")')
+    await button('拒绝', 'document.querySelector(".memory-review-dialog")')
+    await button('拒绝', 'document.querySelector(".memory-review-dialog")')
+    report.interactions.push('external invalidation clears retained draft; transport error requires read-only refresh before another explicit action')
+    await button('返回记忆', 'document.querySelector(".memory-review-dialog")')
+    await b.evaluate('__memoryFixture.seedReviews(); __memoryFixture.setLanguage("en")'); await settle()
+    await viewport(320,700); await navigate({ scope: 'all' }); await click('.memory-review-entry')
+    await button('Edit and accept', 'document.querySelector(".memory-review-dialog")')
+    const english = await b.evaluate(`(() => {
+      const dialog = document.querySelector('.memory-review-dialog');
+      return {overflow: dialog.scrollWidth > dialog.clientWidth + 1 || [...dialog.querySelectorAll('.memory-review-actions,.memory-review-scroll')].some(e => e.scrollWidth > e.clientWidth + 1),
+        title:dialog.querySelector('h2').textContent,
+        footer:[...dialog.querySelectorAll('.memory-review-footer button')].map(e => { const r=e.getBoundingClientRect(); return r.x>=0 && r.right<=innerWidth && r.bottom<=innerHeight; })};
+    })()`)
+    assert.equal(english.overflow,false,'English inline editing fits narrow windows')
+    assert.ok(english.footer.every(Boolean),'English review actions remain inside the viewport')
+    assert.equal(english.title,'Shared Memory Review')
+    await b.capture(join(output,'review-english-320-editor.png'))
+    await b.key('Escape'); await b.wait('!document.querySelector(".memory-review-dialog")')
+    report.interactions.push('English inline review on a 320px viewport')
+    await b.evaluate('__memoryFixture.setLanguage("zh-CN")'); await viewport(1440,920); await click('.memory-review-entry')
     await b.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
     await b.capture(join(output,'review-history-reduced-motion.png'))
     assert.deepEqual(b.errors,[])

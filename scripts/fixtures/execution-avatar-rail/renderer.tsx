@@ -202,8 +202,16 @@ Object.assign(window, { executionNotificationTest: {
 let configureInterruptionFixture: (() => void) | undefined
 Object.assign(window, { configureRunInterruption: () => configureInterruptionFixture?.() })
 
+let configureEmptyExecutionFixture: ((pending: boolean, placement: ExecutionConsolePlacement) => void) | undefined
+let rejectNextPlacement = false
+Object.assign(window, {
+  configureEmptyExecution: (pending = false, placement: ExecutionConsolePlacement = 'inspector') => configureEmptyExecutionFixture?.(pending, placement),
+  failNextExecutionPlacement: () => { rejectNextPlacement = true }
+})
+
 function Fixture(): React.JSX.Element {
   const [count, setCount] = useState(12)
+  const [pendingThread, setPendingThread] = useState(false)
   const [recipientCount, setRecipientCount] = useState(0)
   const [revision, setRevision] = useState(0)
   const [entryRunningCount, setEntryRunningCount] = useState<number | null>(null)
@@ -240,7 +248,25 @@ function Fixture(): React.JSX.Element {
     setRecipientCount(0)
     setOpen(false)
   }
+  configureEmptyExecutionFixture = (pending, placement) => {
+    notificationFixtureEnabled = false
+    setNotificationFocus(null)
+    previewHarness?.hidePane()
+    setCount(0)
+    setRecipientCount(0)
+    setEntryRunningCount(null)
+    setLongTitleScenario(false)
+    setInterruptionScenario(false)
+    setPendingThread(pending)
+    setPlacement(placement)
+    setOpen(false)
+  }
   const snapshot = snapshotFor(count, revision, recipientCount)
+  if (pendingThread) {
+    snapshot.thread.activationState = 'pending'
+    snapshot.messages = []
+    snapshot.tasks = []
+  }
   if (notificationFixtureEnabled && snapshot.agentRuns[0]) {
     snapshot.agentRuns.push({ ...snapshot.agentRuns[0], id: 'run-agent-1-history',
       status: 'succeeded', createdAt: '2026-08-30T04:00:00Z', endedAt: now })
@@ -322,7 +348,11 @@ function Fixture(): React.JSX.Element {
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} detailEntryHost={entryHost}
         onCancelAgentRun={async run => { setStoppedRuns(current => [...current, run.id]) }}
-        executionPlacement={placement} onExecutionPlacementChange={async value => { setPlacement(value); return value }}
+        executionPlacement={placement} onExecutionPlacementChange={async value => {
+          if (rejectNextPlacement) { rejectNextPlacement = false; throw new Error('位置保存失败（隔离验收）') }
+          setPlacement(value)
+          return value
+        }}
         onOpenInspector={() => setOpen(true)} onCloseInspector={() => setOpen(false)}
         notificationFocus={notificationFocus}
         onNotificationFocusPresented={(requestId) => {

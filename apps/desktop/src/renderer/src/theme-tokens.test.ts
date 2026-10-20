@@ -298,9 +298,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
     expect(night['--inline-code-canvas']).toBe('#353b3f')
-    expect(night['--conversation-inline-code-canvas']).toBe('#30373b')
-    expect(night['--conversation-code-block-canvas']).toBe('#252c30')
-    expect(night['--conversation-code-line']).toBe('#3e494f')
+    expect(night['--conversation-inline-code-canvas']).toBe('#343536')
+    expect(night['--conversation-code-block-canvas']).toBe('#28292a')
+    expect(night['--conversation-code-line']).toBe('#3d3f41')
     expect(night['--shell-result-canvas']).toBe('#373f43')
     expect(night['--code-block-canvas']).toBe('#1d252b')
     expect(night['--diff-add-soft']).toBe('#21412e')
@@ -490,7 +490,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
       /\.conversation-bubble:is\(\.user, \.external_principal\):has\(\.message-attachments\) \.message-surface\s*\{[^}]*width: 100%[^}]*max-width: none/
     )
     expect(css).toMatch(/\.user-message-files\s*\{[^}]*justify-content: flex-end/)
-    expect(css).toMatch(/\.attachment-card\s*\{[^}]*--user-file-card-max-width:\s*220px/)
+    expect(css).toMatch(/\.attachment-card\s*\{[^}]*--user-file-card-max-width:\s*280px/)
     expect(css).toMatch(/\.user-timeline\s*\{[^}]*max-width:\s*min\(var\(--user-file-card-max-width\), 100%\)/)
     expect(css).toMatch(/\.composer-attachment-card\s*\{[^}]*max-width:\s*min\(var\(--user-composer-max-width\), var\(--user-file-card-max-width\)\)/)
     expect(css).toMatch(

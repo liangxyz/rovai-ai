@@ -680,6 +680,7 @@ struct AcpPromptObservation {
     assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
     unsupported_interaction: bool,
+    questionnaire_request_ids: BTreeSet<String>,
     native_usage_message_ids: BTreeSet<String>,
     native_usage_tool_call_ids: BTreeSet<String>,
     images: AcpImageAccumulator,
@@ -693,6 +694,7 @@ impl AcpPromptObservation {
             assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
             unsupported_interaction: false,
+            questionnaire_request_ids: BTreeSet::new(),
             native_usage_message_ids: BTreeSet::new(),
             native_usage_tool_call_ids: BTreeSet::new(),
             images: AcpImageAccumulator::default(),
@@ -5975,6 +5977,32 @@ impl AcpRuntime {
             .await
     }
 
+    pub async fn cancel_questionnaire_request(
+        &self,
+        native_prompt_id: &str,
+        request_id: Value,
+        kind: AcpPermissionRequestKind,
+    ) -> Result<()> {
+        {
+            let mut observation = self.active_observation.lock().await;
+            let observation = observation
+                .as_mut()
+                .filter(|observation| observation.prompt_id == native_prompt_id)
+                .context("ACP questionnaire targeted a stale Prompt")?;
+            if !observation
+                .questionnaire_request_ids
+                .insert(canonical_json_digest(&request_id)?)
+            {
+                return Ok(());
+            }
+            observation.unsupported_interaction = true;
+        }
+        // This is a client capability limit, never a user answer or refusal.
+        eprintln!("ACP native questionnaire cancelled by unsupported client: {kind:?}");
+        self.respond(request_id, json!({"outcome": {"outcome": "cancelled"}}))
+            .await
+    }
+
     pub async fn respond_error(&self, id: Value, code: i64, message: &str) -> Result<()> {
         self.host
             .send(json!({
@@ -6013,7 +6041,9 @@ impl AcpRuntime {
         }
         if method == "session/request_permission" {
             observation.assistant_suffix.observe_tool_activity();
-            observation.unsupported_interaction |= is_questionnaire_permission_request(params);
+            observation.unsupported_interaction |=
+                classify_permission_request(self.adapter_kind(), params)
+                    != AcpPermissionRequestKind::Execution;
             return Ok(None);
         }
         if method != "session/update" {
@@ -6825,6 +6855,19 @@ pub(crate) fn runtime_compatibility_digest(
         "externalMcpServers": external_mcp_servers,
         "attachmentOutputRoot": attachment_authorization.output_root,
     });
+    if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
+        compatibility["nativeQuestionnairePolicy"] = json!("no-ask-user-v1");
+    }
+    if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
+        compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
+    }
+    if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli
+        && crate::opencode_compat::Generation::from_version(
+            frozen_runtime.reported_version.as_deref(),
+        ) == Some(crate::opencode_compat::Generation::V2)
+    {
+        compatibility["nativeQuestionnairePolicy"] = json!("deny-question-v1");
+    }
     if is_grok {
         let compatibility = compatibility
             .as_object_mut()
@@ -6852,6 +6895,7 @@ pub(crate) fn runtime_compatibility_digest(
             json!(crate::cline::runtime_configuration_digest()?);
     }
     if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
+        compatibility["nativeQuestionnairePolicy"] = json!("deny-ask-user-question-v1");
         compatibility["zcodeNativeConfigurationDigest"] = json!(
             crate::zcode::NativeConfig::load_for_executable(
                 &execution_root,
@@ -7118,12 +7162,9 @@ fn configure_runtime_command(
             if let Some(root) = run_tmp {
                 command.arg("--add-dir").arg(root);
             }
+            command.arg("--no-ask-user");
             if isolated {
-                command.args([
-                    "--no-custom-instructions",
-                    "--no-ask-user",
-                    "--available-tools=",
-                ]);
+                command.args(["--no-custom-instructions", "--available-tools="]);
             }
             if !external_mcp_servers.is_empty() {
                 let config =
@@ -7204,6 +7245,7 @@ fn configure_runtime_command(
                     });
                 }
                 AdapterKind::QwenCode => {
+                    command.arg("--exclude-tools=ask_user_question");
                     command.arg("--approval-mode").arg(if legacy_read_only {
                         "plan"
                     } else {
@@ -8148,6 +8190,12 @@ pub fn intercepted_action_request(
     params: &Value,
     observed: Option<&ObservedAcpToolContext>,
 ) -> Result<InterceptedAcpActionRequest> {
+    validate_permission_request_identity(context.expected_session_id, params)?;
+    if classify_permission_request_with_context(context.adapter_kind, params, observed)
+        != AcpPermissionRequestKind::Execution
+    {
+        bail!("Native questionnaires are user input, not execution authorization");
+    }
     let session_id = params
         .get("sessionId")
         .and_then(Value::as_str)
@@ -8501,24 +8549,149 @@ pub fn rejection_result(request: &Value) -> Result<Value> {
     approval_result(request, option_id)
 }
 
-/// MiniMax encodes questionnaire answers as allow_once permission options.
-/// They are user input, never execution authorization (including bypass mode).
-pub fn is_questionnaire_permission_request(request: &Value) -> bool {
-    request
-        .get("options")
-        .and_then(Value::as_array)
-        .is_some_and(|options| {
-            options.iter().any(|option| {
-                option
-                    .get("optionId")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| id.starts_with("questionnaire:"))
-            })
-        })
+pub fn validate_permission_request_identity(
+    expected_session_id: &str,
+    request: &Value,
+) -> Result<()> {
+    if request.get("sessionId").and_then(Value::as_str) != Some(expected_session_id) {
+        bail!("ACP permission request is outside the active Native Session");
+    }
+    if request
+        .pointer("/toolCall/toolCallId")
+        .and_then(Value::as_str)
+        .is_none_or(|id| id.trim().is_empty())
+    {
+        bail!("ACP permission request has no stable toolCallId");
+    }
+    Ok(())
 }
 
-pub fn legacy_approval_result(request: &Value, approved: bool) -> Result<Value> {
-    if is_questionnaire_permission_request(request) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpPermissionRequestKind {
+    Execution,
+    Questionnaire,
+    MalformedQuestionnaire,
+}
+
+pub fn classify_permission_request_with_context(
+    adapter_kind: AdapterKind,
+    request: &Value,
+    observed: Option<&ObservedAcpToolContext>,
+) -> AcpPermissionRequestKind {
+    let direct = classify_permission_request(adapter_kind, request);
+    // Sparse ACP permission frames may omit metadata already observed for the
+    // exact Session/Prompt/toolCallId. Losing that metadata must not admit Submit.
+    if adapter_kind == AdapterKind::QwenCode
+        && let Some(observed) = observed
+        && let Some(meta) = &observed.stable_meta
+    {
+        let mut proposal = request.clone();
+        proposal["toolCall"]["_meta"] = meta.clone();
+        if let Some(raw_input) = &observed.raw_input {
+            proposal["toolCall"]["rawInput"] = raw_input.clone();
+        }
+        let prior = classify_permission_request(adapter_kind, &proposal);
+        if prior != AcpPermissionRequestKind::Execution {
+            if request
+                .pointer("/toolCall/_meta")
+                .is_some_and(|current| current != meta)
+            {
+                return AcpPermissionRequestKind::MalformedQuestionnaire;
+            }
+            return prior;
+        }
+    }
+    direct
+}
+
+/// Classification is adapter-specific. A known question with missing or
+/// contradictory fields must not fall back to execution authorization.
+pub fn classify_permission_request(
+    adapter_kind: AdapterKind,
+    request: &Value,
+) -> AcpPermissionRequestKind {
+    use AcpPermissionRequestKind::*;
+    let options = request.get("options").and_then(Value::as_array);
+    // Preserve the existing MiniMax questionnaire fallback across adapters.
+    if options.is_some_and(|options| {
+        options.iter().any(|option| {
+            option
+                .get("optionId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.starts_with("questionnaire:"))
+        })
+    }) {
+        return Questionnaire;
+    }
+    let tool = &request["toolCall"];
+    let meta = &tool["_meta"];
+    let valid = match adapter_kind {
+        AdapterKind::KimiCodeCli if tool["title"] == "AskUserQuestion" => {
+            // kimi-code 2.1.1's ACP fallback exposes only the first question.
+            options.is_some_and(|options| {
+                options.len() >= 2
+                    && options[..options.len() - 1]
+                        .iter()
+                        .enumerate()
+                        .all(|(index, option)| {
+                            option["optionId"] == format!("q0_opt_{index}")
+                                && option["kind"] == "allow_once"
+                        })
+                    && options.last().is_some_and(|option| {
+                        option["optionId"] == "q0_skip" && option["kind"] == "reject_once"
+                    })
+                    && meta
+                        .get("toolName")
+                        .is_none_or(|name| name == "AskUserQuestion")
+            })
+        }
+        AdapterKind::QwenCode
+            if meta["toolName"] == "ask_user_question"
+                || meta["qwenInteractionKind"] == "user_question"
+                || meta.get("qwenQuestions").is_some() =>
+        {
+            meta["toolName"] == "ask_user_question"
+                && meta["qwenInteractionKind"] == "user_question"
+                && meta
+                    .get("qwenQuestions")
+                    .and_then(Value::as_array)
+                    .is_some_and(|questions| {
+                        !questions.is_empty()
+                            && questions.iter().all(|question| {
+                                question
+                                    .get("question")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|text| !text.trim().is_empty())
+                                    && question
+                                        .get("options")
+                                        .and_then(Value::as_array)
+                                        .is_some_and(|options| !options.is_empty())
+                            })
+                    })
+                && tool.pointer("/rawInput/questions") == meta.get("qwenQuestions")
+                && options.is_some_and(|options| {
+                    options.len() == 2
+                        && options[0]["optionId"] == "proceed_once"
+                        && options[0]["kind"] == "allow_once"
+                        && options[1]["optionId"] == "cancel"
+                        && options[1]["kind"] == "reject_once"
+                })
+        }
+        _ => return Execution,
+    };
+    if valid {
+        Questionnaire
+    } else {
+        MalformedQuestionnaire
+    }
+}
+
+pub fn legacy_approval_result(
+    adapter_kind: AdapterKind,
+    request: &Value,
+    approved: bool,
+) -> Result<Value> {
+    if classify_permission_request(adapter_kind, request) != AcpPermissionRequestKind::Execution {
         return Ok(json!({"outcome": {"outcome": "cancelled"}}));
     }
     let options = request
@@ -9494,11 +9667,16 @@ mod compaction_detector_tests {
                         json!([
                             {"action":"*","resource":"*","effect":mode},
                             {"action":"shell","resource":"*","effect":"allow"},
-                            {"action":"skill","resource":"*","effect":"allow"}
+                            {"action":"skill","resource":"*","effect":"allow"},
+                            {"action":"question","resource":"*","effect":"deny"}
                         ])
                     );
                     assert_eq!(
                         config["agents"]["plan"]["permissions"],
+                        config["permissions"]
+                    );
+                    assert_eq!(
+                        config["agents"]["build"]["permissions"],
                         config["permissions"]
                     );
                 }
@@ -15149,6 +15327,129 @@ while IFS= read -r ignored; do :; done
         .unwrap();
         assert_eq!(first, process_input_digest);
 
+        // A process-policy upgrade replaces Copilot Hosts, without changing
+        // the Native Session binding or other adapters' compatibility inputs.
+        let mut copilot = frozen.clone();
+        copilot.adapter_kind = AdapterKind::CopilotCli;
+        copilot.permissions.adapter_kind = AdapterKind::CopilotCli;
+        copilot.permissions.values = json!({"allow_all":"on"});
+        let copilot_digest = runtime_compatibility_digest(
+            &copilot,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+        )
+        .unwrap();
+        let mut old_inputs = json!({
+            "schemaVersion":4, "adapterKind":copilot.adapter_kind,
+            "hostConfigDigest":copilot.host_config_digest, "codebuddyLaunchModel":null,
+            "executionRoot":root.canonicalize().unwrap(), "workspace":workspace,
+            "permissionSemantics":PermissionSemantics::RuntimeManagedV2,
+            "builtinToolContractVersion":BUILTIN_TOOL_CONTRACT_VERSION,
+            "externalMcpServers":{}, "attachmentOutputRoot":attachment_authorization.output_root,
+        });
+        assert_ne!(copilot_digest, canonical_json_digest(&old_inputs).unwrap());
+        old_inputs["nativeQuestionnairePolicy"] = json!("no-ask-user-v1");
+        assert_eq!(copilot_digest, canonical_json_digest(&old_inputs).unwrap());
+        for isolated in [false, true] {
+            let mut command = Command::new(&executable);
+            configure_runtime_command(
+                &mut command,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &copilot,
+                isolated,
+                &BTreeMap::new(),
+                &root,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let args = command.as_std().get_args().collect::<Vec<_>>();
+            assert!(args.iter().any(|arg| *arg == "--no-ask-user"));
+            assert_eq!(
+                args.iter().any(|arg| *arg == "--available-tools="),
+                isolated
+            );
+            assert_eq!(
+                args.iter().any(|arg| *arg == "--no-custom-instructions"),
+                isolated
+            );
+        }
+
+        // Qwen's tool exclusion is also a Host policy, independent of the
+        // Native Session binding and ordinary permission mode.
+        let mut qwen = frozen.clone();
+        qwen.adapter_kind = AdapterKind::QwenCode;
+        qwen.permissions.adapter_kind = AdapterKind::QwenCode;
+        qwen.permissions.values = json!({"approval_mode":"yolo"});
+        let qwen_digest = runtime_compatibility_digest(
+            &qwen,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+        )
+        .unwrap();
+        old_inputs["adapterKind"] = json!(AdapterKind::QwenCode);
+        old_inputs
+            .as_object_mut()
+            .unwrap()
+            .remove("nativeQuestionnairePolicy");
+        assert_ne!(qwen_digest, canonical_json_digest(&old_inputs).unwrap());
+        old_inputs["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
+        assert_eq!(qwen_digest, canonical_json_digest(&old_inputs).unwrap());
+        for isolated in [false, true] {
+            let mut command = Command::new(&executable);
+            configure_runtime_command(
+                &mut command,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &qwen,
+                isolated,
+                &BTreeMap::new(),
+                &root,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let args = command.as_std().get_args().collect::<Vec<_>>();
+            assert!(args.iter().any(|arg| *arg == "--acp"));
+            assert!(
+                args.iter()
+                    .any(|arg| *arg == "--exclude-tools=ask_user_question")
+            );
+            assert!(args.iter().any(|arg| *arg == "yolo"));
+            assert!(!args.iter().any(|arg| *arg == "--available-tools="));
+        }
+
+        // Only the V2 launch policy changes; V1 and native Session identity
+        // retain their existing compatibility inputs.
+        for (runtime, policy) in [(&v1, None), (&v2, Some("deny-question-v1"))] {
+            let digest = runtime_compatibility_digest(
+                runtime,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &BTreeMap::new(),
+                &attachment_authorization,
+            )
+            .unwrap();
+            old_inputs["adapterKind"] = json!(AdapterKind::OpencodeCli);
+            old_inputs["hostConfigDigest"] = json!(runtime.host_config_digest);
+            old_inputs
+                .as_object_mut()
+                .unwrap()
+                .remove("nativeQuestionnairePolicy");
+            if let Some(policy) = policy {
+                assert_ne!(digest, canonical_json_digest(&old_inputs).unwrap());
+                old_inputs["nativeQuestionnairePolicy"] = json!(policy);
+            }
+            assert_eq!(digest, canonical_json_digest(&old_inputs).unwrap());
+        }
+
         let mut upgraded = frozen.clone();
         upgraded.reported_version = Some("0.120.52".to_string());
         upgraded.capabilities = vec!["session.load".to_string(), "session.new".to_string()];
@@ -15397,6 +15698,95 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn approval_selects_the_exact_native_option_id() {
+        for (adapter, fixture) in [
+            (
+                AdapterKind::KimiCodeCli,
+                include_str!("../tests/fixtures/runtime-questionnaire/kimi-2.1.1.json"),
+            ),
+            (
+                AdapterKind::QwenCode,
+                include_str!("../tests/fixtures/runtime-questionnaire/qwen-0.25.0.json"),
+            ),
+        ] {
+            let question: Value = serde_json::from_str(fixture).unwrap();
+            if adapter == AdapterKind::QwenCode {
+                let observed = ObservedAcpToolContext {
+                    native_kind: Some("other".into()),
+                    raw_input: Some(question["toolCall"]["rawInput"].clone()),
+                    stable_meta: Some(question["toolCall"]["_meta"].clone()),
+                    locations: None,
+                };
+                let mut sparse = question.clone();
+                sparse["toolCall"].as_object_mut().unwrap().remove("_meta");
+                assert_eq!(
+                    classify_permission_request_with_context(adapter, &sparse, Some(&observed)),
+                    AcpPermissionRequestKind::Questionnaire
+                );
+                sparse["toolCall"]["_meta"] = json!({"toolName":"write_file"});
+                assert_eq!(
+                    classify_permission_request_with_context(adapter, &sparse, Some(&observed)),
+                    AcpPermissionRequestKind::MalformedQuestionnaire
+                );
+            }
+            assert_eq!(
+                classify_permission_request(adapter, &question),
+                AcpPermissionRequestKind::Questionnaire
+            );
+            assert!(
+                validate_permission_request_identity("questionnaire-session", &question).is_ok()
+            );
+            assert!(validate_permission_request_identity("another-session", &question).is_err());
+            let mut malformed = question.clone();
+            malformed["options"] = json!([{"optionId":"submit","kind":"allow_once"}]);
+            assert_eq!(
+                classify_permission_request(adapter, &malformed),
+                AcpPermissionRequestKind::MalformedQuestionnaire
+            );
+            let mut conflicting = question.clone();
+            conflicting["toolCall"]["_meta"] =
+                json!({"toolName":"write_file","qwenInteractionKind":"user_question"});
+            assert_eq!(
+                classify_permission_request(adapter, &conflicting),
+                AcpPermissionRequestKind::MalformedQuestionnaire
+            );
+            for params in [&question, &malformed, &conflicting] {
+                for approved in [false, true] {
+                    assert_eq!(
+                        legacy_approval_result(adapter, params, approved).unwrap(),
+                        json!({"outcome":{"outcome":"cancelled"}})
+                    );
+                }
+                let context = InterceptedAcpActionContext {
+                    adapter_kind: adapter,
+                    agent_run_id: "run",
+                    execution_epoch: 1,
+                    expected_session_id: "questionnaire-session",
+                    expected_prompt_id: "prompt",
+                    execution_root: Path::new("/project"),
+                    permission_semantics: PermissionSemantics::RuntimeManagedV2,
+                };
+                assert!(
+                    intercepted_action_request(&context, json!("request"), params, None).is_err()
+                );
+            }
+            // Neither a suggestive title nor multiple allow_once options is
+            // enough to turn an ordinary command/MCP authorization into input.
+            let mut ordinary = question.clone();
+            ordinary["toolCall"]["title"] = json!("Question about a command");
+            ordinary["toolCall"]["_meta"] = json!({"toolName":"run_shell_command"});
+            assert_eq!(
+                classify_permission_request(adapter, &ordinary),
+                AcpPermissionRequestKind::Execution
+            );
+            assert_eq!(
+                legacy_approval_result(adapter, &ordinary, true).unwrap()["outcome"]["optionId"],
+                question["options"][0]["optionId"]
+            );
+            assert_eq!(
+                classify_permission_request(AdapterKind::CopilotCli, &question),
+                AcpPermissionRequestKind::Execution
+            );
+        }
         let request = json!({
             "options": [
                 {"optionId": "once", "kind": "allow_once", "name": "  Runtime Allow once  ", "label": "unused"},
@@ -15430,13 +15820,16 @@ while IFS= read -r ignored; do :; done
             approval_result(&request, "reject").expect("denial should map"),
             json!({"outcome": {"outcome": "selected", "optionId": "reject"}})
         );
-        assert!(!is_questionnaire_permission_request(&request));
         assert_eq!(
-            legacy_approval_result(&request, true).unwrap(),
+            classify_permission_request(AdapterKind::MinimaxCodeCli, &request),
+            AcpPermissionRequestKind::Execution
+        );
+        assert_eq!(
+            legacy_approval_result(AdapterKind::MinimaxCodeCli, &request, true).unwrap(),
             approval_result(&request, "once").unwrap()
         );
         assert_eq!(
-            legacy_approval_result(&request, false).unwrap(),
+            legacy_approval_result(AdapterKind::MinimaxCodeCli, &request, false).unwrap(),
             approval_result(&request, "reject").unwrap()
         );
         // Upstream's simple-single-select fallback labels every answer allow_once.
@@ -15454,10 +15847,14 @@ while IFS= read -r ignored; do :; done
         ] {
             let question =
                 json!({"toolCall":{"toolCallId":"ask-1","kind":"other"},"options":options});
-            assert!(is_questionnaire_permission_request(&question));
+            assert_eq!(
+                classify_permission_request(AdapterKind::MinimaxCodeCli, &question),
+                AcpPermissionRequestKind::Questionnaire
+            );
             for approved in [true, false] {
                 assert_eq!(
-                    legacy_approval_result(&question, approved).unwrap(),
+                    legacy_approval_result(AdapterKind::MinimaxCodeCli, &question, approved)
+                        .unwrap(),
                     json!({"outcome":{"outcome":"cancelled"}})
                 );
             }

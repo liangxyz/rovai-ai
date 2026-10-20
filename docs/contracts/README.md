@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-18
+last_updated: 2026-10-20
 ---
 
 # 长期接口合同
@@ -154,7 +154,10 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v64（当前）](runtime-launch-and-verification-v64.md) | 同程序版本与静态证据复用、单项检查必要工作、MiniMax 健康与完整目录分离；不增加启动健康检查 |
+| [Runtime Launch and Verification v67（当前）](runtime-launch-and-verification-v67.md) | ZCode Session toolDenylist、OpenCode V2 question deny；只替换 Host，保留原生会话 |
+| [Runtime Launch and Verification v66（历史）](runtime-launch-and-verification-v66.md) | Qwen ACP 排除 ask_user_question，Host 策略替换与原会话保留；继承 v65 问卷兜底 |
+| [Runtime Launch and Verification v65（历史）](runtime-launch-and-verification-v65.md) | Claude/Copilot 正式禁用原生问卷，Kimi/Qwen 在审批前取消，保留归属与不支持终态 |
+| [Runtime Launch and Verification v64（历史）](runtime-launch-and-verification-v64.md) | 同程序版本与静态证据复用、单项检查必要工作、MiniMax 健康与完整目录分离；不增加启动健康检查 |
 | [Runtime Launch and Verification v63（历史）](runtime-launch-and-verification-v63.md) | Pi 入站单帧 64 MiB、独立出站/stderr 预算、有类型连接失败及既有输入保护 |
 | [Runtime Launch and Verification v62（历史）](runtime-launch-and-verification-v62.md) | 移除原生会话重建提示、展示字段及公聊/单聊事件历史查询；恢复行为保持 |
 | [Runtime Launch and Verification v61（历史）](runtime-launch-and-verification-v61.md) | 移除 Desktop / Mobile 会话队员列表中的重置入口及其弹窗；启动与恢复保持 |

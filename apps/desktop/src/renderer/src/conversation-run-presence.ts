@@ -113,7 +113,44 @@ function currentNarrationLine(text: string): string {
   return text.replace(/\r\n?/g, '\n').split('\n').findLast(line => line.trim())?.trim() ?? ''
 }
 
-export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = []): RunPresencePreview {
+const fallbackCopy = {
+  connecting: ['正在和{0}接上线…', '正在联系{0}…', '正在与{0}会合…'],
+  working: ['{0}正在为你推进…', '{0}正在推进这项任务…', '{0}正与你一起推进…']
+} as const
+
+// Keep only recent renderer-local choices; a full reload draws again.
+const fallbackChoices = new Map<string, number>()
+const maxFallbackChoices = 512
+
+/** Draw independently per Run/phase, then retain the index across ticks and locales. */
+function fallbackText(runId: string, phase: keyof typeof fallbackCopy, name: string): string {
+  const choices = fallbackCopy[phase]
+  const key = `${phase}:${runId}`
+  const index = fallbackChoices.get(key) ?? Math.floor(Math.random() * choices.length)
+  fallbackChoices.delete(key)
+  fallbackChoices.set(key, index)
+  if (fallbackChoices.size > maxFallbackChoices) fallbackChoices.delete(fallbackChoices.keys().next().value!)
+  return uiAttribute(choices[index], name)
+}
+
+/** Only authoritative start/end timestamps contribute; unknown time stays absent. */
+export function runPresenceElapsedSeconds(run: Pick<AgentRunView, 'startedAt' | 'endedAt' | 'status'>, now: number): number | null {
+  const start = run.startedAt ? Date.parse(run.startedAt) : NaN
+  const live = run.status === 'running' || run.status === 'waiting'
+  const end = run.endedAt ? Date.parse(run.endedAt) : live ? now : NaN
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.floor((end - start) / 1000)) : null
+}
+
+export function formatRunPresenceDuration(seconds: number): string {
+  const s = seconds % 60
+  const m = Math.floor(seconds / 60) % 60
+  const h = Math.floor(seconds / 3600)
+  if (h) return uiAttribute('{0}时 {1}分 {2}秒', h, String(m).padStart(2, '0'), String(s).padStart(2, '0'))
+  if (seconds >= 60) return uiAttribute('{0}分 {1}秒', m, String(s).padStart(2, '0'))
+  return uiAttribute('{0}秒', s)
+}
+
+export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = [], name = run.agentId): RunPresencePreview {
   if (run.status === 'failed') {
     if (run.failure?.code === 'context_payload_too_large') {
       return { kind: 'error', text: uiAttribute('输入内容过大 · 查看详情') }
@@ -138,6 +175,6 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
     iconKind: latest.step.publicCommand && latest.step.iconKind === 'unknown' ? 'terminal' : latest.step.iconKind
   }
   if (latest?.kind === 'narration') return { kind: 'narration', text: currentNarrationLine(latest.body) }
-  if (initializing) return { kind: 'status', text: uiAttribute('正在连接智能体…') }
-  return { kind: 'status', text: progress.runtimeThinkingTitle || uiAttribute('正在处理你的请求…') }
+  if (initializing) return { kind: 'status', text: fallbackText(run.id, 'connecting', name) }
+  return { kind: 'status', text: progress.runtimeThinkingTitle || fallbackText(run.id, 'working', name) }
 }

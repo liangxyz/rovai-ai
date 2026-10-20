@@ -58,6 +58,9 @@ pub fn intercepted_action_request(
         .and_then(Value::as_str)
         .filter(|name| !name.trim().is_empty())
         .context("Claude permission request has no tool name")?;
+    if tool_name == "AskUserQuestion" {
+        bail!("Native questionnaires are user input, not execution authorization");
+    }
     let tool_input = request
         .get("input")
         .filter(|input| input.is_object())
@@ -323,6 +326,7 @@ mod tests {
             assert!(convert(&value).is_err());
         }
         for (pointer, invalid) in [
+            ("tool_name", json!("AskUserQuestion")),
             ("tool_use_id", Value::Null),
             ("tool_use_id", json!("")),
             ("input", json!([])),

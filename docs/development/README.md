@@ -135,7 +135,7 @@ App，以受控本机 API 和时钟验证首帧画布、就绪交接与 authorit
 
 消息区队员占位运行 `pnpm test:run-presence-ui`：隔离 Chrome 挂载生产 ThreadWorkspace，覆盖消息顺序、
 流式单行、停止默认／悬浮色与确认、重试受理后暂缓调度期间切群／刷新、后继失败、执行台多次授权、丢失回执、草稿保留、双主题、三种桌面尺寸、200% 等效缩放及粗指针。`ROVAI_PRESENCE_UI_OUTPUT` 保留截图与报告；
-设置 `ROVAI_PRESENCE_REFERENCE_HTML` 可对照 User 确认的 v10 HTML 停止区分隔几何及排版；停止默认中性色、悬浮红色按后续 v8 修正单独验证。
+执行条验证覆盖浅灰完整单行、独立转圈、稳定中英文候选、可点击计时和整行悬浮停止色；其余界面保持生产组件。
 非默认 Chrome 路径使用 `ROVAI_TEST_CHROME`。夹具只持久化模拟服务端数据，不启动 Core 或模型；真实 SQLite 受理、重开及未领取窗口由既有 `user_continuation_preserves_source_and_claims_independent_fifo_batches` owner 覆盖。
 
 记忆工作区运行 `pnpm test:memory-workspace-ui`：隔离 Chrome 挂载生产 MemoryLibrary、通知和导航组件，

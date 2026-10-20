@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-10-18
+last_updated: 2026-10-20
 ---
 
 # Built-in Tool Runtime Architecture
@@ -413,11 +413,14 @@ status 和 stdin 写入都不是 accepted evidence。Adapter 只接受带预期 
 
 Claude Code 的打印进程同时读写 stream-json。审批使用 stdout 的原生 can_use_tool 控制请求和
 stdin 的 control_response，进程所有权绑定 Run/epoch/Native Session，初始化成功后才发送任务。
-request_id 用于回复，tool_use_id 关联实际工具结果。Core 转换为既有 Action/Approval；Dock 的
+request_id 用于回复，tool_use_id 关联实际工具结果。普通执行权限转换为既有 Action/Approval；Dock 的
 允许一次回填原 input，拒绝回填 deny；原生建议允许且用户选择记忆时，原样回填所选 permission update，
 由 Claude 保存和匹配规则。响应 write/flush 完成才 ACK Runtime Delivery。
 
-控制通道仅保存待处理请求，完成、取消或断线后清理。普通工具展示状态仍由输出解析器拥有。
+正式启动禁用 AskUserQuestion；意外问卷在转换前 deny，拒绝过的问卷 ID 与不支持观察保留到本轮终态，
+用于一次回执和防止非空 final 掩盖未承接提问。普通待审批请求在完成、取消或断线后清理。
+具体问卷边界见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
+普通工具展示状态仍由输出解析器拥有。
 审批不经过 Built-in 业务 IPC、不按工具输入反查身份，也没有累计工具调用额度；用户原有 Hook
 由 Claude 原生配置处理。业务 `rovai send` 继续由现有 Run lease 认证。
 
