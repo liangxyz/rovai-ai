@@ -66,11 +66,13 @@ export const WEB_OPERATIONS = [
   'members.reorder',
   'runtime.subsystems.retry',
   'notifications.inbox',
+  'notifications.threadInterruptions',
   'notifications.changesSince',
   'notifications.preference.get',
   'notifications.preference.update',
   'notifications.acknowledge',
   'notifications.acknowledgeVisibleSources',
+  'notifications.acknowledgeThreadInterruptions',
   'diagnostics.check',
   'diagnostics.export',
   'skills.reconcile',
@@ -98,6 +100,7 @@ export const WEB_OPERATIONS = [
   'mcp.import.scan',
   'mcp.import.commit',
   'runtime.startup.get',
+  'runtime.environment.get',
   'member.runtimeEnvironment.get',
   'conversations.memberSession.get',
   'conversations.restartNativeSession',
@@ -154,6 +157,7 @@ export const WEB_OPERATIONS = [
   'thread.messages.page',
   'thread.messages.anchors',
   'thread.messages.anchorPreview',
+  'thread.messages.replies',
   'thread.messages.around',
   'thread.messages.find',
   'members.list',
@@ -200,6 +204,10 @@ export const WEB_OPERATIONS = [
   'members.create',
   'preferences.tasks.get',
   'preferences.tasks.set',
+  'teams.list',
+  'teams.save',
+  'teams.delete',
+  'preferences.newConversation.setTeam',
   'preferences.newConversation.get',
   'preferences.newConversation.setDefaults',
   'preferences.newConversation.setOneClick',
@@ -221,6 +229,8 @@ export const WEB_OPERATIONS = [
 export type WebOperation = typeof WEB_OPERATIONS[number]
 
 const RECONCILABLE_COMMANDS = new Set<WebOperation>([
+  'teams.save',
+  'teams.delete',
   'threads.rename',
   'threads.delete',
   'threads.retryDeletion',
@@ -231,6 +241,7 @@ const RECONCILABLE_COMMANDS = new Set<WebOperation>([
   'notifications.preference.update',
   'notifications.acknowledge',
   'notifications.acknowledgeVisibleSources',
+  'notifications.acknowledgeThreadInterruptions',
   'skills.reconcile',
 
   'singleChat.open', 'singleChat.send', 'singleChat.end', 'singleChat.pendingInputs.edit',
@@ -270,7 +281,7 @@ const RECONCILABLE_COMMANDS = new Set<WebOperation>([
 export type ConnectionState = 'connecting' | 'live' | 'offline' | 'expired'
 type PendingCommand = { operation: WebOperation; params: unknown; resolve(value: unknown): void; reject(error: unknown): void }
 export type UploadProgress = { id: string; name: string; phase: 'hashing' | 'transferring' | 'binding' | 'unknown' | 'received'; percent: number; cancelled: boolean }
-type UploadTarget = { kind: 'single_chat'; conversationId: string }
+type UploadTarget = { kind: 'pasted_text' } | { kind: 'single_chat'; conversationId: string }
   | { kind: 'single_chat_pending'; conversationId: string; pendingInputId: string; editToken: string }
 type UploadIntent = { commandId: string; threadId: string; expectedRevision: number; target?: UploadTarget; displayName: string; byteSize: number; sha256: string }
 type PendingUpload = { cancelled?: boolean; signal?: AbortSignal; intent: UploadIntent; data: FormData | null; resolve(draft: unknown): void; reject(error: unknown): void }
@@ -299,7 +310,7 @@ export class InvalidationDecoder {
           const messages = Array.isArray(payload.messages) ? payload.messages.filter(change =>
             typeof change.threadId === 'string' && typeof change.indexChanged === 'boolean'
             && Number.isSafeInteger(change.throughGlobalSequence)) : []
-          this.#changes.push({ messages, ...(payload.tasksChanged === true ? { tasksChanged: true } : {}) })
+          this.#changes.push({ messages, ...(payload.tasksChanged === true ? { tasksChanged: true } : {}), ...(payload.notificationsChanged === true ? { notificationsChanged: true } : {}) })
         }
       }
     }
@@ -721,24 +732,28 @@ export class ConsoleClient {
     } catch { this.#requireRecovery() /* Still unknown if reconciliation itself could not complete. */ }
   }
 
-  async uploadFile(threadId: string, expectedRevision: number, file: File): Promise<LocalAttachmentSourceView> {
+  async uploadFile(threadId: string, expectedRevision: number, file: File, target?: UploadTarget): Promise<LocalAttachmentSourceView> {
     const source = await this.uploadTo<{
       id: string; sourcePath: string; displayName: string; kind: 'file' | 'directory'
       mediaType: string | null; observedByteSize: number | null
-    }>(threadId, expectedRevision, file)
+      generatedBy?: 'long_text_paste'; pastedTextPreview?: string
+    }>(threadId, expectedRevision, file, target)
     return {
       id: source.id, sourcePath: source.sourcePath, displayName: source.displayName, kind: source.kind,
       mediaType: source.mediaType, byteSize: source.observedByteSize,
       fileCount: source.kind === 'file' ? 1 : null,
       previewKind: source.mediaType?.startsWith('image/') ? 'image' : 'none',
-      availability: 'available'
+      availability: 'available',
+      ...(source.generatedBy ? { generatedBy: source.generatedBy } : {}),
+      ...(source.pastedTextPreview !== undefined ? { pastedTextPreview: source.pastedTextPreview } : {})
     }
   }
 
   async uploadTo<T>(threadId: string, expectedRevision: number, file: File, target?: UploadTarget): Promise<T> {
     if (!this.authenticated) throw new SessionRequired()
     this.#assertConnected()
-    if (file.size > this.#uploadMaxBytes) throw new Error(`单个上传文件不能超过 ${this.#uploadMaxBytes / (1024 * 1024)} MiB（${this.#uploadMaxBytes.toLocaleString('en-US')} 字节）。`)
+    const maxBytes = target?.kind === 'pasted_text' ? Math.min(this.#uploadMaxBytes, 25 * 1024 * 1024) : this.#uploadMaxBytes
+    if (file.size > maxBytes) throw new Error(`单个上传文件不能超过 ${maxBytes / (1024 * 1024)} MiB（${maxBytes.toLocaleString('en-US')} 字节）。`)
     const scope = this.editingScope
     let commandId = newCommandId()
     const controller = new AbortController()
@@ -751,7 +766,9 @@ export class ConsoleClient {
     const matchesFile = (intent: unknown): boolean => {
       const previous = intent as UploadIntent
       return previous.threadId === threadId && previous.sha256 === digest && previous.displayName === file.name && previous.byteSize === file.size
-        && previous.target?.kind === target?.kind && previous.target?.conversationId === target?.conversationId
+        && previous.target?.kind === target?.kind
+        && (previous.target?.kind !== 'single_chat' && previous.target?.kind !== 'single_chat_pending'
+          || (target?.kind === 'single_chat' || target?.kind === 'single_chat_pending') && previous.target.conversationId === target.conversationId)
         && (previous.target?.kind !== 'single_chat_pending' || target?.kind === 'single_chat_pending'
           && previous.target.pendingInputId === target.pendingInputId && previous.target.editToken === target.editToken)
     }
@@ -1119,7 +1136,7 @@ export class ConsoleClient {
             if (done) break
             if (frames.push(decoder.decode(value, { stream: true }))) {
               const changes = frames.takeChanges()
-              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
+              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
               void this.reconcilePending()
             }
           }

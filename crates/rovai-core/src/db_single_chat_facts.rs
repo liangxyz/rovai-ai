@@ -86,7 +86,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::Current(_)
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.projection_schema_version == 158
             ),
             "Single Chat facts admission failed"
         );
@@ -102,6 +103,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 // Only synthetic migration fixtures downgrade; product input always stays frozen.
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    notification_interruption::downgrade_for_test(c);
     let applied: bool = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=208)",
@@ -214,6 +216,11 @@ pub(super) fn assert_upgrade(db: &mut Database) {
         .execute_batch("DROP TRIGGER reject_single_chat_facts_receipt;")
         .unwrap();
     migrate(db).unwrap();
+    notification_interruption::migrate(db).unwrap();
+    notification_interruption::migrate_exit_attention(db).unwrap();
+    shared_environment::migrate(db).unwrap();
+    web_pasted_text::migrate(db).unwrap();
+    teams::migrate(db).unwrap();
     assert_eq!(
         evidence,
         public_history_claim_preserved_evidence_digest(db.connection()).unwrap()

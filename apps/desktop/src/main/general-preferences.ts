@@ -4,15 +4,16 @@ import { dirname } from 'node:path'
 import type {
   ExecutionConsolePlacement,
   GeneralPreferencesSnapshot,
-  InterfaceLanguage,
+  InterfaceLanguagePreference,
+  InterfaceLanguageSnapshot,
   NewConversationDefaults,
   SettingsSection,
   StartupLocationMode,
   StructuredError
 } from '@contracts'
 
-import { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isInterfaceLanguage, isNewConversationDefaults } from '../shared/general-preferences-model'
-export { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isInterfaceLanguage, isNewConversationDefaults, isStartupLocationMode, isSettingsSection } from '../shared/general-preferences-model'
+import { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, resolveGeneralPreferences, storedGeneralPreferences, isExecutionConsolePlacement, isInterfaceLanguagePreference, isNewConversationDefaults } from '../shared/general-preferences-model'
+export { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences, isExecutionConsolePlacement, isInterfaceLanguagePreference, isNewConversationDefaults, isStartupLocationMode, isSettingsSection } from '../shared/general-preferences-model'
 
 export async function readGeneralPreferences(filePath: string): Promise<GeneralPreferencesSnapshot> {
   return (await readGeneralPreferencesResult(filePath)).snapshot
@@ -24,7 +25,8 @@ async function readGeneralPreferencesResult(filePath: string): Promise<{
 }> {
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8')) as unknown
-    const snapshot = parseGeneralPreferences(parsed)
+    const stored = parseGeneralPreferences(parsed)
+    const snapshot = stored ? resolveGeneralPreferences(stored) : null
     return snapshot
       ? { snapshot, degradation: null }
       : {
@@ -65,57 +67,82 @@ export async function writePrivateJson(filePath: string, value: unknown): Promis
 export class GeneralPreferencesStore {
   readonly #filePath: string
   #snapshot: GeneralPreferencesSnapshot
-  readonly loadDegradation: StructuredError | null
+  readonly #languages: () => readonly string[]
+  readonly #listeners = new Set<(snapshot: InterfaceLanguageSnapshot) => void>()
+  get loadDegradation(): StructuredError | null { return this.#snapshot.readError }
   #writeTail: Promise<void> = Promise.resolve()
 
   private constructor(
     filePath: string,
     snapshot: GeneralPreferencesSnapshot,
-    loadDegradation: StructuredError | null = null
+    loadDegradation: StructuredError | null = null,
+    languages: () => readonly string[] = () => []
   ) {
     this.#filePath = filePath
-    this.#snapshot = snapshot
-    this.loadDegradation = loadDegradation
+    this.#languages = languages
+    this.#snapshot = { ...snapshot, readError: loadDegradation }
+    this.refreshInterfaceLanguage()
   }
 
-  static async load(filePath: string): Promise<GeneralPreferencesStore> {
+  static async load(filePath: string, languages: () => readonly string[] = () => []): Promise<GeneralPreferencesStore> {
     const result = await readGeneralPreferencesResult(filePath)
-    return new GeneralPreferencesStore(filePath, result.snapshot, result.degradation)
+    return new GeneralPreferencesStore(filePath, result.snapshot, result.degradation, languages)
   }
 
-  static defaults(filePath: string): GeneralPreferencesStore {
-    return new GeneralPreferencesStore(filePath, { ...DEFAULT_GENERAL_PREFERENCES })
+  static defaults(filePath: string, languages: () => readonly string[] = () => []): GeneralPreferencesStore {
+    return new GeneralPreferencesStore(filePath, { ...DEFAULT_GENERAL_PREFERENCES }, null, languages)
   }
 
   get(): GeneralPreferencesSnapshot {
+    this.refreshInterfaceLanguage()
     return structuredClone(this.#snapshot)
   }
 
-  setInterfaceLanguage(language: InterfaceLanguage): Promise<GeneralPreferencesSnapshot> {
-    if (!isInterfaceLanguage(language)) return Promise.reject(new Error('Unsupported interface language'))
-    return this.#enqueue(async () => {
-      const next = { ...this.#snapshot, interfaceLanguage: language }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
-    })
+  refreshInterfaceLanguage(): void {
+    let languages: readonly string[] = []
+    try { languages = this.#languages() } catch { /* An unavailable system list resolves to English. */ }
+    const next = resolveGeneralPreferences(storedGeneralPreferences(this.#snapshot), languages, this.#snapshot.languageRevision, this.#snapshot.readError)
+    if (next.interfaceLanguage === this.#snapshot.interfaceLanguage && next.systemLanguage === this.#snapshot.systemLanguage) return
+    this.#snapshot = { ...next, languageRevision: next.languageRevision + 1 }
+    this.#publish()
+  }
+
+  onInterfaceLanguageChanged(listener: (snapshot: InterfaceLanguageSnapshot) => void): () => void {
+    this.#listeners.add(listener)
+    return () => { this.#listeners.delete(listener) }
+  }
+
+  async getInterfaceLanguage(): Promise<GeneralPreferencesSnapshot> {
+    return this.#enqueue(async () => this.get(), true)
+  }
+
+  async #readLocal(): Promise<void> {
+    const result = await readGeneralPreferencesResult(this.#filePath)
+    const stored = result.degradation ? storedGeneralPreferences(this.#snapshot) : storedGeneralPreferences(result.snapshot)
+    const changed = JSON.stringify(stored) !== JSON.stringify(storedGeneralPreferences(this.#snapshot))
+      || JSON.stringify(result.degradation) !== JSON.stringify(this.#snapshot.readError)
+    this.#snapshot = { ...this.#snapshot, ...stored, readError: result.degradation,
+      languageRevision: this.#snapshot.languageRevision + (changed ? 1 : 0) }
+    this.refreshInterfaceLanguage()
+    if (changed) this.#publish()
+  }
+
+  setInterfaceLanguagePreference(preference: InterfaceLanguagePreference): Promise<GeneralPreferencesSnapshot> {
+    if (!isInterfaceLanguagePreference(preference)) return Promise.reject(new Error('Unsupported interface language preference'))
+    return this.#enqueue(() => this.#commit({ ...this.#snapshot, interfaceLanguagePreference: preference }))
   }
 
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot> {
     return this.#enqueue(async () => {
       const next = { ...this.#snapshot, startupLocationMode: mode }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot> {
     return this.#enqueue(async () => {
       const next = { ...this.#snapshot, lastSettingsSection: section }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
@@ -127,9 +154,7 @@ export class GeneralPreferencesStore {
     }
     return this.#enqueue(async () => {
       const next = { ...this.#snapshot, executionConsolePlacement: placement }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
@@ -148,9 +173,7 @@ export class GeneralPreferencesStore {
         newConversationDefaultsRequireConfirmation: false,
         oneClickNewConversationEnabled: enableOneClick || this.#snapshot.oneClickNewConversationEnabled
       }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
@@ -163,9 +186,7 @@ export class GeneralPreferencesStore {
         throw new Error('Default new conversation configuration requires confirmation')
       }
       const next = { ...this.#snapshot, oneClickNewConversationEnabled: enabled }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
@@ -175,9 +196,7 @@ export class GeneralPreferencesStore {
     }
     return this.#enqueue(async () => {
       const next = { ...this.#snapshot, worldMapEnabled: enabled }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
@@ -188,14 +207,32 @@ export class GeneralPreferencesStore {
         || this.#snapshot.newConversationDefaultsRequireConfirmation
       ) return this.get()
       const next = { ...this.#snapshot, newConversationDefaultsRequireConfirmation: true }
-      await writePrivateJson(this.#filePath, next)
-      this.#snapshot = next
-      return this.get()
+      return this.#commit(next)
     })
   }
 
-  #enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.#writeTail.then(operation, operation)
+  async #commit(next: GeneralPreferencesSnapshot): Promise<GeneralPreferencesSnapshot> {
+    await writePrivateJson(this.#filePath, storedGeneralPreferences(next))
+    this.#snapshot = { ...next, languageRevision: this.#snapshot.languageRevision + 1 }
+    const snapshot = this.get()
+    this.#publish()
+    return snapshot
+  }
+
+  #publish(): void {
+    const snapshot = structuredClone(this.#snapshot)
+    for (const listener of this.#listeners) listener(snapshot)
+  }
+
+  #enqueue<T>(operation: () => Promise<T>, allowReadError = false): Promise<T> {
+    const guarded = async (): Promise<T> => {
+      // Recheck before a mutation as well: a damaged source must not be replaced
+      // by an unrelated automatic write such as remembering the settings tab.
+      await this.#readLocal()
+      if (!allowReadError && this.#snapshot.readError) return Promise.reject(this.#snapshot.readError)
+      return operation()
+    }
+    const result = this.#writeTail.then(guarded, guarded)
     this.#writeTail = result.then(() => undefined, () => undefined)
     return result
   }

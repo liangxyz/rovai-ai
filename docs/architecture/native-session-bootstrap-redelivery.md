@@ -18,6 +18,9 @@ Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 模型投影/Evidence 分层见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)。
 
+Team 指引采用 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md)：仅从 Thread 创建时固定的
+非空文本恢复，Team 编辑/删除不触发补发；Single Chat 省略。下述 Runtime 投递矩阵保持不变。
+
 ## 两个独立生命周期
 
 ```text

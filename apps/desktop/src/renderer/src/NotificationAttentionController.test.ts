@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -27,10 +28,7 @@ import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-mo
 import { changeInterfaceLanguage } from './interface-language'
 
 it('localizes the identified first-run notification title while retaining the episode data', async () => {
-  const languageApi = {
-    setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-      ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-  } as GeneralPreferencesApi
+  const languageApi = languageTestApi
   const current = episode('turn_completed', { thread: { id: 'camp-1', title: '初次集结' } })
   const entry = { episode: current, signal: headsUpSignal(current, 'turn_completed'), changeSequence: 1 }
   const render = (firstRunThreadId: string | null) => renderToStaticMarkup(createElement(NotificationHeadsUp, {
@@ -410,7 +408,7 @@ describe('Notification attention controller', () => {
     const request = async (cursor: number): Promise<NotificationEpisodeChangeBatch> => {
       requests.push(cursor)
       if (cursor === 0) return {
-        schemaVersion: 9,
+        schemaVersion: 11,
         requestedAfterChangeSequence: 0,
         nextChangeSequence: 1,
         throughChangeSequence: 2,
@@ -425,7 +423,7 @@ describe('Notification attention controller', () => {
     await expect(readNotificationChangePages(0, request)).rejects.toThrow('page two failed')
     expect(requests).toEqual([0, 1])
     const retried = await readNotificationChangePages(0, async (cursor) => ({
-      schemaVersion: 9,
+      schemaVersion: 11,
       requestedAfterChangeSequence: cursor,
       nextChangeSequence: 2,
       throughChangeSequence: 2,
@@ -436,7 +434,7 @@ describe('Notification attention controller', () => {
     }))
     expect(retried.nextChangeSequence).toBe(2)
     const paged = await readNotificationChangePages(0, async (cursor) => ({
-      schemaVersion: 9,
+      schemaVersion: 11,
       requestedAfterChangeSequence: cursor,
       nextChangeSequence: cursor === 0 ? 1 : 3,
       throughChangeSequence: cursor === 0 ? 2 : 3,

@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AboutUpdatesSettingsView } from '@renderer/AboutUpdatesSettings'
@@ -36,7 +37,7 @@ const base = {
   failureReason: null, pendingPrompt: null
 }
 const requests = []
-const api = { setInterfaceLanguage: async interfaceLanguage => ({ interfaceLanguage }) }
+const api = languageTestApi
 let updateSnapshot, updateShell
 const noop = () => undefined
 const client = {}

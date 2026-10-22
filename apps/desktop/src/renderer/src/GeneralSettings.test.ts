@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentProfile, GeneralPreferencesSnapshot } from '@contracts'
 import {
-  DEFAULT_MEMBER_COLLAPSE_THRESHOLD,
   GeneralSettings,
   ONE_CLICK_ENTRY_DESCRIPTIONS,
   ONE_CLICK_PROJECT_HELP,
@@ -64,7 +63,9 @@ describe('General settings', () => {
     const agents = [profile('agent-a', '洛可'), profile('agent-b', '沐瓦')]
     agents[1].runtimeReadiness.status = 'needs_attention'
     const preferences: GeneralPreferencesSnapshot = {
-      schemaVersion: 5,
+      schemaVersion: 7,
+      newConversationTeamId: null,
+      interfaceLanguagePreference: 'zh-CN', systemLanguage: 'en', languageRevision: 0, readError: null,
       interfaceLanguage: 'zh-CN',
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
@@ -107,23 +108,15 @@ describe('General settings', () => {
     }, agents)).toBeNull()
   })
 
-  it('shows up to ten members directly and collapses only when the count exceeds ten', () => {
-    const directMembers = Array.from({ length: DEFAULT_MEMBER_COLLAPSE_THRESHOLD }, (_, index) => (
-      profile(`agent-${index}`, `队员 ${index + 1}`)
-    ))
-    const collapsedMembers = [
-      ...directMembers,
-      profile(`agent-${DEFAULT_MEMBER_COLLAPSE_THRESHOLD}`, `队员 ${DEFAULT_MEMBER_COLLAPSE_THRESHOLD + 1}`)
-    ]
-
-    const directMarkup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls, agents: directMembers }))
-    const collapsedMarkup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls, agents: collapsedMembers }))
-
-    expect(directMarkup).not.toContain('class="general-default-member-picker"')
-    expect(directMarkup).not.toContain('aria-label="搜索默认队员"')
-    expect(collapsedMarkup).toContain('class="general-default-member-picker"')
-    expect(collapsedMarkup).toContain('共 11 位队员，展开后可多选')
-    expect(collapsedMarkup).toContain('aria-label="搜索默认队员"')
+  it('uses the member dropdown for Custom with both small and large rosters', () => {
+    for (const count of [4, 12]) {
+      const agents = Array.from({ length: count }, (_, index) => profile(`agent-${index}`, `队员 ${index + 1}`))
+      const markup = renderToStaticMarkup(createElement(GeneralSettings, { api, windowControls, agents }))
+      expect(markup).toContain('aria-label="选择团队"')
+      expect(markup).toContain('aria-label="选择队员"')
+      expect(markup).toContain('aria-label="默认队长"')
+      expect(markup).not.toContain('管理团队')
+    }
   })
 })
 

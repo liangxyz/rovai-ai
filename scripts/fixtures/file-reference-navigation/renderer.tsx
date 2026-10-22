@@ -79,7 +79,9 @@ const targetBody = [
   '本地配置 `config.toml`；视频 `demo.mp4`；绝对路径 `/Users/name/Downloads/demo.html`；不存在 `missing.toml`。',
   'WBS(外码)/WBS描述/成本中心/FBP/GR-手工金额；心/FBP）有值；`run_gr_reminder.py`。',
   '网页入口：[网页 · GitHub](https://github.com/)。文档中的改动：',
-  ...Array.from({ length: 4 }, () => prose)
+  ...Array.from({ length: 4 }, () => prose),
+  '文</b>[前侧间距](src/report/run_report.py)',
+  '[后侧间距](src/report/run_report.py)<b>文'
 ].join('\n\n')
 const snapshot: ThreadSnapshot = {
   schemaVersion: 35, throughGlobalSequence: 36,
@@ -183,6 +185,12 @@ Object.assign(window, { navigationTest: {
   },
   async scrollBy(amount: number) { timeline().scrollTop += amount; await settle() },
   async bottom() { timeline().scrollTop = timeline().scrollHeight; await settle() },
+  async literalSpacingPreview() {
+    const anchor = [...document.querySelectorAll<HTMLAnchorElement>('a.markdown-file-reference')]
+      .find(anchor => anchor.textContent === '前侧间距')!
+    anchor.scrollIntoView({ block: 'center' })
+    await settle()
+  },
   rememberMessage() { anchorMessageId = visibleTimelineMessageAnchor(timeline())?.messageId ?? null },
   async theme(value: string) { document.documentElement.dataset.theme = value; await settle() },
   state() {
@@ -228,6 +236,13 @@ Object.assign(window, { navigationTest: {
       )].map((anchor) => ({
         title: anchor.title,
         type: anchor.querySelector('svg')?.dataset.resourceType
+      })),
+      literalSpacing: [...document.querySelectorAll<HTMLAnchorElement>(
+        '[data-message-id="message-12"] a.markdown-file-reference'
+      )].filter(anchor => ['前侧间距', '后侧间距'].includes(anchor.textContent ?? '')).map(anchor => ({
+        text: anchor.parentElement?.textContent,
+        start: getComputedStyle(anchor).marginInlineStart,
+        end: getComputedStyle(anchor).marginInlineEnd
       })),
       inlineFileLinkCount: document.querySelectorAll(
         '[data-message-id="message-12"] a.inline-code-file-reference'

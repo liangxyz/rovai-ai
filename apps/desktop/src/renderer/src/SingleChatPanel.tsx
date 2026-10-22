@@ -1,7 +1,10 @@
 import { useShortcutAction, useShortcuts } from './ShortcutProvider'
 import { shouldSendComposerKey } from '../../shared/shortcuts'
 import { useThreadClient } from './camp-client'
+import { useTextareaInputHistory } from './use-textarea-input-history'
+import { singleInputHistory } from './input-history'
 import { useMobileLayout } from './MobileLayout'
+import { ThreadPanelCollapseButton, ThreadPanelDismissHint, useThreadPanelDismiss } from './ThreadPanelDismiss'
 import { newCommandId } from '../../shared/command-id'
 import { RunningText } from './RunningText'
 import { useRuntimePhase } from './useRuntimePhase'
@@ -429,7 +432,7 @@ export function SingleChatRunHistory({
           onToggle={(event) => { if (terminal) setOpen(event.currentTarget.open) }}
         >
           <summary hidden={!terminal}>
-            <span className="single-chat-run-summary" data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
+            <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
             <span className="single-chat-disclosure" aria-hidden="true"><ChevronGlyph /></span>
           </summary>
           <div className="single-chat-execution-content process-content">
@@ -448,7 +451,7 @@ export function SingleChatRunHistory({
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-turn-id={run.threadTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
+          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
         </>}
       </div>
     </section>
@@ -679,6 +682,7 @@ export function SingleChatPanel({
     ?? null
   const shortcutContext = useShortcuts()
   const panelRef = useRef<HTMLElement>(null)
+  const dismiss = useThreadPanelDismiss({ visible, panelRef, onClose })
   const triggerRef = useRef<HTMLButtonElement>(null)
   const focusPanel = useRef(false)
   const visibleRef = useRef(visible)
@@ -772,6 +776,13 @@ export function SingleChatPanel({
     ? `${threadId}:${snapshot.conversation.id}` : `${threadId}:pending:${selectedAgentId ?? ''}`
   const draft = bodyDrafts[bodyDraftKey] ?? ''
   const setDraft = (value: string): void => setBodyDrafts((current) => ({ ...current, [bodyDraftKey]: value }))
+  const inputHistory = useTextareaInputHistory({
+    draft, setDraft, inputRef: composerRef,
+    target: visible && currentSnapshot ? bodyDraftKey : null,
+    getHistory: () => currentSnapshot
+      ? singleInputHistory(currentSnapshot.messages, currentSnapshot.pendingInputs.items)
+      : []
+  })
   useEffect(() => {
     if (!snapshot || snapshot.conversation.agentId !== selectedAgentId) return
     const pendingKey = `${threadId}:pending:${selectedAgentId ?? ''}`
@@ -1048,18 +1059,6 @@ export function SingleChatPanel({
 
   useEffect(() => {
     if (!visible) return
-    const dismissOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      if (document.querySelector('.app-dialog, [role="menu"][data-state="open"]')) return
-      event.preventDefault()
-      onClose()
-    }
-    document.addEventListener('keydown', dismissOnEscape)
-    return () => document.removeEventListener('keydown', dismissOnEscape)
-  }, [onClose, visible])
-
-  useEffect(() => {
-    if (!visible) return
     if (!followLatestRef.current) return
     const viewport = viewportRef.current
     if (viewport) viewport.scrollTop = viewport.scrollHeight
@@ -1074,6 +1073,9 @@ export function SingleChatPanel({
       const canObserve = visible && currentSnapshot !== null && viewport !== null
         && document.visibilityState === 'visible' && document.hasFocus()
       const campTurnIds = new Set<string>()
+      const agentRunIds = new Set<string>()
+      const terminalRunIds = new Set(currentSnapshot?.agentRuns
+        .filter(run => !NON_TERMINAL_RUNS.has(run.status)).map(run => run.id) ?? [])
       const approvalIds = new Set<string>()
       if (canObserve && viewport) {
         const bounds = viewport.getBoundingClientRect()
@@ -1081,6 +1083,11 @@ export function SingleChatPanel({
           if (node.getClientRects().length && rectanglesOverlap(node.getBoundingClientRect(), bounds)) {
             campTurnIds.add(node.dataset.notificationTurnId!)
           }
+        }
+        for (const node of viewport.querySelectorAll<HTMLElement>('[data-notification-run-id]')) {
+          const runId = node.dataset.notificationRunId!
+          if (terminalRunIds.has(runId) && node.getClientRects().length
+            && rectanglesOverlap(node.getBoundingClientRect(), bounds)) agentRunIds.add(runId)
         }
         for (const node of approvalRef.current?.querySelectorAll<HTMLElement>('[data-approval-id]') ?? []) {
           if (node.getClientRects().length && rectanglesOverlap(node.getBoundingClientRect(), {
@@ -1091,7 +1098,7 @@ export function SingleChatPanel({
       const sources: VisibleNotificationSources = { threadId,
         conversationId: currentSnapshot?.conversation.id ?? null, surfaceVisible: canObserve,
         snapshotSequence: 0, messageIds: [], campTurnIds: [...campTurnIds].sort(),
-        agentRunIds: [], approvalIds: [...approvalIds].sort() }
+        agentRunIds: [...agentRunIds].sort(), approvalIds: [...approvalIds].sort() }
       const signature = JSON.stringify(sources)
       if (signature !== lastVisibleSources.current) {
         lastVisibleSources.current = signature
@@ -1157,6 +1164,7 @@ export function SingleChatPanel({
       const body = resultPayloadString(result, 'body') ?? ''
       const returnedDraft = result.payload.draft as unknown as SingleChatSnapshot['draft']
       const key = `${current.conversation.threadId}:${item.conversationId}`
+      if (currentConversationIdRef.current === item.conversationId) inputHistory.reset()
       setBodyDrafts((drafts) => ({ ...drafts, [key]: body }))
       if (currentConversationIdRef.current === item.conversationId) {
         const latest = snapshotRef.current?.conversation.id === item.conversationId ? snapshotRef.current : current
@@ -1429,6 +1437,7 @@ export function SingleChatPanel({
     const owner = snapshotRef.current?.conversation.id
     const commandId = newCommandId()
     if (!owner) return Promise.reject(new Error('quote.owner_unavailable'))
+    inputHistory.adopt()
     quoteOperationCount.current += 1
     setQuoteBusy(true)
     const operation = quoteTailRef.current.then(async () => {
@@ -1446,7 +1455,7 @@ export function SingleChatPanel({
   const send = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (returningPendingRef.current) return
-    const body = draft.trim()
+    const body = inputHistory.value.trim()
     const agentId = selectedAgentIdRef.current
     if (
       !agentId
@@ -1465,6 +1474,7 @@ export function SingleChatPanel({
       if (!current) throw new Error(uiAttribute('无法打开这段单聊。'))
       if (!body && (current.draft.quotes?.length ?? 0) > 0) throw new Error(uiAttribute('请填写这次的问题后再发送。'))
       if (!body && current.draft.attachments.length === 0) return
+      inputHistory.adopt()
       const result = await client.request<StoredCommandResult>('singleChat.send', {
         commandId: newCommandId(),
         command: {
@@ -1497,12 +1507,15 @@ export function SingleChatPanel({
     ) return
     setCancelling(true)
     setError(null)
+    const commandId = newCommandId()
     try {
       const result = await client.request<StoredCommandResult>('agentRuns.cancel', {
-        commandId: newCommandId(),
+        commandId,
         command: { threadId, agentRunId: run.id, expectedVersion: run.version }
       })
-      if (result.status === 'rejected') throw new Error(resultMessage(result))
+      if (result.status === 'rejected') {
+        throw new Error(resultMessage(result))
+      }
       await refreshCurrent(current.conversation.id)
     } catch (nextError) {
       if (currentConversationIdRef.current === current.conversation.id) {
@@ -1544,7 +1557,6 @@ export function SingleChatPanel({
         setConversations(remainingConversations)
         await refreshList()
       }
-      onNotify(uiAttribute('单聊已结束'))
     } catch (nextError) {
       setError(readErrorMessage(nextError, uiAttribute('单聊未结束，请重试。')))
     } finally {
@@ -1634,9 +1646,7 @@ export function SingleChatPanel({
         <SingleChatGlyph />
         <strong id={`${panelId}-title`}>{copy.singleChatTitle}</strong>
         <span><UiText zh={"当前会话"} /></span>
-        <button className="icon-button" type="button" aria-label={uiAttribute("收起单聊")} title={uiAttribute("收起 · Esc")} onClick={() => {
-          onClose()
-        }}><CloseGlyph /></button>
+        <ThreadPanelCollapseButton label={uiAttribute("收起单聊")} mobile={mobile} onDismiss={dismiss} />
       </header>
 
       <div className="single-chat-target-bar">
@@ -1770,10 +1780,10 @@ export function SingleChatPanel({
             <textarea
               ref={composerRef}
               id={`${panelId}-composer`}
-              value={draft}
+              value={inputHistory.value}
               disabled={!selectedMember || !currentTargetReady || sending || returningPending || ending}
               placeholder={selectedMember ? uiAttribute("给 {0} 发消息…", String(selectedMember.displayName)) : uiAttribute("选择一位队员后开始单聊")}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => inputHistory.edit(event.target.value)}
               onPaste={(event) => {
                 const files = Array.from(event.clipboardData.files)
                 if (files.length === 0) return
@@ -1781,6 +1791,7 @@ export function SingleChatPanel({
                 void prepareFiles(files)
               }}
               onKeyDown={(event) => {
+                if (inputHistory.onKeyDown(event)) return
                 if (mobile) return
                 if (event.nativeEvent.keyCode === 229 || event.repeat) return
                 const submit = shortcutContext
@@ -1792,7 +1803,7 @@ export function SingleChatPanel({
               }}
             />
           </div>
-          <TextareaWebLinks key={bodyDraftKey} inputRef={composerRef} value={draft}
+          <TextareaWebLinks key={bodyDraftKey} inputRef={composerRef} value={inputHistory.value}
             enabled={visible && currentTargetReady && !sending && !returningPending && !ending} />
           <div className="composer-action-row">
             <div className="composer-tools">
@@ -1828,13 +1839,13 @@ export function SingleChatPanel({
                   </span>
                 </span>
               )}
-              {activeRun && !draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0
+              {activeRun && !inputHistory.value.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0
                 ? <ComposerPrimaryAction action="stop" type="button" busy={cancelling} disabled={!currentTargetReady || cancelling} onClick={() => void stopCurrentRun()} />
                 : <ComposerPrimaryAction
                     action="send"
                     type="submit"
                     busy={sending || preparingAttachments.some((item) => !item.error)}
-                    disabled={(!draft.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || returningPending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
+                    disabled={(!inputHistory.value.trim() && (currentSnapshot?.draft.attachments.length ?? 0) === 0) || !selectedMember || !currentTargetReady || sending || returningPending || ending || quoteBusy || preparingAttachments.some((item) => !item.error)}
                   />}
             </div>
           </div>
@@ -1849,7 +1860,7 @@ export function SingleChatPanel({
       </form>
       <footer className="single-chat-footer">
         <span><UiText zh={"单聊正文不会进入公屏"} /></span>
-        <span><kbd>Esc</kbd><UiText zh={" 收起"} /></span>
+        <ThreadPanelDismissHint />
       </footer>
       {attachmentDragState && (
         <div className="single-chat-drop-layer" aria-hidden="true">

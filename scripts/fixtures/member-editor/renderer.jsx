@@ -1,8 +1,11 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { CurrentUserProfileProvider } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 import React, { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { RuntimeStartupSettings } from '../../../apps/desktop/src/renderer/src/RuntimeStartupSettings'
+import { COMMON_ENVIRONMENT_CHANGED } from '../../../apps/desktop/src/renderer/src/member-environment'
 import { MembersView } from '../../../apps/desktop/src/renderer/src/MemberManagement'
 import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { changeInterfaceLanguage, useInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
@@ -15,6 +18,9 @@ import {
 } from './data'
 let members = initialMembers()
 const calls = []
+const commonEnvironments = {}, memberEnvironments = {}
+const common = kind => commonEnvironments[kind] ?? { revision: 0, environment: {} }
+const environment = (id,kind) => memberEnvironments[id+':'+kind] ?? { revision: 0, environment: {}, inheritCommon: true }
 let reload,
   failMethod = null,
   failReload = false,
@@ -27,6 +33,8 @@ let delayedReload = false
 let catalogScenario = null
 let removalRunning = false
 let releaseCatalog = null
+let holdEnvironmentRead = false
+let releaseEnvironmentRead = null
 const catalogCalls = []
 const catalogDisplayTimings = []
 const fixtureConsoleInfo = console.info.bind(console)
@@ -68,7 +76,28 @@ window.rovai = {
     }
   },
   request: async (method, payload) => {
-    if (method === 'member.runtimeEnvironment.get') return { revision: 0, environment: {} }
+    if (method === 'member.runtimeEnvironment.get') {
+      const own = environment(payload.memberId,payload.adapterKind), shared = common(payload.adapterKind)
+      const snapshot = { ...clone(own), common: clone(shared) }
+      if (holdEnvironmentRead) await new Promise(resolve => { releaseEnvironmentRead = resolve })
+      return snapshot
+    }
+    if (method === 'runtime.environment.get') return clone(common(payload.runtimeKind))
+    if (method.startsWith('runtime.startup.')) {
+      calls.push({ method, command: clone(payload) })
+      if (failMethod === method) { failMethod = null; throw new Error('验收模拟保存失败，修改仍保留。') }
+      if (method === 'runtime.startup.save' && payload.commonEnvironment) {
+        const saved = common(payload.runtimeKind), edit = payload.commonEnvironment
+        if (saved.revision !== edit.expectedRevision) throw new Error('Common environment changed; reload the saved configuration')
+        const values = JSON.parse(edit.json || '{}')
+        if (Object.values(values).some(value => typeof value !== 'string')) throw new Error('Core requires string environment values')
+        commonEnvironments[payload.runtimeKind] = { revision: saved.revision + 1, environment: values }
+      }
+      if ((method === 'runtime.startup.check' || method === 'runtime.startup.inspect') && payload.commonEnvironment && common(payload.runtimeKind).revision !== payload.commonEnvironment.expectedRevision) throw new Error('Common environment changed; reload the saved configuration')
+      if (method === 'runtime.startup.check' || method === 'runtime.startup.inspect') return { status: 'ready', executablePath: '/fixture/codex', reportedVersion: 'fixture' }
+      const saved = common(payload.runtimeKind)
+      return { runtimeKind: payload.runtimeKind, revision: 1, configuration: { programPath: '/fixture/codex', environment: [] }, reconnectRequired: false, commonEnvironment: clone(saved) }
+    }
     if (method === 'runtime.modelCatalog.open') {
       catalogCalls.push(clone(payload))
       const installation = installations.find(
@@ -145,6 +174,12 @@ window.rovai = {
       if (method === 'members.runtime.set') {
         const { adapterKind, model, permissions } = command
         next.runtimeConfiguration = { adapterKind, model, permissions }
+        if (command.environment) {
+          const previous = environment(command.agentId,adapterKind), edit = command.environment
+          const values = JSON.parse(edit.json || '{}')
+          if (Object.values(values).some(value => typeof value !== 'string')) throw new Error('Core requires string environment values')
+          memberEnvironments[command.agentId+':'+adapterKind] = { revision: previous.revision+1, environment: values, inheritCommon: edit.inheritCommon ?? previous.inheritCommon }
+        }
       }
       if (method === 'members.runtime.clear') next.runtimeConfiguration = null
       if (method === 'members.presence.set') next.presence = command.presence
@@ -174,6 +209,14 @@ window.rovai = {
   }
 }
 window.memberFixture = {
+  environment: (id,kind) => clone(environment(id,kind)),
+  holdEnvironmentRead: () => { holdEnvironmentRead = true },
+  environmentReadPending: () => releaseEnvironmentRead !== null,
+  releaseEnvironmentRead: () => { holdEnvironmentRead = false; releaseEnvironmentRead?.(); releaseEnvironmentRead = null },
+  common: (kind,values) => {
+    commonEnvironments[kind] = { revision: common(kind).revision+1, environment: values }
+    window.dispatchEvent(new CustomEvent(COMMON_ENVIRONMENT_CHANGED,{ detail: kind }))
+  },
   removalRunning: (value) => { removalRunning = value },
   calls,
   catalogCalls,
@@ -223,7 +266,7 @@ window.memberFixture = {
   theme: (theme) => {
     document.documentElement.dataset.theme = theme
   },
-  language: language => changeInterfaceLanguage({ setInterfaceLanguage: async interfaceLanguage => ({ interfaceLanguage }) }, language),
+  language: language => changeInterfaceLanguage(languageTestApi, language),
   leave: () => openSettings(),
   reset: () => {
     members = initialMembers()
@@ -237,6 +280,7 @@ function Fixture() {
   const [selected, setSelected] = useState(members[0].agentId)
   const [tab, setTab] = useState('identity')
   const [view, setView] = useState('members')
+  const [commonReturn, setCommonReturn] = useState(null)
   const ref = useRef(null)
   reload = () => {
     if (failReload) return Promise.reject(new Error('验收模拟读取失败'))
@@ -282,11 +326,12 @@ function Fixture() {
         className="window-drag-strip window-drag-strip-members"
         aria-hidden="true"
       />
-      <main className="content members-content">
-        {view === 'members' ? (
-          <div className="members-workspace">
+      <main className={`content ${view === 'settings' ? 'settings-content' : 'members-content'}`}>
+        {(view === 'members' || commonReturn) && (
+          <div className="members-workspace" hidden={view !== 'members'} style={view !== 'members' ? { display:'none' } : undefined}>
             <MembersView
               ref={ref}
+              onEditCommonEnvironment={(kind,member) => { setCommonReturn({ kind, name: member.displayName }); setView('settings') }}
               agents={agents}
               installations={installations}
               runtimeAvailability={availability}
@@ -312,9 +357,9 @@ function Fixture() {
               onOpenRuntimeSettings={openSettings}
             />
           </div>
-        ) : (
-          <button onClick={() => setView('members')}>返回队员</button>
         )}
+        {view === 'settings' && (commonReturn ? <div className="settings-workbench"><div className="settings-panel settings-panel-runtime"><RuntimeStartupSettings runtimeKind={commonReturn.kind} health={{ runtimeAvailability: availability.map(item => ({ ...item, discovery: { executablePath: '/fixture/codex', discoveryStatus: 'found' } })), hostPlatform: 'macos-arm64' }}
+          backLabel={`返回 ${commonReturn.name} 的队员配置`} onBack={() => { setView('members'); setCommonReturn(null) }}/></div></div> : <button onClick={() => setView('members')}>返回队员</button>)}
       </main>
     </div>
   )

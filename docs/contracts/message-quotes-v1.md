@@ -4,7 +4,7 @@ contract: message-quotes
 version: 1
 status: accepted
 authority: immutable-message-excerpts
-last_updated: 2026-10-11
+last_updated: 2026-10-22
 ---
 
 # Message Quotes v1
@@ -16,17 +16,20 @@ last_updated: 2026-10-11
 每个公共/私有 Draft、Pending（含 edit working copy）、发布消息拥有有序 `quotes`，历史无引用为 `[]`。快照为 version 1、quoteId、source（camp/single_chat、真实 campId、私有 conversationId、messageId）、authorAtCapture（user 或 agent，Core 解析）、text、format=plain_text、capturedAt、sourceContentDigest、snapshotDigest。ID 不授予读取权限；来源必须与 owner 为同一会话。
 
 可选内部 locator 包含 projectionVersion、startScalar、endScalar、projectionDigest。新捕获使用
-MessageQuoteTextProjection v2（projectionVersion=2），旧 locator 的 1 保留；快照 version 仍为 1。
+MessageQuoteTextProjection v3（projectionVersion=3），旧 locator 的 1、2 保留；快照 version 仍为 1。
 locator 使用 Core 验证后的投影范围与 UTF-8 SHA-256 摘要，并纳入 snapshotDigest；不进入模型输入。
 旧快照无 locator 或使用旧投影时仍可读取、发送和重放，不回写其 text、摘要或定位信息。
 
 投影复用 Renderer 的结构化前缀语义：当前用户前缀与其后的 Markdown 正文分块，队员前缀按首个 Markdown 段落决定内联或独立行。用户正文保持纯文本与字面 Markdown。选择请求可携带 currentUserDisplayName，仅用于已有 CurrentUserMention 的当前展示名称；Core 验证名称边界和真实结构，不能借此替换其他正文或声明作者。只有用户明确选进引用的可见文字进入新快照，后续改名不改写源消息、历史引用或已冻结上下文。
 
-Core 建立快照前验证源可读、来源版本和 MessageQuoteTextProjection v2 的 Unicode scalar 选区；正文 CRLF 转 LF，段落两个换行，显式换行一个换行，列表/表格固定分隔，代码保留缩进/空行。引用由用户实际选择的正文可见文本构成，不补 Markdown 包装或隐藏 URL。请求冲突须重新选择。草稿变更进入既有 revision 队列，同一次操作幂等。总选文上限 12,000 Unicode scalar，超限失败，不截断已有文本；仅引用而无问题不能发送。
+Core 建立快照前验证源可读、来源版本和 MessageQuoteTextProjection v3 的 Unicode scalar 选区；正文 CRLF 转 LF，段落两个换行，显式换行一个换行，列表/表格固定分隔，代码保留缩进/空行。引用由用户实际选择的正文可见文本构成，不补 Markdown 包装或隐藏 URL。请求冲突须重新选择。草稿变更进入既有 revision 队列，同一次操作幂等。总选文上限 12,000 Unicode scalar，超限失败，不截断已有文本；仅引用而无问题不能发送。
 
-v2 对 Agent Markdown 采用 CJK-friendly emphasis，并同步 GFM 双波浪线边界；单波浪线仍为字面文本。
+v3 继承 v2 对 Agent Markdown 的 CJK-friendly emphasis，并同步 GFM 双波浪线边界；单波浪线仍为字面文本。
 Renderer 使用 remark CJK 扩展，Core 使用 Comrak 的现成 CJK 能力；双方消费同一组
-[投影对照用例](../../packages/contracts/fixtures/message-quote-projection-v2.json)。
+[投影对照用例](../../packages/contracts/fixtures/message-quote-projection-v3.json)。
+v3 将 Agent Markdown 的原始 HTML 节点作为字面文字纳入投影，包括尖括号占位符、HTML 块和注释；
+不执行 HTML，且在可信 CurrentUserMention 占位符替换前完成文本化。块内未解析的 Markdown 保持字面值。
+Renderer 与 Core 使用同一组 v3 对照用例；v1/v2 历史引用仍使用冻结文本，不按新规则重新捕获。
 代码块、行内代码、转义与实体中的星号不被当成待修复原文，用户纯文本规则不变。
 正文存储、复制整条消息的原文和旧引用快照不修改；无历史迁移或自动修复流程。
 
@@ -46,7 +49,7 @@ CURRENT_INPUT 的 message 保持本轮问题，quotes 为 skills/attachments 同
 
 草稿及历史默认只显示引用段数和作者。悬浮或键盘聚焦展开非模态气泡，完整选文的整行是来源跳转入口，移除是独立按钮。正文来源必须仍属当前 Camp 或当前精确 Single Chat Conversation；不支持群聊/单聊或两个私聊之间搬运引用。
 
-回跳仅给选区涉及的完整视觉行短暂底色，不使用竖线或整条消息底色。Renderer 对版本 1、2 locator
+回跳仅给选区涉及的完整视觉行短暂底色，不使用竖线或整条消息底色。Renderer 对版本 1、2、3 locator
 均先校验完整当前投影摘要及精确选文，再恢复标量范围；同文重复也不能选错位置。
 无 locator 的旧快照沿用唯一完整匹配；有 locator 但版本不支持、摘要变化或选文不符时，不降级为文本搜索或模糊定位。
 来源仍存在时照常跳到该消息，定位失败只取消精确高亮并给出反馈，不影响引用内容展示、草稿保留、发送或重放。

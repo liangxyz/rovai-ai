@@ -77,6 +77,11 @@ non-batch 推进者。通知各自保留一个合并许可，读取状态与进�
 
 ## Runtime 与附件数据流
 
+User 上下键输入历史从当前快照的正式 User 消息及活动 Pending 同步提取本轮内容。
+沿用消息顺序后接队列顺序，从末尾向前浏览；本轮固定，结束后释放，下一轮读取最新快照。
+不增加查询、回执缓存、Pending 身份映射或原提交时间排序，不找回已离开快照的取消项。
+见 [Input History v1](../contracts/input-history-v1.md)；这是 User 编辑器能力，与下述模型 `single_chat.history` 分开。
+
 ```text
 AgentRun.trigger_conversation_message_id
   → exact conversation/invocation/author/route fence

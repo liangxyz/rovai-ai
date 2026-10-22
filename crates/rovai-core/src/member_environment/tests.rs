@@ -26,6 +26,7 @@ fn save(connection: &Connection, member: &str, revision: i64, values: Value) -> 
         AdapterKind::Pi,
         &ModelSelection::RuntimeDefault,
         EnvironmentEdit {
+            inherit_common: None,
             expected_revision: revision,
             json: values.to_string(),
         },
@@ -80,9 +81,12 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
     assert!(recovered.environment.is_none());
     assert_eq!(recovered.config_digest, admitted.config_digest);
     save(database.connection(), a, 1, json!({"ANTHROPIC_BASE_URL":"https://b.example","ANTHROPIC_API_KEY":"fixture-member-b","CLEARED_TOKEN":""})).unwrap();
-    let masked = get(database.connection(), a, AdapterKind::Pi, false).unwrap();
-    assert_eq!(masked["environment"]["ANTHROPIC_API_KEY"], SAVED);
-    assert_eq!(masked["environment"]["CLEARED_TOKEN"], "");
+    let snapshot = get(database.connection(), a, AdapterKind::Pi).unwrap();
+    assert_eq!(
+        snapshot["environment"]["ANTHROPIC_API_KEY"],
+        "fixture-member-b"
+    );
+    assert_eq!(snapshot["environment"]["CLEARED_TOKEN"], "");
     let raw: Vec<u8> = database
         .connection()
         .query_row(
@@ -100,6 +104,7 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
             AdapterKind::Pi,
             &ModelSelection::RuntimeDefault,
             EnvironmentEdit {
+                inherit_common: None,
                 expected_revision: 1,
                 json: json!({"ANTHROPIC_API_KEY":"different"}).to_string()
             }
@@ -110,7 +115,7 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
         database.connection(),
         a,
         2,
-        json!({"ANTHROPIC_BASE_URL":"https://c.example","ANTHROPIC_API_KEY":SAVED}),
+        json!({"ANTHROPIC_BASE_URL":"https://c.example","ANTHROPIC_API_KEY":"fixture-member-b"}),
     )
     .unwrap();
     {
@@ -155,7 +160,7 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
             .unwrap(),
         "native-existing"
     );
-    // Editor masking stays conservative; output scrubbing only treats credential
+    // Owner editors expose values, while output scrubbing still treats credential
     // names as secrets, even when a real credential is a short literal.
     let mut display_env = admitted.environment.as_ref().unwrap().clone();
     let values = display_env.values.as_mut().unwrap();
@@ -178,7 +183,6 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
     assert_eq!(displayed["secret"], "[redacted]");
     assert_eq!(displayed["known"], "[redacted]");
     assert_eq!(original["secret"], "x");
-    assert!(sensitive("AUTH_ENABLED"));
     assert!(!format!("{admitted:?}").contains("fixture-host-a"));
     save(database.connection(), a, 3, json!({})).unwrap();
     let cleared = launch_with_host(database.connection(), a, AdapterKind::Pi, || {
@@ -189,10 +193,168 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
         cleared.values.as_ref().unwrap()["ANTHROPIC_API_KEY"],
         "fixture-host-new"
     );
+    // The shared layer belongs to a Runtime, and never mutates an already captured launch.
+    let common_edit = |revision, value: Value| common::Edit {
+        expected_revision: revision,
+        json: value.to_string(),
+    };
+    common::prepare(database.connection(), AdapterKind::Pi, common_edit(0,
+        json!({"COMMON_ONLY":"shared", "ANTHROPIC_API_KEY":"fixture-common-secret", "EMPTY":"common"})))
+        .unwrap().commit(database.connection()).unwrap();
+    assert_eq!(
+        common::get(database.connection(), AdapterKind::Pi).unwrap()["environment"]["ANTHROPIC_API_KEY"],
+        "fixture-common-secret"
+    );
+    let bytes: Vec<u8> = database
+        .connection()
+        .query_row(
+            "SELECT ciphertext FROM runtime_common_environment",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("fixture-common-secret"));
+    assert!(
+        common::current(database.connection(), AdapterKind::CodexCli)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        common::prepare(
+            database.connection(),
+            AdapterKind::Pi,
+            common_edit(0, json!({}))
+        )
+        .is_err()
+    );
+    let inherited = launch_with_host(database.connection(), a, AdapterKind::Pi, || {
+        Environment::from([("HOST_ONLY".into(), "host".into())])
+    })
+    .unwrap();
+    assert_eq!(inherited.values.as_ref().unwrap()["COMMON_ONLY"], "shared");
+    assert_eq!(inherited.values.as_ref().unwrap()["HOST_ONLY"], "host");
+    assert!(!cleared.values.as_ref().unwrap().contains_key("COMMON_ONLY"));
+    prepare(
+        database.connection(),
+        a,
+        AdapterKind::Pi,
+        &ModelSelection::RuntimeDefault,
+        EnvironmentEdit {
+            expected_revision: 4,
+            json: json!({"EMPTY":"", "ANTHROPIC_API_KEY":"member-secret"}).to_string(),
+            inherit_common: Some(true),
+        },
+    )
+    .unwrap()
+    .commit(database.connection())
+    .unwrap();
+    let merged = current_for_launch(database.connection(), a, AdapterKind::Pi).unwrap();
+    assert_eq!(
+        merged.values.as_ref().unwrap()["ANTHROPIC_API_KEY"],
+        "member-secret"
+    );
+    assert_eq!(merged.values.as_ref().unwrap()["EMPTY"], "");
+    assert_eq!(merged.values.as_ref().unwrap()["COMMON_ONLY"], "shared");
+    prepare(
+        database.connection(),
+        a,
+        AdapterKind::Pi,
+        &ModelSelection::RuntimeDefault,
+        EnvironmentEdit {
+            expected_revision: 5,
+            json: "{}".into(),
+            inherit_common: Some(false),
+        },
+    )
+    .unwrap()
+    .commit(database.connection())
+    .unwrap();
+    assert!(
+        !current_for_launch(database.connection(), a, AdapterKind::Pi)
+            .unwrap()
+            .values
+            .as_ref()
+            .unwrap()
+            .contains_key("COMMON_ONLY")
+    );
+    assert_eq!(
+        get(database.connection(), a, AdapterKind::Pi).unwrap()["inheritCommon"],
+        false
+    );
+    // Simulate a pre-upgrade nonempty revision. A missing preference must not opt it in.
     database
         .connection()
         .execute(
-            "UPDATE member_runtime_environment SET ciphertext=x'00' WHERE revision=4",
+            "DELETE FROM member_environment_inheritance WHERE member_id=?1 AND revision=5",
+            [a],
+        )
+        .unwrap();
+    assert!(
+        !inheritance(
+            database.connection(),
+            a,
+            AdapterKind::Pi,
+            5,
+            &read_version(database.connection(), a, AdapterKind::Pi, 5).unwrap()
+        )
+        .unwrap()
+    );
+    assert!(
+        inheritance(
+            database.connection(),
+            a,
+            AdapterKind::Pi,
+            0,
+            &Environment::new()
+        )
+        .unwrap()
+    );
+    let mut startup = crate::runtime_startup::RuntimeStartupConfiguration::default();
+    crate::runtime_startup::apply_common(database.connection(), AdapterKind::Pi, &mut startup)
+        .unwrap();
+    assert!(
+        startup
+            .environment
+            .iter()
+            .any(|entry| entry.name == "COMMON_ONLY" && entry.value == "shared")
+    );
+    // Common deletion and an unrelated runtime do not affect member/private values.
+    common::prepare(
+        database.connection(),
+        AdapterKind::Pi,
+        common_edit(1, json!({})),
+    )
+    .unwrap()
+    .commit(database.connection())
+    .unwrap();
+    assert!(
+        common::current(database.connection(), AdapterKind::Pi)
+            .unwrap()
+            .is_empty()
+    );
+    // One damaged common record cannot prevent Host startup or independent members.
+    let encrypted: Vec<u8> = database.connection().query_row(
+        "SELECT ciphertext FROM runtime_common_environment WHERE runtime_kind='pi' AND revision=2", [], |r| r.get(0)).unwrap();
+    database.connection().execute("UPDATE runtime_common_environment SET ciphertext=x'00' WHERE runtime_kind='pi' AND revision=2", []).unwrap();
+    let startup = crate::runtime_startup::load_all(&database).unwrap();
+    assert!(
+        startup[&AdapterKind::Pi]
+            .ensure_environment_available()
+            .is_err()
+    );
+    assert!(
+        !startup.contains_key(&AdapterKind::CodexCli)
+            || startup[&AdapterKind::CodexCli]
+                .ensure_environment_available()
+                .is_ok()
+    );
+    assert!(current_for_launch(database.connection(), a, AdapterKind::Pi).is_ok());
+    assert!(current_for_launch(database.connection(), MUWA_AGENT_ID, AdapterKind::Pi).is_err());
+    database.connection().execute("UPDATE runtime_common_environment SET ciphertext=?1 WHERE runtime_kind='pi' AND revision=2", [encrypted]).unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE member_runtime_environment SET ciphertext=x'00' WHERE revision=6",
             [],
         )
         .unwrap();
@@ -210,16 +372,37 @@ async fn parallel_child_processes_inherit_their_cli_environment_without_changing
     let (database, root) = database();
     let original = std::env::var_os("ANTHROPIC_API_KEY");
     let literal = "space ' quote \" $HOME ${HOME} ~ $(touch forbidden)\nnext";
+    common::prepare(database.connection(), AdapterKind::Pi, common::Edit {
+        expected_revision: 0,
+        json: json!({"TIMEOUT_MS":"60000", "FEATURE_ENABLED":"true", "RETRY_COUNT":"3", "EMPTY":"common", "PADDED":"00123"}).to_string(),
+    }).unwrap().commit(database.connection()).unwrap();
     let mut plans = Vec::new();
     for (member, key) in [
         (LUOKE_AGENT_ID, "fixture-key-a"),
         (MUWA_AGENT_ID, "fixture-key-b"),
     ] {
-        let mut values = json!({"ANTHROPIC_API_KEY":key,"LITERAL":literal,"PATH":"/member/path/that/does/not/select/the/cli"});
+        let mut values = json!({"ANTHROPIC_API_KEY":key,"LITERAL":literal,"PATH":"/member/path/that/does/not/select/the/cli", "FEATURE_ENABLED":"false", "RETRY_COUNT":"0", "EMPTY":"", "LITERAL_MARKER":"<saved>"});
         if member == LUOKE_AGENT_ID {
             values["MEMBER_A_ONLY"] = json!("private-a");
         }
-        save(database.connection(), member, 0, values).unwrap();
+        prepare(
+            database.connection(),
+            member,
+            AdapterKind::Pi,
+            &ModelSelection::RuntimeDefault,
+            EnvironmentEdit {
+                expected_revision: 0,
+                json: values.to_string(),
+                inherit_common: Some(true),
+            },
+        )
+        .unwrap()
+        .commit(database.connection())
+        .unwrap();
+        assert_eq!(
+            get(database.connection(), member, AdapterKind::Pi).unwrap()["environment"]["LITERAL_MARKER"],
+            "<saved>"
+        );
         plans.push(current_for_launch(database.connection(), member, AdapterKind::Pi).unwrap());
     }
     crate::runtime_discovery::with_launch_environment(Some(plans[0].clone()), async {
@@ -235,7 +418,7 @@ async fn parallel_child_processes_inherit_their_cli_environment_without_changing
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args([
             "-c",
-            "printf '%s\\0%s\\0%s' \"$ANTHROPIC_API_KEY\" \"$LITERAL\" \"$PATH\"",
+            "printf '%s\\0%s\\0%s\\0%s\\0%s\\0%s\\0%s\\0%s' \"$ANTHROPIC_API_KEY\" \"$LITERAL\" \"$PATH\" \"$TIMEOUT_MS\" \"$FEATURE_ENABLED\" \"$RETRY_COUNT\" \"$EMPTY\" \"$PADDED\"",
         ]);
         plan.apply(&mut command).unwrap();
         use crate::managed_process::{
@@ -267,7 +450,16 @@ async fn parallel_child_processes_inherit_their_cli_environment_without_changing
         let fields = text.split('\0').collect::<Vec<_>>();
         assert_eq!(
             fields,
-            [key, literal, "/member/path/that/does/not/select/the/cli"]
+            [
+                key,
+                literal,
+                "/member/path/that/does/not/select/the/cli",
+                "60000",
+                "false",
+                "0",
+                "",
+                "00123"
+            ]
         );
     }
     save(database.connection(), LUOKE_AGENT_ID, 1,
@@ -388,7 +580,7 @@ fn legacy_archive_is_inert_read_only_and_acknowledgment_survives_path_edits() {
         0
     );
     assert_eq!(
-        legacy_get(&raw, AdapterKind::ClaudeCodeCli, true).unwrap()["ANTHROPIC_API_KEY"],
+        legacy_get(&raw, AdapterKind::ClaudeCodeCli).unwrap()["ANTHROPIC_API_KEY"],
         "fixture-old-key"
     );
     raw.execute_batch("DROP TRIGGER fail_session_environment_receipt;")
@@ -419,8 +611,8 @@ fn legacy_archive_is_inert_read_only_and_acknowledgment_survives_path_edits() {
         .unwrap()
         .to_owned();
     assert_eq!(
-        legacy_get(database.connection(), AdapterKind::ClaudeCodeCli, false).unwrap()["ANTHROPIC_API_KEY"],
-        SAVED
+        legacy_get(database.connection(), AdapterKind::ClaudeCodeCli).unwrap()["ANTHROPIC_API_KEY"],
+        "fixture-old-key"
     );
     legacy_acknowledge(database.connection(), AdapterKind::ClaudeCodeCli, &identity).unwrap();
     assert!(
@@ -446,7 +638,7 @@ fn legacy_archive_is_inert_read_only_and_acknowledgment_survives_path_edits() {
         true
     );
     assert_eq!(
-        legacy_get(database.connection(), AdapterKind::ClaudeCodeCli, true).unwrap()["ANTHROPIC_API_KEY"],
+        legacy_get(database.connection(), AdapterKind::ClaudeCodeCli).unwrap()["ANTHROPIC_API_KEY"],
         "fixture-old-key"
     );
     drop(database);

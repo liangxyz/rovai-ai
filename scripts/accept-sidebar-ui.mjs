@@ -1083,7 +1083,7 @@ async function assertCampIdCopy(cdp, target, expectedCampId) {
     await pressKey(cdp, 'ArrowDown')
     await assertHighlightedItem(cdp, '复制会话 ID')
     await pressKey(cdp, 'Enter')
-    await waitForExpression(cdp, `document.querySelector('.app-toast')?.textContent?.includes('已复制会话 ID') === true`)
+    await waitForExpression(cdp, `window.__rovaiSidebarCopiedText === ${JSON.stringify(expectedCampId)}`)
     await assertNoTargetRefocus(cdp, target)
     const state = await evaluate(cdp, `({
       copiedText: window.__rovaiSidebarCopiedText,
@@ -1091,7 +1091,7 @@ async function assertCampIdCopy(cdp, target, expectedCampId) {
       toast: document.querySelector('.app-toast')?.textContent?.trim() ?? null
     })`)
     const copiedText = state.copiedText ?? execFileSync('/usr/bin/pbpaste', { encoding: 'utf8' })
-    assert(copiedText === expectedCampId && !state.menuOpen && state.toast?.includes('已复制会话 ID'),
+    assert(copiedText === expectedCampId && !state.menuOpen && !state.toast,
       `Camp ID copy semantics were incorrect: ${JSON.stringify({ ...state, copiedText })}`)
   } finally {
     await evaluate(cdp, `(() => {

@@ -353,7 +353,7 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(markup).toContain('请 @沐瓦 与 @所有队员 审阅。')
     expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
     expect(markup).not.toContain('<script')
-    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
+    expect(markup).toContain('&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;')
     expect(markup).not.toContain('alert("unsafe")')
   })
 
@@ -386,6 +386,10 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(markup).not.toContain('cache()')
     for (const displayName of ['Murray✨', '小雪_[团队]', '新的昵称']) {
       for (const content of [nonLeading, repeated, [
+        { kind: 'text', text: '<div>\n' },
+        { kind: 'current_user_mention', userId: 'local_user' },
+        { kind: 'text', text: '\n</div>' }
+      ] as StructuredThreadMessageContent, [
         { kind: 'text', text: '**完成**\n\nROVAICURRENTUSER1END\n' },
         { kind: 'current_user_mention', userId: 'local_user' },
         { kind: 'text', text: ' 请确认 `@Principal`' }
@@ -515,7 +519,7 @@ describe('Agent leading Member Mention Markdown rendering', () => {
     expect(markup).toContain('<table>')
     expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
     expect(markup).not.toContain('<script')
-    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
+    expect(markup).toContain('&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;')
   })
 
   it('preserves multiple leading recipients and does not mutate authoritative content', () => {

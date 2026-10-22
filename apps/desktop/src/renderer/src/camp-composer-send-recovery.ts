@@ -14,7 +14,7 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 // Compare owned submission data, independent of JSON property ordering. Local
-// display/probe metadata and the draft revision are not part of the command.
+// availability/probe metadata and the draft revision are not part of the command.
 function equal(left: unknown, right: unknown): boolean {
   if (left === right) return true
   if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((value, index) => equal(value, right[index]))
@@ -40,7 +40,8 @@ export function localDraftMatchesSubmission(draft: ThreadComposerDraftView, subm
     && (draft.replyIntent?.replyToThreadMessageId ?? null) === submitted.replyToThreadMessageId
     && equal(draft.attachments.map(attachment => ({
       id: attachment.id, sourcePath: attachment.sourcePath, displayName: attachment.displayName,
-      kind: attachment.kind, mediaType: attachment.mediaType, observedByteSize: attachment.byteSize
+      kind: attachment.kind, mediaType: attachment.mediaType, observedByteSize: attachment.byteSize,
+      ...(attachment.pastedTextPreview !== undefined ? { pastedTextPreview: attachment.pastedTextPreview } : {})
     })), submitted.sourceAttachments)
 }
 

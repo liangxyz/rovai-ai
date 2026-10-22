@@ -6,7 +6,6 @@ import {
   type AppQuitPreparationResponse
 } from '../shared/app-lifecycle'
 import type {
-  NewConversationDefaults,
   AppearancePreferences,
   AppearanceSnapshot,
   AppUpdateSnapshot,
@@ -15,7 +14,7 @@ import type {
   CoreMethod,
   ExecutionWebSettingsSnapshot,
   ExecutionConsolePlacement,
-  InterfaceLanguage,
+  InterfaceLanguagePreference,
   RestorableLocation,
   SettingsSection,
   StartupLocationMode,
@@ -202,8 +201,16 @@ const api: RovaiApi = {
     get() {
       return ipcRenderer.invoke('rovai:general-preferences-get')
     },
-    setInterfaceLanguage(language: InterfaceLanguage) {
-      return ipcRenderer.invoke('rovai:general-preferences-set-language', language)
+    getInterfaceLanguage() {
+      return ipcRenderer.invoke('rovai:desktop-session-get-interface-language')
+    },
+    onInterfaceLanguageChanged(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: import('@contracts').InterfaceLanguageSnapshot): void => listener(snapshot)
+      ipcRenderer.on('rovai:interface-language-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:interface-language-changed', handler)
+    },
+    setInterfaceLanguagePreference(preference: InterfaceLanguagePreference) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-language', preference)
     },
     setStartupLocationMode(mode: StartupLocationMode) {
       return ipcRenderer.invoke('rovai:general-preferences-set-startup', mode)
@@ -214,6 +221,9 @@ const api: RovaiApi = {
     setExecutionConsolePlacement(placement: ExecutionConsolePlacement) {
       return ipcRenderer.invoke('rovai:general-preferences-set-execution-placement', placement)
     },
+    setNewConversationTeam(teamId, enableOneClick = false) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-team', teamId, enableOneClick)
+    },
     setNewConversationDefaults(defaults, enableOneClick = false) {
       return ipcRenderer.invoke('rovai:general-preferences-set-new-conversation-defaults', defaults, enableOneClick)
     },
@@ -223,8 +233,8 @@ const api: RovaiApi = {
     setWorldMapEnabled(enabled: boolean) {
       return ipcRenderer.invoke('rovai:general-preferences-set-world-map', enabled)
     },
-    invalidateNewConversationDefaults(expectedDefaults?: NewConversationDefaults | null) {
-      return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults', expectedDefaults)
+    invalidateNewConversationDefaults(expected) {
+      return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults', expected)
     }
   },
   channels: {
@@ -308,11 +318,12 @@ const api: RovaiApi = {
     deferRuntimeSetup() {
       return ipcRenderer.invoke('rovai:onboarding-defer-runtime')
     },
-    beginProvisioning(selection, runtimePermissions) {
+    beginProvisioning(selection, runtimePermissions, interfaceLanguage) {
       return ipcRenderer.invoke(
         'rovai:onboarding-begin-provisioning',
         selection,
-        runtimePermissions
+        runtimePermissions,
+        interfaceLanguage
       )
     },
     recordProvisionedMember(agentId, version) {
@@ -411,6 +422,18 @@ const api: RovaiApi = {
     }
   },
   composerAttachments: {
+    async preparePastedText(threadId, file) {
+      if (file.size > 25 * 1024 * 1024) throw new Error('附件无效或超过 25 MiB。')
+      return ipcRenderer.invoke(
+        'rovai:composer-attachment-prepare-pasted-text',
+        threadId,
+        file.name,
+        new Uint8Array(await file.arrayBuffer())
+      )
+    },
+    removePastedText(threadId, attachmentRefId) {
+      return ipcRenderer.invoke('rovai:composer-attachment-remove-pasted-text', threadId, attachmentRefId)
+    },
     async prepare(threadId, expectedRevision, file) {
       const sourcePath = webUtils.getPathForFile(file)
       if (sourcePath) {

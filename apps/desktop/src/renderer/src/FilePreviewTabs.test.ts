@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -122,11 +123,7 @@ beforeEach(() => {
 })
 
 describe('localized preview status tabs', () => {
-  const preferences = {
-    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
-      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
-    })
-  } as GeneralPreferencesApi
+  const preferences = languageTestApi
 
   afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
 

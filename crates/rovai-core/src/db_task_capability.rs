@@ -330,6 +330,7 @@ pub(super) fn assert_upgrade(db: &mut Database) {
         .unwrap();
     migrate_notification_boundary(db).unwrap();
     super::single_chat_facts::migrate(db).unwrap();
+    db.migrate(false).unwrap();
     assert!(!crate::task_capability::enabled(db.connection()).unwrap());
     assert_eq!(
         evidence,

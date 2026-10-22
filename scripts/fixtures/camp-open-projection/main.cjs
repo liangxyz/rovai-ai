@@ -22,7 +22,8 @@ app.whenReady().then(async () => {
   window.webContents.on('console-message', event => {
     if (event.level === 'warning' || event.level === 'error' || event.level >= 2) errors.push(event.message)
   })
-  await window.loadFile(renderer, attachmentReview ? { query: { review: 'attachments' } } : undefined)
+  await window.loadFile(renderer, attachmentReview ? { query: { review: 'attachments' } }
+    : mode === '--input-history' ? { query: { inputHistory: '1' } } : undefined)
   const run = code => window.webContents.executeJavaScript(code, true).catch(error => { throw new Error(`Fixture action failed: ${code}`, { cause: error }) })
   const state = async () => { await run('window.campOpenTest.settle()'); return run('window.campOpenTest.state()') }
   const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
@@ -40,13 +41,145 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--input-history') {
+      const settle = () => run('window.campOpenTest.settle()')
+      const history = async () => { await settle(); return run('window.campOpenTest.inputHistoryState()') }
+      const waitFor = async expression => {
+        const deadline = Date.now() + 5000
+        do { await settle(); if (await run(expression)) return } while (Date.now() < deadline)
+        assert.fail(`Input history condition: ${expression}`)
+      }
+      const boundary = async end => { await run(`window.campOpenTest.historyBoundary(${Boolean(end)})`); await settle() }
+      const key = async (key, extra = {}) => {
+        const consumed = await run(`(() => {
+          const event = new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true, ...${JSON.stringify(extra)} })
+          document.querySelector('#camp-message').dispatchEvent(event)
+          return event.defaultPrevented
+        })()`)
+        await settle()
+        return consumed
+      }
+      await waitFor("document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'")
+      await boundary(false)
+      assert.equal(await key('ArrowUp'), false, 'empty existing messages keep native Up')
+      await window.webContents.insertText('我的未发送草稿')
+      await run('window.campOpenTest.setHistoryMessages()')
+      await waitFor('window.campOpenTest.localDraftState().body === "我的未发送草稿"')
+      const readsBefore = (await history()).reads
+      await boundary(false)
+      assert.equal(await key('ArrowUp', { isComposing: true }), false)
+      assert.equal(await key('ArrowUp', { ctrlKey: true }), false)
+      assert.equal(await key('ArrowDown'), false, 'Down outside browsing remains native')
+      assert.equal(await key('ArrowUp'), true)
+      let value = await history()
+      assert.equal(value.atoms, 2, 'member and Skill remain structured')
+      assert.equal(value.sendDisabled, false, 'preview drives send eligibility')
+      await run('window.campOpenTest.setHistoryMessages(true)')
+      await settle()
+      assert.equal((await history()).atoms, 2, 'message refresh does not replace this round')
+      await new Promise(resolve => setTimeout(resolve, 450))
+      assert.equal((await run('window.campOpenTest.localDraftState()')).body, '我的未发送草稿', 'preview is not autosaved')
+      assert.equal(await key('Escape'), true)
+      assert.equal((await history()).text, '我的未发送草稿')
+      await boundary(false)
+      await key('ArrowUp')
+      assert.equal((await history()).text, 'arrived later', 'next round reads the latest existing messages')
+      await key('Escape')
+      await run('window.campOpenTest.setHistoryMessages()')
+      await settle()
+      await boundary(false)
+      await key('ArrowUp')
+      await key('ArrowUp')
+      assert.equal((await history()).text, 'old 1')
+      await boundary(true)
+      await key('ArrowDown')
+      assert.equal((await history()).atoms, 2)
+      await boundary(true)
+      await key('ArrowDown')
+      assert.equal((await history()).text, '我的未发送草稿')
+      const undoModifier = process.platform === 'darwin' ? { metaKey: true } : { ctrlKey: true }
+      await key('z', undoModifier)
+      assert.equal((await history()).text, '', 'recall and caret moves do not add previews to undo')
+      await key('z', { ...undoModifier, shiftKey: true })
+      assert.equal((await history()).text, '我的未发送草稿', 'redo keeps the original draft')
+      // Move the caret inside a live preview before invoking history commands:
+      // selection-only updates can otherwise merge the preview into Lexical history.
+      await boundary(true)
+      await window.webContents.insertText('（修改）')
+      await waitFor('window.campOpenTest.localDraftState().body === "我的未发送草稿（修改）"')
+      await boundary(false)
+      await key('ArrowUp')
+      await boundary(true)
+      await key('z', undoModifier)
+      assert.equal((await history()).text, '我的未发送草稿', 'Undo during preview uses the original draft history')
+      assert.equal(await key('Escape'), false, 'Undo ends the browsing round')
+      await key('z', { ...undoModifier, shiftKey: true })
+      assert.equal((await history()).text, '我的未发送草稿（修改）', 'Redo after preview Undo restores the changed draft, not the preview')
+      await key('z', undoModifier)
+      await boundary(false)
+      await key('ArrowUp')
+      await boundary(true)
+      await key('z', { ...undoModifier, shiftKey: true })
+      assert.equal((await history()).text, '我的未发送草稿（修改）', 'Redo during preview uses the existing redo stack')
+      assert.equal(await key('Escape'), false, 'Redo ends the browsing round')
+      await key('z', undoModifier)
+      assert.equal((await history()).text, '我的未发送草稿', 'Undo after preview Redo restores the draft, not the preview')
+      await key('z', { ...undoModifier, shiftKey: true })
+      await boundary(false)
+      await key('ArrowUp')
+      await boundary(true)
+      await key('z', { ...undoModifier, shiftKey: true })
+      assert.equal((await history()).text, '我的未发送草稿（修改）', 'Redo with an empty stack still exits preview and restores the draft')
+      assert.equal(await key('Escape'), false)
+      await key('z', undoModifier)
+      assert.equal((await history()).text, '我的未发送草稿')
+      await waitFor('window.campOpenTest.localDraftState().body === "我的未发送草稿"')
+      await boundary(false)
+      await key('ArrowUp')
+      for (let index = 0; index < 21; index++) await key('ArrowUp')
+      assert.equal((await history()).text, 'old 21')
+      assert.equal(await key('ArrowUp'), false, 'oldest item never loads more messages')
+      assert.deepEqual((await history()).reads, readsBefore, 'history navigation makes no message requests')
+      await key('Escape')
+      await boundary(false)
+      await key('ArrowUp')
+      await window.webContents.insertText('编辑后的 ')
+      await waitFor('window.campOpenTest.localDraftState().body?.includes("编辑后的")')
+      const edited = (await history()).text
+      assert.equal(await key('Escape'), false)
+      assert.equal((await history()).text, edited, 'editing adopts preview')
+      // A full production remount restores only the saved draft.
+      await boundary(false)
+      await key('ArrowUp')
+      await run('window.campOpenTest.remount()')
+      await waitFor('window.campOpenTest.inputHistoryState().text?.includes("编辑后的")')
+      await boundary(false)
+      await key('ArrowUp')
+      await run("Array.from(document.querySelectorAll('.composer-primary-action')).at(-1).click()")
+      await waitFor('window.campOpenTest.inputHistoryState().sends.length === 1')
+      value = await history()
+      assert.deepEqual(value.sends[0], value.expected, 'send freezes the displayed structured input')
+      await waitFor('window.campOpenTest.inputHistoryState().text === ""')
+      await boundary(false)
+      await key('ArrowUp')
+      assert.equal((await history()).atoms, 2)
+      await key('ArrowUp')
+      assert.equal((await history()).text, 'old 1', 'a receipt alone does not insert another history entry')
+      await key('Escape')
+      assert.equal((await history()).text, '', 'successful send cannot restore the old draft')
+      assert.deepEqual(errors, [])
+      console.log(JSON.stringify({ ok: true, mode, checks: ['empty-history', 'keyboard-priority', 'structured-preview',
+        'draft-preservation', 'undo-redo', 'undo-redo-during-preview', 'fixed-round', 'no-history-requests', 'edit-adoption', 'remount', 'displayed-send'] }))
+      window.destroy(); app.quit()
+      return
+    }
     if (mode === '--steer') {
       const settle = () => run('window.campOpenTest.settle()')
       for (const theme of ['day','night']) {
         await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
         for (const scenario of ['single','multi','attachment','unsupported','continuation','flushed-recipient']) {
           await run(`window.campOpenTest.showSteer(${JSON.stringify(scenario)})`); await settle()
-          const expected = scenario === 'unsupported' ? '发送消息' : scenario === 'multi' ? '发送' : '插话'
+          const expected = scenario === 'unsupported' ? '发送消息' : scenario === 'multi' ? '优先插话' : '插话'
           assert.equal(await run(`Array.from(document.querySelectorAll('.composer-primary-action')).at(-1).getAttribute('aria-label')`),expected, `${theme}/${scenario}`)
           assert.equal(await run(`Array.from(document.querySelectorAll('.composer-primary-action')).at(-1).disabled`),false)
           if (scenario !== 'unsupported') {

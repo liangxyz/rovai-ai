@@ -3,13 +3,13 @@ document_type: architecture
 architecture: camp-attachments
 authority: live-source-references-and-legacy-attachment-reads
 status: accepted
-last_updated: 2026-09-22
+last_updated: 2026-10-21
 ---
 
 # Camp Attachments：原路径引用、默认输出与历史读取
 
 新用户输入和新 Agent 发布复用 `LocalAttachmentSourceRef`；历史 Managed/Prepared/Message Attachment 保留原位读取。
-[Camp Attachment v10](../contracts/camp-attachment-v10.md) 拥有当前合同；
+[Camp Attachment v12](../contracts/camp-attachment-v12.md) 拥有当前合同；
 [V1.59-D08](../versions/v1.59/decisions.md#v1-59-d08) 解释从复制快照转为原路径的选择。
 
 ## 发布和身份
@@ -32,6 +32,10 @@ CLI 只传指定路径，Core 在锁外观察此对象，提交前再次核对 R
 既有 `source_attachments_json` 明确选择新读取语义；旧关系表选择旧读取语义，不猜测目录名字。
 同 Camp 相同 sourcePath 可复用附件 ID，内容编辑不换身份；跨 Camp 分别保存引用，物理文件仍为同一份。
 目录仅保存位置，不遍历整树分配身份。失败不删除源文件。
+
+Source Ref 显示名只承担展示元数据职责：检查非空、120 码点上限及控制字符，保留冒号等原始字符，
+不再复用落盘文件名的规范化相等检查。实际读取始终使用原 sourcePath；渠道下载、历史受管文件等
+创建文件的入口仍负责安全目标名称。已有记录和 Desktop 本地恢复绑定不重写。
 
 用户 Composer/Pending/单聊的 owner、发布前重检、编辑隔离和弱持久性保持原合同；
 Agent 新发布直接使用消息 source refs，不建立另一个资产实体或内容版本库。

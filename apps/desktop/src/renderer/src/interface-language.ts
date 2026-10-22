@@ -1,76 +1,120 @@
 import { useSyncExternalStore } from 'react'
-import type { GeneralPreferencesApi, GeneralPreferencesSnapshot, InterfaceLanguage } from '@contracts'
+import type { GeneralPreferencesSnapshot, InterfaceLanguage, InterfaceLanguageApi, InterfaceLanguagePreference, InterfaceLanguageSnapshot } from '@contracts'
+import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 import englishCopy from './locales/en.json'
 
 const english: Readonly<Record<string, string>> = englishCopy
 const listeners = new Set<() => void>()
-let currentLanguage: InterfaceLanguage = 'zh-CN'
-let savedLanguage: InterfaceLanguage = 'zh-CN'
+// Unbound, component-only callers retain the catalog's original Chinese presentation.
+// Desktop/Web entries gate their first frame on the local source below.
+let current: InterfaceLanguageSnapshot = languageSnapshot({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguagePreference: 'zh-CN', interfaceLanguage: 'zh-CN' })
+let saved = current
 let initialized = false
 let requestNumber = 0
-let lastSavedRequest = 0
 let pendingRequests = 0
 let latestRequestFailed = false
+let epoch = 0
+let source: InterfaceLanguageApi | null = null
 
-function publish(language: InterfaceLanguage): void {
-  if (currentLanguage === language) return
-  currentLanguage = language
-  if (typeof document !== 'undefined') document.documentElement.lang = language
-  listeners.forEach((listener) => listener())
+function languageSnapshot(snapshot: InterfaceLanguageSnapshot): InterfaceLanguageSnapshot {
+  const { interfaceLanguagePreference, interfaceLanguage, systemLanguage, languageRevision, readError } = snapshot
+  return { interfaceLanguagePreference, interfaceLanguage, systemLanguage, languageRevision, readError }
 }
-
+function publish(snapshot: InterfaceLanguageSnapshot): void {
+  if (typeof document !== 'undefined') document.documentElement.lang = snapshot.interfaceLanguage
+  if (JSON.stringify(current) === JSON.stringify(snapshot)) return
+  current = languageSnapshot(snapshot)
+  listeners.forEach(listener => listener())
+}
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
+export const getInterfaceLanguage = (): InterfaceLanguage => current.interfaceLanguage
+export const getInterfaceLanguageSnapshot = (): InterfaceLanguageSnapshot => current
+export const useInterfaceLanguage = (): InterfaceLanguage => useSyncExternalStore(subscribe, getInterfaceLanguage, getInterfaceLanguage)
+export const useInterfaceLanguageSnapshot = (): InterfaceLanguageSnapshot => useSyncExternalStore(subscribe, getInterfaceLanguageSnapshot, getInterfaceLanguageSnapshot)
 
-export function getInterfaceLanguage(): InterfaceLanguage {
-  return currentLanguage
+function effective(snapshot: InterfaceLanguageSnapshot, preference = snapshot.interfaceLanguagePreference): InterfaceLanguageSnapshot {
+  return { ...snapshot, interfaceLanguagePreference: preference, interfaceLanguage: preference === 'system' ? snapshot.systemLanguage : preference }
 }
-
-export function useInterfaceLanguage(): InterfaceLanguage {
-  return useSyncExternalStore(subscribe, getInterfaceLanguage, getInterfaceLanguage)
-}
-
-/** Apply the first persisted snapshot without letting a late read undo a user's choice. */
-export function initializeInterfaceLanguage(snapshot: Pick<GeneralPreferencesSnapshot, 'interfaceLanguage'>): void {
-  if (initialized || pendingRequests > 0) return
+function accept(snapshot: InterfaceLanguageSnapshot): void {
+  if (snapshot.languageRevision < saved.languageRevision) return
+  saved = languageSnapshot(snapshot)
   initialized = true
-  savedLanguage = snapshot.interfaceLanguage
-  publish(snapshot.interfaceLanguage)
+  publish(effective(saved, pendingRequests > 0 && !latestRequestFailed ? current.interfaceLanguagePreference : saved.interfaceLanguagePreference))
 }
 
-/** Optimistic display; serialized persistence in the preference store makes the last choice win. */
+/** Standalone consumers can restore once; the entry's live local source owns later changes. */
+export function initializeInterfaceLanguage(snapshot: InterfaceLanguageSnapshot): void {
+  if (source || initialized || pendingRequests > 0) return
+  accept(snapshot)
+}
+
+/** Subscribe before reading; revisions and source epochs reject stale reads, events and saves. */
+export function observeInterfaceLanguage(api: InterfaceLanguageApi, ready: () => void = () => undefined): () => void {
+  const generation = ++epoch
+  source = api
+  initialized = false
+  pendingRequests = 0
+  latestRequestFailed = false
+  saved = { ...languageSnapshot(DEFAULT_GENERAL_PREFERENCES), languageRevision: -1 }
+  const unsubscribe = api.onInterfaceLanguageChanged(snapshot => { if (generation === epoch) accept(snapshot) })
+  void refreshInterfaceLanguage().finally(() => { if (generation === epoch) ready() })
+  return () => {
+    unsubscribe()
+    if (generation === epoch) { epoch++; source = null }
+  }
+}
+
+export async function refreshInterfaceLanguage(): Promise<void> {
+  if (!source) return
+  const generation = epoch
+  try {
+    const snapshot = await source.getInterfaceLanguage()
+    if (generation === epoch) accept(snapshot)
+  } catch {
+    if (generation !== epoch) return
+    saved = { ...saved, readError: {
+      code: 'interface_language_unreadable', message: '语言偏好暂时无法读取，原记录已保留。', retryable: true, details: {}
+    } }
+    publish({ ...(initialized ? current : effective(saved)), readError: saved.readError })
+  }
+}
+
+/** Optimistic display; persistence is serialized by the local preference owner. */
 export async function changeInterfaceLanguage(
-  api: GeneralPreferencesApi,
-  language: InterfaceLanguage,
+  api: InterfaceLanguageApi,
+  preference: InterfaceLanguagePreference,
   onSaved?: (snapshot: GeneralPreferencesSnapshot) => void
 ): Promise<void> {
-  const request = ++requestNumber
-  pendingRequests += 1
+  const request = ++requestNumber, generation = epoch
+  pendingRequests++
   latestRequestFailed = false
-  publish(language)
+  publish(effective(current, preference))
   try {
-    const snapshot = await api.setInterfaceLanguage(language)
-    if (request > lastSavedRequest) {
-      lastSavedRequest = request
-      savedLanguage = snapshot.interfaceLanguage
-      initialized = true
-      onSaved?.(snapshot)
-    }
+    const snapshot = await api.setInterfaceLanguagePreference(preference)
+    if (generation !== epoch) return
+    if (snapshot.languageRevision >= saved.languageRevision) saved = languageSnapshot(snapshot)
+    initialized = true
     if (request === requestNumber) {
       latestRequestFailed = false
-      publish(snapshot.interfaceLanguage)
+      publish(effective(saved))
+      onSaved?.({ ...snapshot, ...saved })
     }
   } catch (error) {
-    if (request === requestNumber) {
+    if (generation === epoch && request === requestNumber) {
       latestRequestFailed = true
-      publish(savedLanguage)
+      publish(effective(saved))
+      // Refresh the system result on rollback; it is never restored from a cached manual language.
+      await refreshInterfaceLanguage()
     }
     throw error
   } finally {
-    pendingRequests -= 1
-    if (pendingRequests === 0 && latestRequestFailed) publish(savedLanguage)
+    if (generation === epoch) {
+      pendingRequests--
+      if (pendingRequests === 0 && latestRequestFailed) publish(effective(saved))
+    }
   }
 }
 
@@ -98,5 +142,5 @@ export function UiText({ zh }: { zh: string }): string {
 }
 
 export function uiAttribute(chinese: string, ...values: Array<string | number>): string {
-  return translateUi(currentLanguage, chinese, ...values)
+  return translateUi(current.interfaceLanguage, chinese, ...values)
 }

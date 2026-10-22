@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react'
+import { $getRoot, getNearestEditorFromDOMNode } from 'lexical'
+import { composerDocumentToStructuredContent } from '../../../apps/desktop/src/renderer/src/composer-document'
 import { ReturnToLatest } from '../../../apps/desktop/src/renderer/src/ReturnToLatest'
 import { ExecutionLatestContext } from '../../../apps/desktop/src/renderer/src/useExecutionWindow'
 import { createRoot } from 'react-dom/client'
 import type {
   AgentProfile,
+  ComposerDocument,
   AgentRunView,
   AgentRunExecutionBlock,
   AgentRunExecutionEvidenceView,
@@ -27,6 +30,14 @@ let steerFixtureRevision = 0
 let steerSent: {mode: string | undefined; attachments: number; recipients: string[]; targets: Array<{agentRunId: string; executionEpoch: number}>} | null = null
 const now = '2026-08-31T00:00:00Z'
 const threadId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
+const inputHistoryMode = new URLSearchParams(location.search).has('inputHistory')
+const inputHistoryReads: string[] = []
+const inputHistorySends: ComposerDocument[] = []
+const recallContent: ComposerDocument = { version: 2, segments: [
+  { kind: 'atom', atom: { type: 'member', agentId: 'agent-2' } },
+  { kind: 'text', text: ' 历史问题 ' },
+  { kind: 'atom', atom: { type: 'skill', skillId: 'recall-skill', nameAtSend: 'recall-skill' } }
+] }
 const fullNarration = `BODY_A ${'完整正文🙂 '.repeat(5000)} LONG_BODY_A_END`
 let textReadFailures = 1
 const textEvidence: AgentRunExecutionEvidenceView[] = [
@@ -184,6 +195,14 @@ const projection = (count: number): ThreadOpenProjection => ({
 const earlier = { ...campOpenProjectionAsSnapshot(projection(60)),
   messages: messages.slice(0, 40).map(message => ({ ...message, timelineGlobalSequence: message.sequence })) }
 let current = campOpenProjectionAsSnapshot(projection(60), earlier)
+const recallMessages = Array.from({ length: 22 }, (_, index) => ({
+  ...current.messages[0], id: `recall-${21 - index}`, sequence: index + 1,
+  authorType: 'user' as const, authorId: 'local_user', withdrawn: false, version: 1,
+  body: index === 21 ? '历史问题' : `old ${21 - index}`,
+  content: index === 21 ? composerDocumentToStructuredContent(recallContent) : [{ kind: 'text' as const, text: `old ${21 - index}` }]
+}))
+if (inputHistoryMode) current = { ...current, messages: [], agentRuns: [], turns: [], timeline: [] }
+
 let updateSnapshot: (snapshot: typeof current) => void
 let updateCurrentUserProfile: (profile: CurrentUserProfile) => void
 let updateMessageHistory: (coverage: ThreadOpenMessageCoverage | null) => void
@@ -326,6 +345,7 @@ Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
   clipboard: { write: async ({ text }: { text: string }) => { copiedPublicText = text } },
   request: async (method: string, params?: {
+    cursor?: string | null
     imageId?: string
     evidenceId?: string
     agentRunId?: string
@@ -339,6 +359,7 @@ Object.assign(window, { rovai: {
     beforeSequence?: number | null
     limit?: number
   }): Promise<unknown> => {
+    if (inputHistoryMode && method.startsWith('thread.messages.')) inputHistoryReads.push(method)
     if (steerFixture && method === 'thread.messages.anchors') return {schemaVersion:1,threadId,throughGlobalSequence:current.throughGlobalSequence,totalCount:0,items:[]}
     if (method === 'agentRunExecution.page') {
       const beforeSequence = params?.beforeSequence ?? null, afterSequence = params?.afterSequence ?? null
@@ -417,7 +438,10 @@ Object.assign(window, { rovai: {
       if (textReadFailures-- > 0) throw new Error('Transient Blob read error')
       return { payload: { text: fullNarration } }
     }
-    if (method === 'skills.candidates') return { skills: [], errors: [] }
+    if (method === 'skills.candidates') return { skills: inputHistoryMode ? [{
+      id: 'recall-skill', name: 'recall-skill', description: 'Fixture', source: 'toolbox',
+      sourceScope: 'user', entryPath: '/fixture/SKILL.md', memberIds: ['agent-2']
+    }] : [], errors: [] }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'agentRunImages.read') return imageResultsById.get(params?.imageId ?? '') ?? imageResult
     throw new Error(`Unexpected fixture API: ${method}`)
@@ -509,7 +533,12 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
           setMessageHistory({ loadedCount: 61, totalCount: 61, omittedCount: 0, complete: true,
             oldestLoadedSequence: 1, newestLoadedSequence: 61, hasEarlier: false })
         }}
-        onSend={async (value, mode, targets) => { steerSent = { mode, attachments: value.attachments.length,
+        onSend={async (value, mode, targets) => {
+          if (inputHistoryMode) {
+            inputHistorySends.push(structuredClone(value.content))
+            return { threadMessageId: `accepted-${inputHistorySends.length}`, deliveryIds: [], agentRunIds: [], addressedAgentIds: ['agent-2'] }
+          }
+          steerSent = { mode, attachments: value.attachments.length,
           recipients: value.content.segments.flatMap(segment => segment.kind === 'atom' && segment.atom.type === 'member' ? [segment.atom.agentId] : []),
           targets: targets ?? [] }; return { deliveryIds: [], agentRunIds: [], addressedAgentIds: [] } }} onChangeLead={async () => {}} onTasksChanged={async () => {}}
         onResolveApproval={() => {}} onStop={() => {}} worldMapEnabled={false} executionPlacement={activePlacement}
@@ -555,6 +584,25 @@ reactRoot.render(<Fixture />)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let anchor: HTMLElement | null = null
 Object.assign(window, { campOpenTest: {
+  setHistoryMessages: (refresh = false) => {
+    current = { ...current, messages: refresh ? [...recallMessages, {
+      ...recallMessages[0], id: 'arrived-later', sequence: 23, body: 'arrived later',
+      content: [{ kind: 'text', text: 'arrived later' }]
+    }] : recallMessages }
+    updateSnapshot(current)
+  },
+  historyBoundary: (end = false) => {
+    const editor = getNearestEditorFromDOMNode(element('#camp-message'))
+    editor.update(() => { if (end) $getRoot().selectEnd(); else $getRoot().selectStart() }, { discrete: true })
+    element('#camp-message').focus()
+  },
+  inputHistoryState: () => ({
+    reads: inputHistoryReads, sends: inputHistorySends, expected: recallContent,
+    stored: loadLocalThreadComposerDraft(threadId)?.content,
+    text: element('#camp-message')?.textContent,
+    atoms: element('#camp-message')?.querySelectorAll('[data-composer-atom]').length,
+    sendDisabled: Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-primary-action')).at(-1)?.disabled
+  }),
   showSteer: (scenario: string) => {
     steerFixture = true; steerSent = null; localStorage.clear()
     const continuation = scenario === 'continuation'

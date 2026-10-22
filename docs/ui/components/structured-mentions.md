@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-10-16
+last_updated: 2026-10-21
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -90,8 +90,11 @@ All Members 候选继续显示广播说明，范围仍是发送时 Camp 中的�
 
 - Enter：Typeahead 先同步决定是否消费；其返回 false 后，非 Shift、非 composition、Composer 非空且允许发送时提交；
 - Shift+Enter：插入 LineBreak，领域文档导出为 Text 中的 `\n`；
-- Escape：先关闭 Typeahead，再关闭 Atom 激活态，始终保留正文；
-- Arrow Up/Down：仅在 Typeahead 打开时改变候选，否则保留正常光标行为；
+- Escape：候选/链接菜单优先；输入历史浏览时恢复原结构化草稿并消费事件，其余沿用 Atom 激活态关闭；
+- Arrow Up/Down：Typeahead 优先；会话输入在文档绝对起点用 Up 回看，浏览中在绝对终点用 Down 前进。
+  回看置于起点，前进置于终点；Down 越过最新项恢复草稿。有选区、修饰键或 IME 时保持原行为，
+  非浏览中的 Down 不接管。见 [Input History v1](../../contracts/input-history-v1.md)；
+  Mission 等非会话编辑器保持原行为；
 - Backspace/Delete：普通文本遵循原生 Lexical 行为，Atom 整体删除；绝对起点保留 `onBackspaceAtStart`；
 - Undo/Redo：覆盖输入、删除、粘贴、换行、Atom 插入/删除和选区替换；Catalog 与保存状态不进入历史。
 
@@ -135,8 +138,28 @@ Composer 选区 Copy/Cut 同时写：
 - `text/html`：仅兼容可见文本，不拥有 identity。
 
 粘贴时文件优先交给附件入口。没有文件时优先读取私有 MIME，严格校验 version、closed Segment/Atom shape 和
-identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引用转换为普通可见文本。没有合法私有 MIME 时只
-插入 `text/plain`，或把 HTML 解析为可见纯文本。
+identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引用转换为普通可见文本。只有恢复后仍包含实际
+Member、All Members 或 Skill Atom 的内容优先按结构化粘贴。仅含文字的内部文档使用文档自身的完整正文，
+同样参与下面的长文本阈值判断；不能因带私有 MIME 而豁免，也不被并行的 `text/plain` 截短或替换。
+没有合法私有 MIME 时使用 `text/plain`，或把 HTML 解析为可见纯文本。
+
+仅公屏消息输入框（已有与新建 Thread）通过调用方可选回调启用单次长文本附件化；使命描述和单聊不启用。
+只在 paste 的普通文本分支对本次最终纯文本按 Unicode 码点计数：不超过 10,000 时正常插入，超过时
+将完整 UTF-8 内容写为 `.txt`，保留空格、Tab 和换行。文件名从 `粘贴内容-1.txt`（英文 `Pasted-text-1.txt`）起，仅避开当前已添加和
+待准备附件的显示名；Main 在所属 Thread 输出目录写入 UUID 文件，沿用原附件卡片、预览、草稿与发送。转换成功不改正文，
+包括已有选区；成功后只显示附件卡片，不追加成功提示。无正文占位符或永久保存承诺。
+
+长文本附件在既有串行准备队列内按最新草稿数量检查加入后的附件上限。原文保留到原草稿接纳结果明确：
+未接纳时，在该准备任务结束前追加到原编辑器当前正文末尾，移除本次被回填替代的失败附件卡并轻提示；
+已接纳后发生本地保存、Pending presence 或发送错误时沿用既有错误处理，不重复回填。Pending 本地保存成功
+即已接纳，不能把后续 presence 拒绝当作未接纳。回填不表示持久保存成功，后续保存失败继续保留编辑器与错误。
+发送按钮禁用和离开前等待沿用原行为，不记忆一次点击并自动发送。不增加位置追踪、跨 Thread 后台恢复、
+自动重试、累计正文检测、输入预算预判或选中文本转换。
+
+移除未进入发送流程的生成附件，先成功保存移除后的本机草稿，再等待异步删除并清登记。曾进入发送流程的
+文件只移除引用，保留到会话删除。清理失败用轻提示说明，允许继续编辑；外部文件和发送成功后的源文件不删除。
+发送成功后先保存新草稿，再释放旧登记，保存失败保留恢复能力。普通弹窗零消息 Active 不按 Pending 清理；
+一键 Pending 的附件仍在时不是空草稿。存储、保护和失败边界见 [Composer Draft v19](../../contracts/camp-composer-draft-v19.md)。
 
 不得从纯文本 `@Alice`、`/review-code` 或外部 HTML 的 `data-reference-id`、`data-atom-type`、`data-skill-id`
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。

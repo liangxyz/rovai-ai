@@ -9176,6 +9176,9 @@ mod tests {
         );
         assert!(state.last_error_code.is_none());
         assert_eq!(state.input_delivery_status, "accepted");
+        assert_eq!(database.connection().query_row(
+            "SELECT interruption_kind FROM notification_occurrence WHERE agent_run_id=?1 AND semantic='run_stopped'",
+            [&agent_run_id], |r| r.get::<_,String>(0)).unwrap(), "app_shutdown");
         assert_eq!(
             service
                 .count_runtime_terminal_settlements(
@@ -9363,6 +9366,9 @@ mod tests {
             );
             assert_eq!(state.5, "failed");
             assert_eq!(state.6, 12);
+            assert_eq!(database.connection().query_row(
+                "SELECT interruption_kind FROM notification_occurrence WHERE agent_run_id=?1 AND semantic='turn_failed'",
+                [&agent_run_id], |r| r.get::<_,String>(0)).unwrap(), "execution_lost");
 
             // Cleanup uses cancellation bookkeeping, but runtime loss must remain
             // a failure in the public view rather than a legacy user cancellation.
@@ -9456,6 +9462,9 @@ mod tests {
             .unwrap();
         assert_eq!(replay.cycles_settled, 0);
         assert!(replay.fenced_agent_runs.is_empty());
+        assert_eq!(database.connection().query_row(
+            "SELECT count(*) FROM notification_occurrence WHERE agent_run_id=?1 AND interruption_kind='app_shutdown'",
+            [&agent_run_id], |r| r.get::<_,i64>(0)).unwrap(), 1, "startup replay must keep the first admission");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -9641,6 +9650,17 @@ mod tests {
         assert_eq!(state.1.as_deref(), Some("runtime_terminal"));
         assert_eq!(state.2.as_deref(), Some("planned_shutdown_cancelled"));
         assert_eq!(state.3, "cancelled");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT interruption_kind FROM notification_occurrence WHERE agent_run_id=?1",
+                    [&agent_run_id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "app_shutdown"
+        );
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -10955,6 +10975,9 @@ mod tests {
             repeated_with_stale_version.result.code,
             "agent_run.already_terminal"
         );
+        assert_eq!(database.connection().query_row(
+            "SELECT count(*) FROM notification_occurrence WHERE agent_run_id=?1 AND interruption_kind='user_stop'",
+            [&target_run_id], |r| r.get::<_,i64>(0)).unwrap(), 0, "manual cancel and repeat do not admit exit attention");
 
         let run_state: (
             String,

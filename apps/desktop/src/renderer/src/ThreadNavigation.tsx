@@ -1,8 +1,10 @@
+import { TeamGlyph } from './MissionDefinitionEditor'
 import { useShortcutAction, useShortcutLabel, useShortcuts } from './ShortcutProvider'
 import { useThreadClient } from './camp-client'
 import { useMobileLayout } from './MobileLayout'
 import { useNavigationPressMenu } from './useNavigationPressMenu'
 import { navigationThreadHasUnread } from './navigation-unread'
+import { useInterruptionAttention } from './thread-interruption-attention'
 import {
   useEffect,
   useMemo,
@@ -151,6 +153,7 @@ export function ThreadNavigation({
   updateSnapshot = null,
   onNewConversation,
   onMembers,
+  onTeams = () => undefined,
   onAutomations = () => undefined,
   onMissions = () => undefined,
   unreadMissionCount = 0,
@@ -176,7 +179,7 @@ export function ThreadNavigation({
   navigationId?: string
   settingsNavigation?: React.ReactNode
   footer?: React.ReactNode
-  view: 'compose' | 'camp' | 'members' | 'automations' | 'missions' | 'memory' | 'settings'
+  view: 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'missions' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   disabled?: boolean
   navigation: NavigationSnapshot | null
@@ -199,6 +202,7 @@ export function ThreadNavigation({
   updateSnapshot?: AppUpdateSnapshot | null
   onNewConversation(): void
   onMembers(): void
+  onTeams?(): void
   onAutomations?(): void
   onMissions?(): void
   unreadMissionCount?: number
@@ -411,6 +415,7 @@ export function ThreadNavigation({
                 groups={SETTINGS_SIDEBAR_GROUPS.map(group => ({ ...group, items: group.items.filter(item => (item.key !== 'channels' || client.channels) && (item.key !== 'shortcuts' || managed)) }))}
                 section={settingsSection}
                 updateBadge={updateBadge}
+                pendingMemoryCount={pendingMemoryCount}
                 onSectionChange={onSettingsSectionChange}
                 onBack={onSettingsBack}
               />
@@ -418,22 +423,14 @@ export function ThreadNavigation({
           : (
               <>
                 <nav className="unified-primary-nav" aria-label={uiAttribute("主要页面")}>
-                  <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label={uiAttribute("新对话")} title={uiAttribute("新对话")} onClick={onNewConversation} disabled={state !== 'ready' || creatingConversation}>
+                  <button className={`rail-button new-conversation-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label={uiAttribute("新对话")} title={uiAttribute("新对话")} onClick={onNewConversation} disabled={state !== 'ready' || creatingConversation}>
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="square-pen" /></span><span className="rail-label"><UiText zh={"新对话"} /></span>
                   </button>
                   <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label={uiAttribute("队员")} title={uiAttribute("队员")} onClick={onMembers}>
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="users" /></span><span className="rail-label"><UiText zh={"队员"} /></span>
                   </button>
-                  <button
-                    className={`rail-button ${view === 'memory' ? 'active' : ''}`}
-                    type="button"
-                    aria-current={view === 'memory' ? 'page' : undefined}
-                    aria-label={pendingMemoryCount > 0 ? uiAttribute("记忆，{0} 条普通提案待确认", String(pendingMemoryCount)) : uiAttribute("记忆")}
-                    title={pendingMemoryCount > 0 ? uiAttribute("记忆 · {0} 条普通提案待确认", String(pendingMemoryCount)) : uiAttribute("记忆")}
-                    onClick={onMemory}
-                  >
-                    <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="brain" /></span><span className="rail-label"><UiText zh={"记忆"} /></span>
-                    {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
+                  <button className={`rail-button ${view === 'teams' ? 'active' : ''}`} type="button" aria-current={view === 'teams' ? 'page' : undefined} aria-label={uiAttribute('团队')} title={uiAttribute('团队')} onClick={onTeams}>
+                    <span className="rail-glyph" aria-hidden="true"><TeamGlyph/></span><span className="rail-label">{uiAttribute('团队')}</span>
                   </button>
                   <button
                     className={`rail-button ${view === 'missions' ? 'active' : ''}`}
@@ -610,6 +607,7 @@ export function ThreadNavigation({
           >
             <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="settings" /></span><span className="rail-label"><UiText zh={"设置"} /></span>
           </button>
+          {pendingMemoryCount > 0 && <button type="button" className="team-memory-review-shortcut" aria-label={uiAttribute('记忆，{0} 条普通提案待确认', String(pendingMemoryCount))} title={uiAttribute('记忆，{0} 条普通提案待确认', String(pendingMemoryCount))} onClick={onMemory}><NavigationIcon name="brain"/><span>{pendingMemoryCount}</span></button>}
           {updateBadge && (
             <button
               className={`app-update-badge is-${updateBadge.kind}`}
@@ -721,6 +719,7 @@ export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     label:"应用",
     items: [
       { key: 'general', icon: 'sliders-horizontal', label:"通用" },
+      { key: 'memory', icon: 'brain', label: '记忆' },
       { key: 'appearance', icon: 'sun-moon', label:"外观" },
       { key: 'shortcuts', icon: 'keyboard', label: '快捷键' },
       { key: 'notifications', icon: 'bell-ring', label:"提醒" }
@@ -730,10 +729,10 @@ export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     key: 'capabilities',
     label:"能力",
     items: [
+      { key: 'runtime', icon: 'cpu', label:"智能体" },
       { key: 'mcp', icon: 'blocks', label: 'MCP' },
       { key: 'skills', icon: 'sparkles', label: 'Skills' },
       { key: 'toolbox', icon: 'briefcase-business', label:"工具箱" },
-      { key: 'runtime', icon: 'cpu', label:"智能体" },
       { key: 'remote', icon: 'monitor-smartphone', label:"远程连接" },
       { key: 'channels', icon: 'radio-tower', label:"渠道" }
     ]
@@ -753,12 +752,14 @@ export function SettingsSidebarNavigation<Section extends string>({
   groups,
   section,
   updateBadge,
+  pendingMemoryCount = 0,
   onSectionChange,
   onBack
 }: {
   groups: SettingsSidebarGroup<Section>[]
   section: Section
   updateBadge: AppUpdateBadgePresentation | null
+  pendingMemoryCount?: number
   onSectionChange(section: Section): void
   onBack(): void
 }): JSX.Element {
@@ -793,6 +794,7 @@ export function SettingsSidebarNavigation<Section extends string>({
                 >
                   <span className="settings-sidebar-icon" aria-hidden="true"><NavigationIcon name={item.icon} /></span>
                   <strong>{uiAttribute(item.label)}</strong>
+                  {item.key === 'memory' && pendingMemoryCount > 0 && <span className="team-memory-count">{pendingMemoryCount}</span>}
                   {item.key === 'about' && updateBadge && (
                     <span
                       className={`app-update-badge settings-app-update-badge is-${updateBadge.kind}`}
@@ -1125,10 +1127,19 @@ function ThreadRow({
   const mobile = useMobileLayout()
   const pressMenu = useNavigationPressMenu(true)
   const title = formatThreadTitle(thread, firstRunThreadId)
-  const hasNewReply = navigationThreadHasUnread(thread, readState)
+  const attention = useInterruptionAttention()
+  const hasNewReply = navigationThreadHasUnread(thread, readState?.manualUnread ? { ...readState, manualUnread: false } : readState)
+  const hasInterruption = attention?.snapshots[thread.id]?.unread ?? false
+  const hasUnread = Boolean(readState?.manualUnread || hasNewReply || hasInterruption)
+  const showDot = hasUnread
+  const unreadLabel = [
+    readState?.manualUnread ? uiAttribute('已标记未读') : '',
+    hasNewReply ? uiAttribute('有新回复') : '',
+    hasInterruption ? uiAttribute('有未查看的执行中断') : ''
+  ].filter(Boolean).join('，')
   const loadingStatus = opening ? 'opening' : thread.marker === 'loading' ? 'loading' : null
-  const status = loadingStatus && hasNewReply ? `${loadingStatus}-unread` : loadingStatus ?? (hasNewReply ? 'unread' : 'none')
-  const menuLabels = campNavigationMenuLabels(pinned, hasNewReply)
+  const status = loadingStatus && showDot ? `${loadingStatus}-unread` : loadingStatus ?? (showDot ? 'unread' : 'none')
+  const menuLabels = campNavigationMenuLabels(pinned, hasUnread)
   const menuItems: SidebarActionMenuItem[] = thread.activationState === 'pending'
     ? []
     : [{
@@ -1144,8 +1155,8 @@ function ThreadRow({
         onSelect: () => onAction('rename', thread)
       }]
   if (onSetUnread) menuItems.splice(1, 0, {
-    key: 'toggle-unread', label: menuLabels[1], icon: hasNewReply ? 'read' : 'unread',
-    onSelect: () => onSetUnread(!hasNewReply)
+    key: 'toggle-unread', label: menuLabels[1], icon: hasUnread ? 'read' : 'unread',
+    onSelect: () => onSetUnread(!hasUnread)
   })
   menuItems.push({
     key: 'copy-id',
@@ -1170,15 +1181,15 @@ function ThreadRow({
         type="button"
         aria-current={active ? 'page' : undefined}
         aria-busy={opening || undefined}
-        aria-label={`${title}${hasNewReply ? readState?.manualUnread ? uiAttribute("，已标记未读") : uiAttribute("，有新回复") : ''}${opening ? uiAttribute("，正在打开") : thread.marker === 'loading' ? uiAttribute("，正在运行") : ''}`}
-        title={`${title}${hasNewReply ? uiAttribute(" · 未读") : ''}${opening ? uiAttribute(" · 正在打开") : loadingStatus ? uiAttribute(" · 正在运行") : ''}`}
+        aria-label={`${title}${unreadLabel ? `，${unreadLabel}` : ''}${opening ? uiAttribute("，正在打开") : thread.marker === 'loading' ? uiAttribute("，正在运行") : ''}`}
+        title={`${title}${hasUnread ? uiAttribute(" · 未读") : ''}${opening ? uiAttribute(" · 正在打开") : loadingStatus ? uiAttribute(" · 正在运行") : ''}`}
         onClick={() => onThread(thread)}
       >
         {pinned && <span className="pinned-camp-icon" aria-hidden="true"><NavigationIcon name="messages" /></span>}
         <span className="truncate">{title}</span>
         {thread.activationState === 'pending' && <span className="camp-draft-badge"><UiText zh={"草稿"} /></span>}
         <span className="camp-status-cluster" data-status={status} aria-hidden="true">
-          {hasNewReply && <span className="camp-status-slot"><i className="camp-unread-dot" /></span>}
+          {showDot && <span className="camp-status-slot"><i className="camp-unread-dot" /></span>}
           {loadingStatus && <span className="camp-status-slot"><span className={`camp-loading-spinner ${opening ? 'camp-open-spinner' : 'camp-marker-loading'}`} /></span>}
         </span>
       </button>

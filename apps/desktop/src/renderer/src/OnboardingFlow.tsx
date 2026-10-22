@@ -1,3 +1,4 @@
+import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
 import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import { useState, type KeyboardEvent } from 'react'
 import { runtimeInstallGuide } from './runtime-install-guide'
@@ -7,7 +8,7 @@ import type {
   AppearanceSnapshot,
   RuntimeStatus,
   HostPlatformKey,
-  InterfaceLanguage,
+  InterfaceLanguagePreference,
   OnboardingRuntimeSelection,
   OnboardingSnapshot,
   ProductRuntimeAvailability,
@@ -153,7 +154,7 @@ export function OnboardingFlow({
   runtimePhase: OnboardingRuntimePhase
   busy: boolean
   error: string | null
-  onLanguageChange(language: InterfaceLanguage): void
+  onLanguageChange(language: InterfaceLanguagePreference): void
   onThemeChange(preference: ThemePreference): void
   onShowWelcome(): void
   onCompleteWelcome(): void
@@ -168,7 +169,7 @@ export function OnboardingFlow({
 }): React.JSX.Element {
   const language = useInterfaceLanguage()
   const t = useUiText()
-  const presets = builtinMemberPresetsForLanguage(language)
+  const presets = builtinMemberPresetsForLanguage(snapshot.provisioning?.interfaceLanguage ?? language)
   const selectedMember = presets.find(
     (preset) => preset.role === snapshot.selectedMemberRole
   ) ?? presets[0]
@@ -194,16 +195,8 @@ export function OnboardingFlow({
             </button>
           )}
           {snapshot.step === 'welcome' && (
-            <div className="onboarding-language" role="radiogroup" aria-label={t('界面语言')}>
-              {(['zh-CN', 'en'] as const).map((option) => (
-                <label key={option} className={language === option ? 'selected' : ''}>
-                  <input type="radio" name="onboarding-language" value={option}
-                    checked={language === option} disabled={busy || snapshot.provisioning !== null}
-                    onChange={() => onLanguageChange(option)} />
-                  <span>{option === 'zh-CN' ? uiAttribute("简体中文") : 'English'}</span>
-                </label>
-              ))}
-            </div>
+            <LanguagePreferenceOptions name="onboarding-language" className="onboarding-language"
+              disabled={busy || snapshot.provisioning !== null} onChange={onLanguageChange} />
           )}
           <span className="onboarding-progress" aria-label={t('第 {0} 步，共 3 步', stepNumber)}>
             {stepNumber} / 3

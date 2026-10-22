@@ -1,13 +1,17 @@
 import { browserAuthStorage } from './auth-storage'
 import { acquireTabRecovery } from './tab-recovery'
 import { takeLoginTicket } from './login-ticket'
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, useState, useRef } from 'react'
 import { RemoteConnectionStatus } from '../../desktop/src/renderer/src/RemoteConnectionStatus'
 import { HostWorkspacePicker } from './HostWorkspacePicker'
 import { WebLogin } from './WebLogin'
 import { WebConnectionRecovery } from './WebConnectionRecovery'
 import '../../desktop/src/renderer/src/remote-connection.css'
-import type { WorkspaceSelection } from '@contracts'
+import { browserGeneralPreferences } from './general-preferences'
+import { createLoginLanguagePreferences } from './login-language'
+import { observeInterfaceLanguage, useUiText } from '../../desktop/src/renderer/src/interface-language'
+import { LanguagePreferenceReadNotice } from '../../desktop/src/renderer/src/LanguagePreferenceControl'
+import type { InterfaceLanguageApi, WorkspaceSelection } from '@contracts'
 import { createRoot } from 'react-dom/client'
 import { BusinessApp } from '../../desktop/src/renderer/src/BusinessApp'
 import { ThreadClientProvider } from '../../desktop/src/renderer/src/camp-client'
@@ -54,7 +58,11 @@ const recovery = (async () => {
   return restored
 })()
 
+const loginPreferences = createLoginLanguagePreferences(browserGeneralPreferences(null))
+const loginLanguageApi = loginPreferences.api
+
 function WebEntry() {
+  const t = useUiText()
   const [workspaceChoice, setWorkspaceChoice] = useState<{ resolve(value: WorkspaceSelection | null): void } | null>(null)
   const selectWorkspace = async (): Promise<WorkspaceSelection | null> => {
     return new Promise(resolve => setWorkspaceChoice({ resolve }))
@@ -68,6 +76,24 @@ function WebEntry() {
   const [restoring, setRestoring] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const adapterRef = useRef<ReturnType<typeof createThreadAdapter> | null>(null)
+  const preparing = useRef<Promise<void> | null>(null)
+  const openWorkspace = (): Promise<void> => {
+    if (adapterRef.current) return Promise.resolve()
+    if (preparing.current) return preparing.current
+    const next = createThreadAdapter(transport, selectWorkspace)
+    preparing.current = (async () => {
+      // An explicit login-page choice transfers once; passive detection never replaces a saved owner preference.
+      try { await loginPreferences.transferTo(next.environment.preferences.generalPreferences) }
+      catch { setError('语言偏好未能保存，请重试。') }
+      adapterRef.current = next
+      setAdapter(next)
+    })().finally(() => { preparing.current = null })
+    return preparing.current
+  }
+  const languageApi = adapter?.environment.preferences.generalPreferences ?? loginLanguageApi
+  const [readyLanguageApi, setReadyLanguageApi] = useState<InterfaceLanguageApi | null>(null)
+  useEffect(() => observeInterfaceLanguage(languageApi, () => setReadyLanguageApi(languageApi)), [languageApi])
   useEffect(() => {
     // Once mounted, BusinessApp owns the scoped appearance, including re-login.
     if (adapter) return
@@ -84,10 +110,10 @@ function WebEntry() {
   }, [authenticated, authGeneration, adapter])
   useEffect(() => {
     let cancelled = false
-    void recovery.then(restored => {
+    void recovery.then(async restored => {
       if (cancelled) return
       if (restored && transport.authenticated) {
-        setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace))
+        await openWorkspace()
         setAuthenticated(true)
       }
     }).catch(e => { if (!cancelled) setError(e instanceof TypeError ? '暂时无法连接，网络恢复后会重试。' : e instanceof Error ? e.message : '恢复失败，请重试。') })
@@ -104,7 +130,7 @@ function WebEntry() {
         const restored = await retryStartup()
         retryStartup = null
         if (active && restored && transport.authenticated) {
-          setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace))
+          await openWorkspace()
           setAuthenticated(true); setError(null)
         }
       } catch { /* Keep credentials and the visible connection error for retry. */ }
@@ -136,9 +162,9 @@ function WebEntry() {
       setBusy(true); setScanning(true); setError(null)
       // Same-document scans reuse this tab's verified editor. Copied tabs were
       // already separated by startup recovery before this handler can sign in.
-      void recovery.catch(() => false).then(() => transport.loginTicket(ticket!)).then(() => {
+      void recovery.catch(() => false).then(() => transport.loginTicket(ticket!)).then(async () => {
         if (!active) return
-        setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace)); setAuthenticated(true)
+        await openWorkspace(); setAuthenticated(true)
       }).catch(e => { if (active) setError(e instanceof Error ? e.message : '扫码登录失败。') })
         .finally(() => { ticket = null; if (active) { setBusy(false); setScanning(false) } })
     }
@@ -151,13 +177,15 @@ function WebEntry() {
     retryStartup = null
     try {
       await transport.login(token)
-      setAdapter(current => current ?? createThreadAdapter(transport, selectWorkspace))
+      await openWorkspace()
       setAuthenticated(true)
     } catch (e) { setError(e instanceof TypeError ? '暂时无法连接，请检查网络后重试。' : e instanceof Error ? e.message : '登录失败，请重试。') }
     finally { setBusy(false) }
   }
   const current = adapter
+  if (readyLanguageApi !== languageApi || (restoring && !current)) return <div className="language-bootstrap" aria-busy="true" />
   return <>
+    <LanguagePreferenceReadNotice />
     <WebConnectionRecovery transport={transport} enabled={authenticated} onNotice={setError}>
       {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client}>
         <CurrentUserProfileProvider api={current.profile}>
@@ -165,10 +193,10 @@ function WebEntry() {
         </CurrentUserProfileProvider>
       </ThreadClientProvider></div>}
       {authenticated && <UploadStatus transport={transport} />}
-      {authenticated && error && <div className="web-recovery-error" role="alert">{error}<button type="button" className="quiet-button compact" onClick={() => setError(null)}>关闭</button></div>}
+      {authenticated && error && <div className="web-recovery-error" role="alert">{t(error)}<button type="button" className="quiet-button compact" onClick={() => setError(null)}>{t('关闭')}</button></div>}
       {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
     </WebConnectionRecovery>
-    {!authenticated && <WebLogin hostKind={hostKind}
+    {!authenticated && <WebLogin languageApi={languageApi} hostKind={hostKind}
       status={scanning ? 'scanning' : restoring ? 'restoring' : busy ? 'submitting' : null}
       error={error} onLogin={token => { void login(token) }} />}
   </>

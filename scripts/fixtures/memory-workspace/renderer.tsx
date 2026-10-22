@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, MemoryRecord, HearthReviewItem } from '@contracts'
@@ -95,7 +96,7 @@ function Fixture() {
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => { document.documentElement.dataset.rovaiPlatform = platform; document.documentElement.dataset.platform = platform }, [platform])
   useEffect(() => { (window as any).__memoryFixture = {
-    navigate: setTarget, setTheme, setNotice, setPlatform, setLanguage: (language: 'en' | 'zh-CN') => changeInterfaceLanguage({ setInterfaceLanguage: async (interfaceLanguage: string) => ({ interfaceLanguage }) } as any, language),
+    navigate: setTarget, setTheme, setNotice, setPlatform, setLanguage: (language: 'en' | 'zh-CN') => changeInterfaceLanguage(languageTestApi, language),
     failNext: () => { failNext = true },
     failReads: () => { failedReads++ },
     failReviewRefresh: () => { failAfterReview = true },

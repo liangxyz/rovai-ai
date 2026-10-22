@@ -3455,6 +3455,76 @@ mod tests {
                 [&cancelled_run_id],
             )
             .unwrap();
+        let stopped = runtime
+            .request_agent_run_cancellation(
+                &mut database,
+                &user_envelope(
+                    "single-chat-explicit-stop",
+                    Some(&camp_id),
+                    crate::runtime::CancelAgentRunCommand {
+                        camp_id: camp_id.clone(),
+                        agent_run_id: cancelled_run_id.clone(),
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stopped.result.status, CommandResultStatus::Applied);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM notification_occurrence WHERE agent_run_id=?1",
+                    [&cancelled_run_id],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0,
+            "manual stop does not create an exit reminder"
+        );
+        let shutdown_send = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &cancel_conversation_id,
+            "single-chat-exit-reminder",
+        );
+        let shutdown_run = shutdown_send.result.payload["agentRunId"].as_str().unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='cancelled',cancel_requested_at=datetime('now'),
+            cancel_reason_code='app_shutdown_cancel_all',ended_at=datetime('now') WHERE id=?1",
+                [shutdown_run],
+            )
+            .unwrap();
+        let stop_id: String = database.connection().query_row(
+            "SELECT id FROM notification_occurrence WHERE agent_run_id=?1 AND interruption_kind='app_shutdown'",
+            [shutdown_run], |r|r.get(0)).unwrap();
+        assert!(
+            notifications
+                .thread_interruptions(&mut database, "local_user", &[camp_id.clone()])
+                .unwrap()
+                .threads[0]
+                .has_unread_interruption
+        );
+        // Keep the original owner: ending C1 also cancels a still-running reply
+        // and fences its late output, independently of the preceding user stop.
+        let cancelled_send = send(
+            &service,
+            &mut database,
+            &camp_id,
+            &cancel_conversation_id,
+            "single-chat-send-cancel-on-end",
+        );
+        let cancelled_run_id = cancelled_send.result.payload["agentRunId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        database.connection().execute(
+            "UPDATE agent_run SET status='running',execution_epoch=1,started_at=updated_at WHERE id=?1",
+            [&cancelled_run_id],
+        ).unwrap();
         service
             .end(
                 &mut database,
@@ -3468,6 +3538,16 @@ mod tests {
                 ),
             )
             .unwrap();
+        assert!(
+            !notifications
+                .thread_interruptions(&mut database, "local_user", &[camp_id.clone()])
+                .unwrap()
+                .threads[0]
+                .has_unread_interruption
+        );
+        assert!(database.connection().query_row(
+            "SELECT acknowledged_at IS NULL FROM notification_occurrence_disposition WHERE occurrence_id=?1",
+            [&stop_id], |r| r.get::<_, bool>(0)).unwrap());
         let late = runtime
             .succeed_agent_run(
                 &mut database,
@@ -3516,7 +3596,7 @@ mod tests {
             "single-chat-send-failure",
         );
         let failed_run = failed_send.result.payload["agentRunId"].as_str().unwrap();
-        database.connection().execute("UPDATE agent_run SET status='failed',ended_at=datetime('now'),updated_at=datetime('now') WHERE id=?1",[failed_run]).unwrap();
+        database.connection().execute("UPDATE agent_run SET status='failed',last_error_code='accepted_input_outcome_unknown',ended_at=datetime('now'),updated_at=datetime('now') WHERE id=?1",[failed_run]).unwrap();
         let changes = notifications
             .changes_since(&mut database, "local_user", through, 100)
             .unwrap();
@@ -3535,6 +3615,13 @@ mod tests {
             failed_conversation
         );
         let failure_id = failure.action.acknowledgement_id.clone().unwrap();
+        assert!(
+            notifications
+                .thread_interruptions(&mut database, "local_user", &[camp_id.clone()])
+                .unwrap()
+                .threads[0]
+                .has_unread_interruption
+        );
         service
             .end(
                 &mut database,
@@ -3548,7 +3635,27 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert!(database.connection().query_row("SELECT resolved_at IS NOT NULL FROM notification_occurrence_disposition WHERE occurrence_id=?1",[failure_id],|r|r.get::<_,bool>(0)).unwrap());
+        assert!(database.connection().query_row("SELECT resolved_at IS NOT NULL AND acknowledged_at IS NULL FROM notification_occurrence_disposition WHERE occurrence_id=?1",[&failure_id],|r|r.get::<_,bool>(0)).unwrap());
+        assert!(
+            !notifications
+                .thread_interruptions(&mut database, "local_user", &[camp_id.clone()])
+                .unwrap()
+                .threads[0]
+                .has_unread_interruption
+        );
+        open(
+            &service,
+            &mut database,
+            &camp_id,
+            "single-chat-next-after-interruption",
+        );
+        assert!(
+            !notifications
+                .thread_interruptions(&mut database, "local_user", &[camp_id.clone()])
+                .unwrap()
+                .threads[0]
+                .has_unread_interruption
+        );
         assert_eq!(
             database
                 .connection()

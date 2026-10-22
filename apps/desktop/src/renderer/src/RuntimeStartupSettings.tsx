@@ -1,5 +1,6 @@
+import { CommonEnvironmentEditor, useCommonEnvironment } from './CommonEnvironmentEditor'
 import { useThreadClient } from './camp-client'
-import { useEffect, useId, useRef, useState } from 'react'
+import { Activity, useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { AdapterKind, RuntimeStatus, RuntimeStartupInspection } from '@contracts'
 import { configurationFromSnapshot, conflictValue, editableSnapshot, withSnapshotValue, type FieldConflict, type RuntimeStartupConfiguration, type RuntimeStartupSettings as StartupSettings } from './runtime-startup-editor'
@@ -15,10 +16,14 @@ const INSPECTION_LABELS: Record<RuntimeStartupInspection['status'], string> = {
   authentication_required: '已识别程序，需要登录', ready: '检查通过', check_failed: '检查未通过，请确认登录和运行环境'
 }
 
-export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
-  runtimeKind: AdapterKind; health: RuntimeStatus | null; onBack(): void
+export type RuntimeStartupLeaveGuard = () => Promise<boolean>
+
+export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel, active = true, onLeaveGuardChange }: {
+  runtimeKind: AdapterKind; health: RuntimeStatus | null; onBack(): void; backLabel?: string; active?: boolean
+  onLeaveGuardChange?(guard: RuntimeStartupLeaveGuard | null): void
 }): React.JSX.Element {
   const client = useThreadClient()
+  const common = useCommonEnvironment(runtimeKind, health?.hostPlatform === 'windows-x64')
   const [saved, setSaved] = useState<StartupSettings | null>(null)
   const [draft, setDraft] = useState<RuntimeStartupConfiguration>(EMPTY)
   const [busy, setBusy] = useState<'load' | 'save' | 'pick' | 'inspect' | 'check' | null>('load')
@@ -26,23 +31,46 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [inspection, setInspection] = useState<RuntimeStartupInspection | null>(null)
-  const [confirmAction, setConfirmAction] = useState<'back' | null>(null)
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  const pendingLeave = useRef<{ promise: Promise<boolean>; resolve(allowed: boolean): void } | null>(null)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [saveCompleted, setSaveCompleted] = useState(false)
   const sequence = useRef(0)
   const loaded = useRef(false)
   const state = useRef({ draft, busy, dirty: false, saved })
   const id = useId()
-  const dirty = saved !== null && runtimeStartupKey(draft) !== runtimeStartupKey(saved.configuration)
+  const startupDirty = saved !== null && runtimeStartupKey(draft) !== runtimeStartupKey(saved.configuration)
+  const dirty = startupDirty || common.dirty
   const canSave = dirty && conflicts.length === 0
   state.current = { draft, busy, dirty, saved }
   const item = health?.runtimeAvailability.find((candidate) => candidate.runtimeKind === runtimeKind)
   const initialPath = item?.discovery.executablePath ?? null
   const label = adapterLabel(runtimeKind)
 
+  const requestLeave = useCallback((): Promise<boolean> => {
+    if (pendingLeave.current) return pendingLeave.current.promise
+    if (state.current.busy) return Promise.resolve(false)
+    if (!state.current.dirty) return Promise.resolve(true)
+    let resolve!: (allowed: boolean) => void
+    const promise = new Promise<boolean>(complete => { resolve = complete })
+    pendingLeave.current = { promise, resolve }
+    setConfirmLeave(true)
+    return promise
+  }, [])
+
+  useEffect(() => {
+    onLeaveGuardChange?.(requestLeave)
+    return () => {
+      onLeaveGuardChange?.(null)
+      pendingLeave.current?.resolve(false)
+      pendingLeave.current = null
+    }
+  }, [onLeaveGuardChange, requestLeave])
+
   const applySaved = (settings: StartupSettings): void => {
     setSaved(settings)
     setDraft(settings.configuration)
+    common.accept(settings.commonEnvironment ?? { revision: 0, environment: {} })
     setConflicts([])
   }
 
@@ -87,7 +115,8 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
     setInspection(null)
     try {
       const result = await client.request<RuntimeStartupInspection>(deep ? 'runtime.startup.check' : 'runtime.startup.inspect', {
-        runtimeKind, configuration: normalizedStartupConfiguration({ programPath: next.programPath, environment: next.environment })
+        runtimeKind, configuration: normalizedStartupConfiguration({ programPath: next.programPath, environment: next.environment }),
+        commonEnvironment: common.edit()
       })
       if (sequence.current === request) setInspection(result)
     } catch (nextError) {
@@ -114,13 +143,14 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const save = async (): Promise<void> => {
     if (!saved || !canSave || busy) return
     const next = normalizedStartupConfiguration(draft)
+    try { common.edit() } catch { return }
     setBusy('save')
     setSaveCompleted(false)
     setError(null)
     try {
       const edits = startupEdits(saved, next)
       const response = await client.request<StartupSettings | { status: 'conflict'; latest: StartupSettings; conflicts: FieldConflict[] }>('runtime.startup.save', {
-        runtimeKind, edits
+        runtimeKind, edits, commonEnvironment: common.dirty ? common.edit() : undefined
       })
       if ('status' in response) {
         let merged = editableSnapshot(response.latest.configuration)
@@ -132,8 +162,13 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
         return
       }
       applySaved(response)
+      if (response.commonEnvironment) common.saved(response.commonEnvironment)
       setSaveCompleted(true)
-    } catch (nextError) { setError(readErrorMessage(nextError)) }
+    } catch (nextError) {
+      const message = readErrorMessage(nextError)
+      if (message.includes('Common environment changed')) common.fail(uiAttribute('通用配置已在其他位置更新，请重新读取。'))
+      else setError(message)
+    }
     finally { setBusy(null) }
   }
 
@@ -141,7 +176,10 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
     if (!saved) return
     sequence.current += 1
     setSaveCompleted(false)
-    applySaved(saved)
+    setDraft(saved.configuration)
+    setConflicts([])
+    // Common settings can reload their saved baseline independently.
+    common.discard()
     setInspection(null)
     setError(null)
   }
@@ -149,6 +187,18 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const retryRead = (): void => {
     loaded.current = false
     setLoadAttempt((value) => value + 1)
+  }
+
+  const finishLeave = (allowed: boolean): void => {
+    if (allowed) {
+      discard()
+      // A local Back can immediately enter the App's navigation guard again.
+      state.current.dirty = false
+    }
+    const pending = pendingLeave.current
+    pendingLeave.current = null
+    setConfirmLeave(false)
+    pending?.resolve(allowed)
   }
 
   const resolveConflict = (conflict: FieldConflict, keepMine: boolean): void => {
@@ -166,12 +216,13 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const statusLabel = busy === 'inspect' ? uiAttribute('正在验证程序…') : busy === 'check' ? uiAttribute('正在检查状态…') : status ? uiAttribute(INSPECTION_LABELS[status]) : null
   const locked = busy !== null || saved === null || loadError !== null
   const displayedPath = draft.programPath ?? (inspection ? inspection.executablePath :
-    !dirty && !saved?.reconnectRequired && !error && busy !== 'inspect' && busy !== 'check' ? initialPath : null)
+    !startupDirty && !saved?.reconnectRequired && !error && busy !== 'inspect' && busy !== 'check' ? initialPath : null)
   const environmentIncomplete = (inspection?.searchEnvironment?.diagnosticCodes?.length ?? 0) > 0
 
-  return <section className="runtime-startup-page" aria-busy={busy === 'load' || busy === 'save'}>
+  // Hidden settings categories retain their draft, leave guard and confirmation dialog.
+  return <><Activity mode={active ? 'visible' : 'hidden'}><section className="runtime-startup-page" aria-busy={busy === 'load' || busy === 'save'}>
     <button className="quiet-button runtime-startup-back" type="button" disabled={busy !== null}
-      onClick={() => dirty ? setConfirmAction('back') : onBack()}><DialogControlIcon name="back" /><UiText zh={"智能体"} /></button>
+      onClick={() => { void requestLeave().then(allowed => { if (allowed) onBack() }) }}><DialogControlIcon name="back" />{backLabel ?? uiAttribute('智能体')}</button>
     <header className="runtime-startup-heading">
       <span className="runtime-product-logo" aria-hidden="true"><img src={PRODUCT_RUNTIME_LOGOS[runtimeKind]} alt="" /></span>
       <div><h1>{label}</h1><p><UiText zh={"启动设置"} /></p></div>
@@ -196,6 +247,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
         {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status"><UiText zh={"部分查找来源不可用，本次结果使用已读取的可用环境。"} /></p>}
       </section>
 
+      <CommonEnvironmentEditor environment={common} disabled={locked} onChange={() => { sequence.current++; setInspection(null); setError(null); setSaveCompleted(false) }}/>
       {saved && error && <p className="inline-error" role="alert">{error}</p>}
       {conflicts.map((conflict) => <div className="runtime-save-conflict" role="alert" key={JSON.stringify(conflict.path)}>
         <p>{conflict.label}<UiText zh={"也在外部修改过，请选择保留哪一项。其他编辑已保留。"} /></p>
@@ -205,15 +257,18 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
           <button className="quiet-button runtime-conflict-use-external" type="button" disabled={locked} onClick={() => resolveConflict(conflict, false)}><UiText zh={"采用外部修改"} /></button>
         </div>
       </div>)}
-      <footer className="runtime-startup-actions">
-        {saveCompleted && <span className="runtime-startup-result" role="status"><UiText zh="已保存" /></span>}
-        <button className="quiet-button" type="button" disabled={!dirty || locked} onClick={discard}><UiText zh={"放弃更改"} /></button>
-        <button className="quiet-button member-editor-save" type="submit" disabled={!canSave || locked}><DialogControlIcon name="save" />{busy === 'save' ? uiAttribute("正在保存…") : uiAttribute("保存")}</button>
+      <footer className="runtime-startup-actions member-editor-save-row">
+        <span className="member-editor-save-status" role="status">{saveCompleted && <UiText zh="已保存" />}</span>
+        <div>
+          <button className="quiet-button" type="button" disabled={!dirty || locked} onClick={discard}><UiText zh={"放弃更改"} /></button>
+          <button className="quiet-button member-editor-save" type="submit" disabled={!canSave || locked}><DialogControlIcon name="save" />{busy === 'save' ? uiAttribute("正在保存…") : uiAttribute("保存")}</button>
+        </div>
       </footer>
     </form>
-    <Dialog.Root open={confirmAction !== null} onOpenChange={(open) => { if (!open) setConfirmAction(null) }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay" /><AppDialogContent width="compact" tone="attention">
+  </section></Activity>
+    <Dialog.Root open={confirmLeave} onOpenChange={(open) => { if (!open) finishLeave(false) }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay" /><AppDialogContent width="compact" tone="attention">
       <AppDialogHeader title={uiAttribute("放弃更改？")} description={uiAttribute("当前编辑的启动设置尚未保存。")} />
-      <AppDialogFooter><button className="quiet-button" data-dialog-autofocus onClick={() => setConfirmAction(null)}><UiText zh={"继续编辑"} /></button><button className="danger-button" onClick={onBack}><UiText zh={"放弃更改"} /></button></AppDialogFooter>
+      <AppDialogFooter><button className="quiet-button" data-dialog-autofocus onClick={() => finishLeave(false)}><UiText zh={"继续编辑"} /></button><button className="danger-button" onClick={() => finishLeave(true)}><UiText zh={"放弃更改"} /></button></AppDialogFooter>
     </AppDialogContent></Dialog.Portal></Dialog.Root>
-  </section>
+  </>
 }

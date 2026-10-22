@@ -103,8 +103,12 @@ and member configuration surfaces.
 ## References
 
 - [Camp 资源不变量](foundational-invariants.md#camp-resources)
-- [First-run Onboarding v6](../contracts/first-run-onboarding-v6.md)
+- [First-run Onboarding v7](../contracts/first-run-onboarding-v7.md)
 - [Availability-first Runtime](availability-first-runtime.md)
 - [Camp Activation Lifecycle](camp-activation-lifecycle.md)
 - [Camp Composer Draft](camp-composer-draft.md)
 - [Runtime Catalog Boundaries](runtime-catalog-boundaries.md)
+
+## 跟随系统语言
+
+新配置默认跟随本机语言；旧配置保留原语言。偏好和显示结果分离，首次呈现文本前完成本地解析。欢迎页提供“跟随系统 / 简体中文 / English”，继续使用现有位置和三步流程。创建开始时将具体资料语言写入 schema 4 检查点；系统变化只更新应用文案，不改变本次创建资料或已保存的队员身份。字段、迁移和恢复规则见 [Interface Language v2](../contracts/interface-language-v2.md)。

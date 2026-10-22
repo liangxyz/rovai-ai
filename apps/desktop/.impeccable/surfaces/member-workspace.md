@@ -118,7 +118,7 @@ Runtime default remains selectable without a catalog. The search input also acce
 trimmed input absent from the native catalog and current manual selection, show “使用 {ID}” / “Use {ID}” in the result list.
 Do not add a permanent action, badge or second editor. The current catalog-absent ID appears as an ordinary selected row;
 choosing another model removes that manual row. Save only the current explicit selection with initially empty options, never
-a custom catalog or recent-ID list. The model catalog continues to use native Runtime configuration, not member environment.
+a custom catalog or recent-ID list. The model catalog uses native Runtime configuration plus shared Runtime variables; member overrides stay local to member execution.
 
 Keep presence and destructive removal in the header overflow menu. Removal uses its existing confirmation
 and Core preview. Do not expose Installation IDs, executable paths or internal bindings in the ordinary profile.
@@ -177,6 +177,8 @@ Each section owns its “放弃更改” and neutral primary save control: a 14p
 both sections' pending drafts for each visited teammate. Saving one section advances its accepted baseline
 without resetting the other. A conflicting external update preserves the local draft and blocks that section's
 save until the user reloads its saved values. Leaving the workspace confirms discarding pending changes.
+The environment editor does not add its own “已保存。” line; saving uses the enclosing Runtime section's
+existing clean state and disabled save/discard controls.
 
 New teammates use the same page. The pending draft has a separate bottom roster row and is excluded from
 saved teammate counts and ordering. Only a name is required. Runtime configuration becomes available after
@@ -213,3 +215,9 @@ the production component with explicit transport fixtures, including unknown res
 portrait/landscape and zoom; no real Runtime or daily profile participates.
 
 Selected roster rows use a neutral surface and text without a left selection rail. Keep the roster background and identity assets unchanged.
+
+Environment values are directly visible in the existing JSON textarea, without a reveal control or an add-variable entry.
+Accept string, number and boolean values; preview and submit their string forms, preserve raw drafts until save succeeds.
+Keep the existing save/discard flow without a permanent input hint. An empty editor shows only the shared
+JSON placeholder `{ "VARIABLE_NAME": "value" }`; the example is not draft content or a saved value.
+The boundary is [Runtime Launch v69](../../../../docs/contracts/runtime-launch-and-verification-v69.md).

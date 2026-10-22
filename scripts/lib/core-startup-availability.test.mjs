@@ -17,6 +17,68 @@ const repository = resolve(import.meta.dirname, '../..')
 const binary = process.env.ROVAI_CORE_BIN
   ?? join(repository, 'target', 'debug', process.platform === 'win32' ? 'rovai-core.exe' : 'rovai-core')
 
+// This seam owns actual Thread creation/output-root resolution and startup cleanup.
+// Main's file eligibility matrix remains in local-composer-attachments.test.ts.
+test('Thread output directories follow Pending presence and preserve zero-message Active Threads', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-thread-output-lifecycle-')))
+  const dataDir = process.platform === 'win32'
+    ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
+    : join(fixture, 'data')
+  const skillRoot = join(dataDir, 'managed-skill-library')
+  const mcpPath = join(dataDir, 'mcp.json')
+  let core = startCore(dataDir, skillRoot, mcpPath)
+  try {
+    await core.ready
+    await core.settled()
+    const agent = (await core.request('members.list')).find(profile => profile.presence === 'present')
+    const threads = []
+    for (const [activationState, present] of [['active', false], ['pending', false], ['pending', true]]) {
+      const created = await core.request('threads.create', {
+        commandId: randomUUID(), name: 'Output lifecycle fixture', workspace: null,
+        memberAgentIds: [agent.agentId], defaultLeadAgentId: agent.agentId, collaborationMode: 'peer', activationState
+      })
+      assert.equal(created.status, 'applied')
+      const threadId = created.payload.threadId
+      const outputRoot = await core.request('host.thread.attachmentOutputRoot', { threadId })
+      assert.equal(outputRoot.split(/[\\/]/).at(-1), threadId)
+      assert.equal(await realpath(outputRoot), outputRoot)
+      const source = join(outputRoot, `${randomUUID()}.txt`)
+      await writeFile(source, ' \t\r\n' + '😀'.repeat(10_001) + '\n ')
+      if (present) await core.request('threads.pendingDraft.setPresence', { threadId, present })
+      threads.push({ threadId, outputRoot, source })
+    }
+    const [active, emptyPending, savedPending] = threads
+    await core.close()
+    core = startCore(dataDir, skillRoot, mcpPath)
+    await core.ready
+    await core.settled()
+    await assert.rejects(lstat(emptyPending.outputRoot), { code: 'ENOENT' })
+    assert.ok(core.notifications.some(event => event.method === 'navigation.invalidated'
+      && event.params.reason === 'camps.discardPending' && event.params.threadId === emptyPending.threadId))
+    await assert.rejects(core.request('host.thread.attachmentOutputRoot', { threadId: emptyPending.threadId }))
+    for (const kept of [active, savedPending]) {
+      assert.equal(await core.request('host.thread.attachmentOutputRoot', { threadId: kept.threadId }), kept.outputRoot)
+      assert.ok((await readFile(kept.source, 'utf8')).endsWith('\n '))
+    }
+    const activeDiscard = await core.request('threads.discardPending', {
+      commandId: randomUUID(), command: { threadId: active.threadId }
+    })
+    assert.notEqual(activeDiscard.payload?.discarded, true)
+    assert.ok(await lstat(active.source))
+    await core.request('threads.pendingDraft.setPresence', { threadId: savedPending.threadId, present: false })
+    const pendingDiscard = await core.request('threads.discardPending', {
+      commandId: randomUUID(), command: { threadId: savedPending.threadId }
+    })
+    assert.equal(pendingDiscard.payload.discarded, true)
+    await assert.rejects(lstat(savedPending.outputRoot), { code: 'ENOENT' })
+    assert.ok(await lstat(active.source))
+  } finally {
+    await core.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 // Core startup used to install a process-global wrapper. A ManagedProcess unit
 // test without run_core would miss that policy and pass on the broken build.
 test('Core-managed macOS probes can start their own native sandbox', { skip: process.platform !== 'darwin' }, async () => {

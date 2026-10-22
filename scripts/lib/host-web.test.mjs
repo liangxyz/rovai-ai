@@ -8,6 +8,7 @@ import { launchHost, within } from './host-test-client.mjs'
 import { createServer } from 'node:net'
 import { request as httpRequest } from 'node:http'
 import test from 'node:test'
+import { exercisePastedText, verifyPastedTextRestart } from './host-web-pasted-text.mjs'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as pause } from 'node:timers/promises'
 import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from './runtime-camp-files-root.mjs'
@@ -387,6 +388,8 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal('sourcePath' in missingUpload, false)
     } finally { await rename(`${bound.sourcePath}-temporarily-missing`, bound.sourcePath) }
 
+    const pasteState = await exercisePastedText({ host, origin, session: first, otherSession: second, threadId, otherThreadId: directoryCamp.payload.threadId, dataDir, spools })
+
     // Actual HTTP ingress and the shared private page API use the verified
     // editor, never the client-provided conversation or command identity alone.
     const privateOpen = session => call(session, 'singleChat.open', { commandId: crypto.randomUUID(), command: { threadId, agentId: profiles[0].agentId } })
@@ -475,6 +478,21 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(stream.status, 200)
     const reader = stream.body.getReader()
     assert.match(new TextDecoder().decode((await within(reader.read())).value), /event: resync/)
+    const eventPreference = await call(first, 'notifications.preference.get')
+    await call(first, 'notifications.preference.update', { commandId: crypto.randomUUID(), command: {
+      expectedVersion: eventPreference.version, headsUpEnabled: !eventPreference.headsUpEnabled,
+      ...Object.fromEntries(['approvalHeadsUpEnabled', 'userMentionHeadsUpEnabled', 'turnCompletedHeadsUpEnabled',
+        'turnIncompleteHeadsUpEnabled', 'singleChatHeadsUpEnabled', 'missionNeedsYouHeadsUpEnabled',
+        'missionStatusHeadsUpEnabled', 'taskStatusHeadsUpEnabled', 'missionStatuses', 'taskStatuses'].map(key => [key, eventPreference[key]]))
+    } })
+    await within((async () => {
+      let frames = ''
+      while (!frames.includes('"notificationsChanged":true')) {
+        const next = await reader.read()
+        assert.equal(next.done, false, 'notification invalidation must arrive on the existing stream')
+        frames += new TextDecoder().decode(next.value)
+      }
+    })())
     const otherReaders = []
     for (const session of [first, second]) {
       const controller = new AbortController(); controllers.push(controller)
@@ -837,7 +855,17 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(changedPreference.status, 'applied')
     assert.deepEqual((await call(second, 'notifications.preference.get')).headsUpEnabled, !preference.headsUpEnabled)
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'notifications.preference.update', params: preferenceParams })).result, changedPreference)
-    assert.equal((await call(first, 'notifications.inbox', { filter: 'unread', limit: 1 })).schemaVersion, 9)
+    assert.equal((await call(first, 'notifications.inbox', { filter: 'unread', limit: 1 })).schemaVersion, 11)
+    const interruptionProjection = await call(first, 'notifications.threadInterruptions', { threadIds: [fileCampId] })
+    assert.deepEqual(interruptionProjection.threads, [{ threadId: fileCampId, hasUnreadInterruption: false }])
+    const interruptionRead = { commandId: crypto.randomUUID(), command: {
+      threadId: fileCampId, observedThroughChangeSequence: interruptionProjection.throughChangeSequence
+    } }
+    const interruptionReceipt = await call(first, 'notifications.acknowledgeThreadInterruptions', interruptionRead)
+    assert.equal(interruptionReceipt.status, 'applied')
+    assert.deepEqual((await call(second, 'commands.reconcile', {
+      operation: 'notifications.acknowledgeThreadInterruptions', params: interruptionRead
+    })).result, interruptionReceipt)
     const exported = await call(first, 'diagnostics.export')
     assert.equal(exported.format, 'rovai-diagnostics-v5')
     assert.equal(JSON.stringify(exported).includes(administrator), false)
@@ -936,6 +964,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(recoveredIdentity.clientId, beforeExit.clientId)
       assert.equal(recoveredIdentity.expiresAt, beforeExit.expiresAt)
       for (const session of [first, second, beforeStop]) assert.equal((await fetch(`${reopenedWeb.origin}/api/v1/session/renew`, { method: 'POST', headers: { Authorization: `Bearer ${session.token}` } })).status, 401, 'prior explicit revocations survive Host restart')
+      await verifyPastedTextRestart({ origin: reopenedWeb.origin, administratorToken: reopenedWeb.administratorToken, state: pasteState })
       assert.deepEqual(await reopened.request(defaultsMethod + 'get'), sharedDefaults)
       assert.deepEqual(await reopened.request(defaultsMethod + 'initialize', legacyDefaults), sharedDefaults)
       const path = join(dataDir, 'new-conversation-preferences.json')

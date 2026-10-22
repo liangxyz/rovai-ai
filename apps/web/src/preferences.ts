@@ -1,11 +1,11 @@
+import { browserGeneralPreferences } from './general-preferences'
 import { withBrowserPreferenceWrite } from './auth-storage'
 import { withHostConversationPreferences } from '../../desktop/src/shared/host-general-preferences'
 import type { ConsoleClient } from './client'
-import type { AppearanceSnapshot, CurrentUserProfileApi, GeneralPreferencesSnapshot, NavigationPreferencesSnapshot } from '@contracts'
+import type { AppearanceSnapshot, CurrentUserProfileApi, NavigationPreferencesSnapshot } from '@contracts'
 import { DEFAULT_CURRENT_USER_PROFILE, currentUserNameError, isThreadId } from '@contracts'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
 import { DEFAULT_APPEARANCE, parseAppearancePatch } from '../../desktop/src/shared/appearance'
-import { DEFAULT_GENERAL_PREFERENCES, parseGeneralPreferences } from '../../desktop/src/shared/general-preferences-model'
 import { EMPTY_SNAPSHOT, sanitizeSnapshot, sourceMatchesSupportedSnapshot, registerNavigationProjects, isNavigationThreadReadState } from '../../desktop/src/shared/navigation-preferences-model'
 import { normalizeProjectDisplayName, projectDisplayNameError } from '../../desktop/src/shared/project-display-name'
 
@@ -19,7 +19,6 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
     catch { return fallback }
   }
   const write = (name: string, value: unknown): void => localStorage.setItem(`${key}:${name}`, JSON.stringify(value))
-  let general = { ...(parseGeneralPreferences(read('general', DEFAULT_GENERAL_PREFERENCES)) ?? structuredClone(DEFAULT_GENERAL_PREFERENCES)), newConversationDefaults: null, newConversationDefaultsRequireConfirmation: false, oneClickNewConversationEnabled: false } as GeneralPreferencesSnapshot
   let navigation = sanitizeSnapshot(read('navigation', null))
   const navigationListeners = new Set<(snapshot: NavigationPreferencesSnapshot) => void>()
   const publishNavigation = (): void => { for (const listener of navigationListeners) listener(structuredClone(navigation)) }
@@ -35,12 +34,6 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
   const storageChanged = (event: StorageEvent): void => {
     if (event.storageArea !== localStorage || event.key !== `${key}:navigation`) return
     refreshNavigation(); publishNavigation()
-  }
-  const commitGeneral = async (patch: Partial<GeneralPreferencesSnapshot>): Promise<GeneralPreferencesSnapshot> => {
-    const next = parseGeneralPreferences({ ...general, ...patch })
-    if (!next) throw new Error('界面偏好无效。')
-    write('general', next); general = next
-    return structuredClone(next)
   }
   const commitNavigation = async (update: (current: NavigationPreferencesSnapshot) => Partial<NavigationPreferencesSnapshot>): Promise<NavigationPreferencesSnapshot> => {
     const next = await withBrowserPreferenceWrite(key, () => {
@@ -85,17 +78,7 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
           return () => { appearanceListeners.delete(listener); if (!appearanceListeners.size) media.removeEventListener('change', publish) }
         }
       },
-      generalPreferences: withHostConversationPreferences({
-        get: async () => structuredClone(general),
-        setInterfaceLanguage: interfaceLanguage => commitGeneral({ interfaceLanguage }),
-        setStartupLocationMode: startupLocationMode => commitGeneral({ startupLocationMode }),
-        setLastSettingsSection: lastSettingsSection => commitGeneral({ lastSettingsSection }),
-        setExecutionConsolePlacement: executionConsolePlacement => commitGeneral({ executionConsolePlacement }),
-        setNewConversationDefaults: (newConversationDefaults, enableOneClick = false) => commitGeneral({ newConversationDefaults, newConversationDefaultsRequireConfirmation: false, oneClickNewConversationEnabled: enableOneClick || general.oneClickNewConversationEnabled }),
-        setOneClickNewConversationEnabled: oneClickNewConversationEnabled => commitGeneral({ oneClickNewConversationEnabled }),
-        setWorldMapEnabled: worldMapEnabled => commitGeneral({ worldMapEnabled }),
-        invalidateNewConversationDefaults: () => commitGeneral({ newConversationDefaultsRequireConfirmation: general.newConversationDefaults !== null })
-      }, (method, params) => transport.request(method, params)),
+      generalPreferences: withHostConversationPreferences(browserGeneralPreferences(scope), (method, params) => transport.request(method, params)),
       navigationPreferences: {
         get: async () => { refreshNavigation(); return structuredClone(navigation) },
         onChanged: listener => {

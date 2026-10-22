@@ -13,6 +13,35 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/notification-attention')
 
+test('exit reminders acknowledge displayed Threads without querying on execution progress', { timeout: 45_000 }, async (t) => {
+  if (!admitElectronIntegrationTest(t)) return
+  const fixture = await mkdtemp(join(tmpdir(), 'rovai-interruption-attention-test-'))
+  let child
+  let closed
+  try {
+    await build({ configFile: false, root: source, base: './', logLevel: 'error', plugins: [react()],
+      resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
+      build: { outDir: join(fixture, 'renderer'), minify: false, rollupOptions: { input: join(source, 'interruption.html') } } })
+    const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+    delete environment.ELECTRON_RUN_AS_NODE
+    process.stdout.write(`Isolated interruption userData: ${join(fixture, 'user-data')}; Skill Library: ${join(fixture, 'user-data/managed-skill-library')} (no Core/Runtime)\n`)
+    child = spawn(electron, [join(source, 'main-interruption.cjs'), join(fixture, 'renderer/interruption.html'), join(fixture, 'user-data'),
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
+    closed = once(child, 'close')
+    let output = ''
+    child.stdout.on('data', chunk => { output += chunk.toString() })
+    child.stderr.on('data', chunk => { output += chunk.toString() })
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 35_000)
+    let code
+    try { [code] = await closed } finally { clearTimeout(timeout) }
+    assert.equal(code, 0, `Interruption attention regression failed:\n${output}`)
+    assert.equal(JSON.parse(output.split('\n').find(line => line.startsWith('{'))).ok, true)
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await closed }
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test('notification cards preserve source identity, quiet current Camps, queues and paused lifetime', { timeout: 90_000 }, async (t) => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-notification-attention-test-'))

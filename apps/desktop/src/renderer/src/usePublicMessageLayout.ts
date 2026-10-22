@@ -11,7 +11,8 @@ export function usePublicMessageLayout(
   revision: unknown,
   threadId: string,
   visible: boolean,
-  followingLatest: () => boolean
+  followingLatest: () => boolean,
+  preserveReadingPosition: () => boolean
 ): ReadonlySet<string> {
   const [layout, setLayout] = useState<{ threadId: string; short: Set<string> }>({
     threadId, short: new Set()
@@ -24,10 +25,10 @@ export function usePublicMessageLayout(
     const scroll = timelineRef.current
     const pending = pendingAnchor.current
     pendingAnchor.current = null
-    if (!scroll || !pending || pending.threadId !== threadId) return
+    if (!scroll || !pending || pending.threadId !== threadId || !preserveReadingPosition()) return
     if (pending.follow) scroll.scrollTop = scroll.scrollHeight
     else restoreTimelineReadingAnchor(scroll, pending.anchor)
-  }, [layout, threadId, timelineRef])
+  }, [layout, threadId, timelineRef, preserveReadingPosition])
 
   useLayoutEffect(() => {
     const scroll = timelineRef.current
@@ -58,9 +59,11 @@ export function usePublicMessageLayout(
         const bounds = surface.getBoundingClientRect()
         return bounds.bottom > viewport.top && bounds.top < viewport.bottom
       })
-      pendingAnchor.current = {
+      // Explicit navigation owns the destination through asynchronous regrouping.
+      // Do not save an old reading anchor to restore after that navigation finishes.
+      pendingAnchor.current = preserveReadingPosition() ? {
         threadId, anchor: captureTimelineReadingAnchor(scroll, source), follow: followingLatest()
-      }
+      } : null
       const next = { threadId, short }
       currentLayout.current = next
       setLayout(next)
@@ -86,7 +89,7 @@ export function usePublicMessageLayout(
       scroll.removeEventListener('error', schedule, true)
       if (frame !== null) window.cancelAnimationFrame(frame)
     }
-  }, [threadId, revision, visible, followingLatest, timelineRef])
+  }, [threadId, revision, visible, followingLatest, timelineRef, preserveReadingPosition])
 
   return layout.threadId === threadId ? layout.short : new Set()
 }

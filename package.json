@@ -1,7 +1,7 @@
 {
   "name": "rovai-ai",
   "productName": "Rovai AI",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "private": true,
   "type": "module",
   "description": "A desktop workspace for long-lived agent teams, shared Threads, visible execution, and collaborative memory.",
@@ -182,7 +182,7 @@
     "test:member-avatar-flow": "tsc --noEmit -p scripts/fixtures/member-avatar-flow/tsconfig.json && node --test scripts/lib/member-avatar-flow.test.mjs",
     "test:mission-board": "node --test scripts/lib/mission-board.test.mjs",
     "test:member-runtime-apply": "node --test scripts/lib/member-runtime-apply.test.mjs",
-    "test:run-presence-ui": "node --test scripts/lib/run-presence.test.mjs",
+    "test:run-presence-ui": "node --test --test-concurrency=1 scripts/lib/run-presence.test.mjs scripts/lib/reply-details.test.mjs",
     "test:markdown-code-copy": "node --test scripts/lib/markdown-code-copy.test.mjs",
     "test:steer-ui": "node --test scripts/lib/steer-ui.test.mjs"
   },

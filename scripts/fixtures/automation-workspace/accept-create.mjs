@@ -46,7 +46,7 @@ export async function acceptCreateFromDetail(tab) {
   await tab.playwright.getByRole('textbox', { name: '定时任务名称', exact: true }).fill('新建入口回归')
   await tab.playwright.getByRole('textbox', { name: '执行内容', exact: true }).fill('整理当前项目中需要关注的改动。')
   await tab.playwright.getByRole('button', { name: '保存', exact: true }).click()
-  await tab.playwright.getByRole('status').filter({ hasText: '定时任务已保存' }).waitFor({ state: 'visible', timeoutMs: 1500 })
+  await tab.playwright.getByRole('button', { name: '保存', exact: true }).waitFor({ state: 'hidden', timeoutMs: 1500 })
   assert.equal(await tab.playwright.getByRole('button', { name: '保存', exact: true }).count(), 0, 'Creation must enter the persisted task')
   for (const template of [
     { name: 'Issue / PR 巡检', frequency: '每天', time: '09:00', prompt: '检查当前项目新增和更新的 Issue、PR' },

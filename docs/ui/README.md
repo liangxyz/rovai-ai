@@ -52,6 +52,8 @@ Runtime 终态文件行与会话中的每 Run 文件变化卡片由
 使命板、抽屉与完整会话、交付和活动见[使命板](components/mission-board.md)。当前发布显示一级菜单入口，
 以右侧蓝点提示存在未读 Agent 回复的使命；Mobile WebUI 在主抽屉中提供使命板入口。
 
+Team 的独立入口、名册行操作、通用默认配置和新对话选择见 [Team 工作区](components/team-workspace.md)。
+
 ## Web 与 Mobile
 
 - [Web 连接恢复](host-web-connection-recovery.md)：统一全屏断线遮罩、原提交恢复入口和键盘边界。

@@ -13,7 +13,8 @@ import { MarkdownCodeFrame } from './MarkdownCodeFrame'
 import {
   fileReferenceSpacingClassName,
   visitMarkdownFileReferences,
-  type MarkdownNode
+  type MarkdownNode,
+  type RawHtmlPolicy
 } from './safe-markdown-model'
 import type { FilePreviewBinaryContent, FilePreviewOperationResult, ResolvedTheme } from '@contracts'
 import { UiText, uiAttribute } from './interface-language'
@@ -37,6 +38,26 @@ type InlineHtmlNode = {
   tagName?: string
   properties?: Record<string, string>
   children?: InlineHtmlNode[]
+}
+
+// Normalize raw nodes before trusted inline tokens are replaced. react-markdown's
+// own raw-to-text fallback runs after rehype plugins and would expose those tokens.
+// Neither policy parses HTML or creates elements from untrusted markup.
+function rehypeRawHtmlPolicy({ policy }: { policy: RawHtmlPolicy }): (tree: InlineHtmlNode) => void {
+  return (tree) => {
+    // react-markdown's skipHtml already handles the drop policy.
+    if (policy === 'drop') return
+    const visit = (parent: InlineHtmlNode): void => {
+      const children = parent.children
+      if (!children) return
+      for (let index = 0; index < children.length; index++) {
+        const node = children[index]
+        if (node.type === 'raw') children[index] = { type: 'text', value: node.value }
+        else visit(node)
+      }
+    }
+    visit(tree)
+  }
 }
 
 function rehypeInlineContent({ tokens }: { tokens: string[] }): (tree: InlineHtmlNode) => void {
@@ -124,7 +145,7 @@ function scrollToMarkdownHeading(root: HTMLElement, target: string): boolean {
   return Boolean(heading)
 }
 
-function fileLinkTransformer(addInlineSpacing: boolean): (tree: MarkdownTreeNode) => void {
+function fileLinkTransformer(addInlineSpacing: boolean, rawHtmlPolicy: RawHtmlPolicy): (tree: MarkdownTreeNode) => void {
   return (tree) => {
     visitMarkdownFileReferences(tree, (node, spacing) => {
       if (typeof node.url !== 'string') return
@@ -142,16 +163,16 @@ function fileLinkTransformer(addInlineSpacing: boolean): (tree: MarkdownTreeNode
           }
         }
       }
-    })
+    }, rawHtmlPolicy)
   }
 }
 
-function remarkFileLinks(): (tree: MarkdownTreeNode) => void {
-  return fileLinkTransformer(false)
+function remarkFileLinks({ rawHtmlPolicy }: { rawHtmlPolicy: RawHtmlPolicy }): (tree: MarkdownTreeNode) => void {
+  return fileLinkTransformer(false, rawHtmlPolicy)
 }
 
-function remarkMessageFileLinks(): (tree: MarkdownTreeNode) => void {
-  return fileLinkTransformer(true)
+function remarkMessageFileLinks({ rawHtmlPolicy }: { rawHtmlPolicy: RawHtmlPolicy }): (tree: MarkdownTreeNode) => void {
+  return fileLinkTransformer(true, rawHtmlPolicy)
 }
 
 export function SafeMarkdown({
@@ -165,6 +186,7 @@ export function SafeMarkdown({
   leadingContent,
   inlineContent,
   inlineLeadingContent = true,
+  rawHtmlPolicy = 'text',
   mode = 'message',
   theme = 'day'
 }: {
@@ -180,6 +202,8 @@ export function SafeMarkdown({
   /** Collision-free placeholders generated from authoritative structured content. */
   inlineContent?: Readonly<Record<string, ReactNode>>
   inlineLeadingContent?: boolean
+  /** Literal markup in messages; metadata-oriented readers explicitly opt out. */
+  rawHtmlPolicy?: RawHtmlPolicy
   mode?: 'message' | 'document'
   theme?: ResolvedTheme
 }): JSX.Element {
@@ -231,10 +255,13 @@ export function SafeMarkdown({
           remarkCjkFriendly,
           [remarkCjkFriendlyStrikethrough, { singleTilde: false }],
           remarkRepairCjkUrlTail,
-          ...(fileReferencesEnabled ? [mode === 'message' ? remarkMessageFileLinks : remarkFileLinks] : []),
+          [mode === 'message' ? remarkMessageFileLinks : remarkFileLinks, fileReferencesEnabled ? { rawHtmlPolicy } : false],
           [remarkLeadingContent, { enabled: hasLeadingContent, inline: inlineLeadingContent }]
         ]}
-        rehypePlugins={[[rehypeInlineContent, { tokens: JSON.parse(inlineContentKeys) as string[] }]]}
+        rehypePlugins={[
+          [rehypeRawHtmlPolicy, { policy: rawHtmlPolicy }],
+          [rehypeInlineContent, { tokens: JSON.parse(inlineContentKeys) as string[] }]
+        ]}
         skipHtml
         disallowedElements={[
           ...(!localImageUrl && !localImageContent ? ['img'] : []),
@@ -338,7 +365,7 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, mode, theme])
+  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, rawHtmlPolicy, mode, theme])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>

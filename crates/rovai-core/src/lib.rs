@@ -51,6 +51,7 @@ pub mod context_contract;
 pub mod context_delivery;
 pub mod context_index;
 pub mod core_data_dir_lock;
+pub mod creation_preferences;
 pub mod current_input_skill;
 pub mod current_user;
 pub mod database_admission;
@@ -127,6 +128,7 @@ pub mod storage_layout;
 pub mod task_capability;
 pub mod team_tool;
 pub mod team_tool_catalog;
+pub mod teams;
 pub mod thread_compat;
 pub mod thread_runs;
 #[cfg(windows)]

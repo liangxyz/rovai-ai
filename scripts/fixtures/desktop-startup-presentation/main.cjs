@@ -6,6 +6,7 @@ const { app, BrowserWindow } = require('electron')
 const [renderer, userData] = process.argv.slice(2)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData), 'The startup fixture requires isolated absolute paths')
 mkdirSync(userData, { recursive: true })
+mkdirSync(join(userData, 'managed-skill-library'), { recursive: true })
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 

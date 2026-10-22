@@ -1,3 +1,4 @@
+import { LanguagePreferenceReadNotice } from './LanguagePreferenceControl'
 import { WindowCloseDialog } from './WindowCloseSettings'
 import { ShortcutProvider } from './ShortcutProvider'
 import { useEffect, useRef, useState } from 'react'
@@ -7,7 +8,7 @@ import { CoreSubsystemNotice } from './CoreSubsystemNotice'
 import { ThreadClientProvider } from './camp-client'
 import { desktopThreadClient } from './desktop-camp-client'
 import { desktopBusinessEnvironment } from './desktop-business-environment'
-import { initializeInterfaceLanguage, useInterfaceLanguage } from './interface-language'
+import { observeInterfaceLanguage, useInterfaceLanguage } from './interface-language'
 import { applyAppearanceSnapshot } from './theme'
 import {
   BusinessApp, BootstrapShell, StartupWorkspace, ControlledShutdownOverlay,
@@ -18,6 +19,7 @@ export * from './BusinessApp'
 
 export function App(): React.JSX.Element {
   useInterfaceLanguage()
+  const [languageReady, setLanguageReady] = useState(false)
   const [supervisorState, setSupervisorState] = useState<{
     latest: SupervisorSnapshot | null
     lastNonShutdown: SupervisorSnapshot | null
@@ -43,15 +45,7 @@ export function App(): React.JSX.Element {
     return () => { disposed = true }
   }, [startupReadAttempt])
 
-  useEffect(() => {
-    let disposed = false
-    // Main owns this local preference, so the language is available even when
-    // Core is blocked and BusinessApp never mounts.
-    void window.rovai.desktopSession.getInterfaceLanguage().then((language) => {
-      if (!disposed) initializeInterfaceLanguage({ interfaceLanguage: language })
-    }).catch(() => undefined)
-    return () => { disposed = true }
-  }, [startupReadAttempt])
+  useEffect(() => observeInterfaceLanguage(window.rovai.generalPreferences, () => setLanguageReady(true)), [])
 
   useEffect(() => {
     let disposed = false
@@ -124,6 +118,9 @@ export function App(): React.JSX.Element {
     return () => window.clearTimeout(timer)
   }, [shuttingDown])
 
+  // The first frame contains no locale-dependent copy until local restoration completes.
+  if (!languageReady) return <div className="language-bootstrap" aria-busy="true" />
+
   let workspace: React.JSX.Element
   if (
     presentationSupervisor?.fullCoreState === 'blocked'
@@ -154,6 +151,7 @@ export function App(): React.JSX.Element {
   return (
     <>
       {workspace}
+      <LanguagePreferenceReadNotice />
       {window.rovai.windowClose && <WindowCloseDialog api={window.rovai.windowClose} />}
       {shuttingDown && <ControlledShutdownOverlay visible={shutdownFeedbackVisible} />}
     </>

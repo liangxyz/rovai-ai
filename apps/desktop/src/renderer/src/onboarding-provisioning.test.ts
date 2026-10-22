@@ -337,6 +337,7 @@ function onboardingHarness(
   current(): OnboardingSnapshot
 } {
   const operation: OnboardingProvisioningOperation = {
+    interfaceLanguage: 'zh-CN',
     memberCommandId: 'member-command',
     runtimeCommandId: 'runtime-command',
     campCommandId: 'camp-command',
@@ -349,7 +350,7 @@ function onboardingHarness(
     ...checkpoints
   }
   let current: OnboardingSnapshot = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     status: 'in_progress',
     step: 'runtime',
     selectedMemberRole: 'luoke',
@@ -379,7 +380,7 @@ function onboardingHarness(
       return result as T
     },
     onboarding: {
-      async beginProvisioning(_selection, runtimePermissions): Promise<OnboardingSnapshot> {
+      async beginProvisioning(_selection, runtimePermissions, interfaceLanguage): Promise<OnboardingSnapshot> {
         events.push('begin')
         if (current.status !== 'in_progress') throw new Error('not in progress')
         if (current.provisioning) {
@@ -387,7 +388,7 @@ function onboardingHarness(
         }
         current = {
           ...current,
-          provisioning: current.provisioning ?? { ...operation, runtimePermissions }
+          provisioning: current.provisioning ?? { ...operation, runtimePermissions, interfaceLanguage }
         }
         return current
       },
@@ -428,7 +429,7 @@ function onboardingHarness(
           throw new Error('incomplete')
         }
         current = {
-          schemaVersion: 3,
+          schemaVersion: 4,
           status: 'completed',
           origin: 'onboarding',
           completedAt: '2026-08-17T00:00:00.000Z',

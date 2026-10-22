@@ -21,6 +21,9 @@ pub struct RuntimeStartupConfiguration {
     /// Resolved by the Host from its private stored references, never accepted from clients.
     #[serde(skip)]
     pub custom_api_snapshot: Option<CustomApiSnapshot>,
+    /// A damaged private record blocks only this runtime's shared checks.
+    #[serde(skip)]
+    pub common_environment_unavailable: bool,
 }
 
 impl PartialEq for RuntimeStartupConfiguration {
@@ -71,6 +74,14 @@ pub struct FieldConflict {
 }
 
 impl RuntimeStartupConfiguration {
+    pub fn ensure_environment_available(&self) -> Result<()> {
+        ensure!(
+            !self.common_environment_unavailable,
+            "Common environment credentials are unavailable; restore the local credential key or configuration"
+        );
+        Ok(())
+    }
+
     pub fn validated(mut self, windows: bool) -> Result<Self> {
         if let Some(path) = &mut self.program_path {
             *path = path.trim().to_owned();
@@ -83,7 +94,6 @@ impl RuntimeStartupConfiguration {
                 "程序路径必须是本机绝对路径。"
             );
         }
-        ensure!(self.environment.len() <= 128, "环境变量不能超过 128 项。");
         let mut names = BTreeSet::new();
         let mut bytes = 0;
         for variable in &mut self.environment {
@@ -91,8 +101,7 @@ impl RuntimeStartupConfiguration {
             let mut chars = variable.name.chars();
             ensure!(
                 matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
-                    && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-                    && variable.name.len() <= 256,
+                    && chars.all(|c| c.is_ascii_alphanumeric() || c == '_'),
                 "变量名需以字母或下划线开头，只含字母、数字、下划线。"
             );
             ensure!(
@@ -126,10 +135,9 @@ fn load_record(
     ).optional()?;
     let Some((revision, json)) = row else {
         let mut configuration = RuntimeStartupConfiguration::default();
-        if native::supported(runtime_kind) {
-            // Share the actual legacy custom entrypoint with reads, saves and
-            // execution snapshots, not only the settings page's display fallback.
-            configuration.program_path = connection.query_row(
+        // Share the actual legacy custom entrypoint with reads, saves and
+        // execution snapshots, not only the settings page's display fallback.
+        configuration.program_path = connection.query_row(
                 "SELECT COALESCE(locator.canonical_shim_path, installation.executable_path)
                  FROM adapter_installation AS installation
                  LEFT JOIN adapter_capability_snapshot AS snapshot ON snapshot.installation_id=installation.id
@@ -140,7 +148,6 @@ fn load_record(
                     AND installation.installation_class='managed_default' AND installation.source IN ('custom','manual')",
                 [runtime_kind.as_str()], |row| row.get(0),
             ).optional()?;
-        }
         return Ok((0, configuration));
     };
     let mut value: serde_json::Value = serde_json::from_str(&json)?;
@@ -166,7 +173,7 @@ pub fn load(database: &Database, kind: AdapterKind) -> Result<RuntimeStartupSett
     })
 }
 
-fn native_snapshot(
+pub fn native_snapshot(
     kind: AdapterKind,
     configuration: &RuntimeStartupConfiguration,
     database: &Path,
@@ -204,12 +211,37 @@ pub fn sensitive_environment(kind: AdapterKind, name: &str) -> bool {
 pub fn load_all(database: &Database) -> Result<BTreeMap<AdapterKind, RuntimeStartupConfiguration>> {
     let mut configurations = BTreeMap::new();
     for kind in AdapterKind::ALL {
-        let settings = load(database, kind)?;
-        if settings.revision != 0 || settings.configuration.custom_api_snapshot.is_some() {
+        let mut settings = load(database, kind)?;
+        // Keep the Host and unrelated runtimes usable when a private record is
+        // damaged, but never let shared probes silently use another credential.
+        if apply_common(database.connection(), kind, &mut settings.configuration).is_err() {
+            settings.configuration.common_environment_unavailable = true;
+            settings.configuration.custom_api_snapshot = None;
+        }
+        if settings.revision != 0
+            || settings.configuration.common_environment_unavailable
+            || !settings.configuration.environment.is_empty()
+            || settings.configuration.custom_api_snapshot.is_some()
+        {
             configurations.insert(kind, settings.configuration.validated(cfg!(windows))?);
         }
     }
     Ok(configurations)
+}
+
+pub fn apply_common(
+    connection: &rusqlite::Connection,
+    kind: AdapterKind,
+    configuration: &mut RuntimeStartupConfiguration,
+) -> Result<()> {
+    configuration.environment = crate::member_environment::common::entries(
+        crate::member_environment::common::current(connection, kind)?,
+    );
+    configuration.common_environment_unavailable = false;
+    if let Some(path) = connection.path() {
+        configuration.custom_api_snapshot = native_snapshot(kind, configuration, Path::new(path));
+    }
+    Ok(())
 }
 
 pub fn editable(
@@ -366,6 +398,7 @@ pub fn save(
         configuration,
         search_generation,
         true,
+        None,
     )?;
     load(database, kind)
 }
@@ -375,15 +408,26 @@ pub fn commit_save(
     prepared: PreparedSave,
     search_generation: u64,
 ) -> Result<RuntimeStartupSettings> {
+    commit_save_with_common(database, kind, prepared, search_generation, None)
+}
+pub fn commit_save_with_common(
+    database: &mut Database,
+    kind: AdapterKind,
+    prepared: PreparedSave,
+    search_generation: u64,
+    common: Option<&crate::member_environment::common::Prepared>,
+) -> Result<RuntimeStartupSettings> {
     ensure!(prepared.conflicts.is_empty(), "请先处理字段冲突。");
-    let reconnect_required = prepared.configuration != prepared.current.configuration;
+    let path_changed = prepared.configuration != prepared.current.configuration;
+    let reconnect_required = path_changed || common.is_some_and(|edit| edit.changed);
     persist(
         database,
         kind,
         prepared.current.revision,
         prepared.configuration,
         search_generation,
-        reconnect_required,
+        path_changed,
+        common,
     )?;
     let mut saved = load(database, kind)?;
     saved.reconnect_required = reconnect_required;
@@ -413,6 +457,7 @@ fn persist(
     mut configuration: RuntimeStartupConfiguration,
     search_generation: u64,
     invalidate: bool,
+    common: Option<&crate::member_environment::common::Prepared>,
 ) -> Result<()> {
     ensure!(
         configuration.environment.is_empty(),
@@ -431,9 +476,14 @@ fn persist(
     let stored = serde_json::to_value(&configuration)?;
     let transaction = database.connection_mut().transaction()?;
     transaction.execute("INSERT INTO runtime_startup_setting(runtime_kind, revision, configuration_json, updated_at) VALUES (?1, ?2, ?3, datetime('now')) ON CONFLICT(runtime_kind) DO UPDATE SET revision=excluded.revision, configuration_json=excluded.configuration_json, updated_at=excluded.updated_at", params![kind.as_str(), i64::try_from(revision)?, serde_json::to_string(&stored)?])?;
-    if invalidate {
+    if let Some(common) = common {
+        common.commit(&transaction)?;
+    }
+    if invalidate || common.is_some_and(|edit| edit.changed) {
         transaction.execute("UPDATE adapter_capability_snapshot SET stale_at=COALESCE(stale_at, datetime('now')), authentication_status='unknown', probe_status='installed_unverified', last_error='runtime_startup_configuration_changed' WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind=?1 AND installation_class='managed_default')", [kind.as_str()])?;
-        transaction.execute("UPDATE adapter_installation SET generation=generation+1, version=version+1, updated_at=datetime('now') WHERE adapter_kind=?1 AND installation_class='managed_default'", [kind.as_str()])?;
+        if invalidate {
+            transaction.execute("UPDATE adapter_installation SET generation=generation+1, version=version+1, updated_at=datetime('now') WHERE adapter_kind=?1 AND installation_class='managed_default'", [kind.as_str()])?;
+        }
         transaction.execute("INSERT INTO runtime_search_environment_state(singleton, generation, captured_at) VALUES(1, ?1, datetime('now')) ON CONFLICT(singleton) DO UPDATE SET generation=excluded.generation, captured_at=excluded.captured_at", [i64::try_from(search_generation)?])?;
     }
     transaction.commit()?;
@@ -491,6 +541,7 @@ mod tests {
     fn environment_validation_preserves_values_and_rejects_ambiguous_or_reserved_names() {
         let config = |names: &[&str]| RuntimeStartupConfiguration {
             custom_api_snapshot: None,
+            common_environment_unavailable: false,
             program_path: None,
             environment: names
                 .iter()
@@ -543,6 +594,15 @@ mod tests {
             )
             .unwrap()["EMPTY"],
             ""
+        );
+        let mut many = (0..129)
+            .map(|index| (format!("KEY_{index}"), "".to_owned()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        many.insert("K".repeat(257), "long name".into());
+        assert_eq!(
+            crate::member_environment::parse(&serde_json::to_string(&many).unwrap(), false)
+                .unwrap(),
+            many
         );
         let overlay = crate::member_environment::parse(
             r#"{"anthropic_base_url":"https://fixture.example","anthropic_api_key":"fixture-key"}"#,
@@ -640,6 +700,7 @@ mod tests {
                 AdapterKind::CodexCli,
                 RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
+                    common_environment_unavailable: false,
                     program_path: None,
                     environment: vec![RuntimeEnvironmentVariable {
                         name: key.into(),

@@ -9,6 +9,7 @@ use std::{collections::HashMap, sync::Mutex, time::Instant};
 use tokio::io::AsyncWriteExt;
 
 pub const MAX_BYTES: usize = 30 * 1024 * 1024;
+const MAX_PASTED_TEXT_BYTES: usize = 25 * 1024 * 1024;
 const RECEIVE_IDLE: Duration = Duration::from_secs(60);
 const MAX_INTENT_BYTES: usize = 8 * 1024;
 
@@ -98,6 +99,7 @@ impl Attempts {
 // request. Once submitted, only a definitive Core receipt permits deletion.
 struct TemporaryUpload {
     directory: PathBuf,
+    generated_path: Option<PathBuf>,
     retain: bool,
 }
 impl TemporaryUpload {
@@ -112,17 +114,63 @@ impl TemporaryUpload {
         rovai_core::platform::prepare_private_directory(&directory)?;
         Ok(Self {
             directory,
+            generated_path: None,
             retain: false,
         })
     }
     fn path(&self) -> PathBuf {
-        self.directory.join("source")
+        self.generated_path
+            .clone()
+            .unwrap_or_else(|| self.directory.join("source"))
+    }
+    async fn pasted_text(
+        state: &WebState,
+        session: &Session,
+        intent: &UploadIntent,
+    ) -> Result<Self> {
+        let reply = state
+            .core
+            .request_for_editor(
+                "host.upload.pastedTextRoot",
+                json!(intent),
+                DraftClient::verified_web(&session.client_id)?,
+            )
+            .await?;
+        ensure!(reply.error.is_none(), "invalid_upload");
+        let root = reply
+            .result
+            .and_then(|v| v.as_str().map(PathBuf::from))
+            .context("invalid_upload")?;
+        // Core authorizes the destination; Host never recreates a deleted Thread.
+        for ancestor in root.ancestors() {
+            ensure!(
+                !tokio::fs::symlink_metadata(ancestor)
+                    .await?
+                    .file_type()
+                    .is_symlink(),
+                "invalid_upload"
+            );
+        }
+        let path = root.join(format!("{}.txt", uuid::Uuid::new_v4()));
+        Ok(Self {
+            directory: root,
+            generated_path: Some(path),
+            retain: false,
+        })
     }
 }
 impl Drop for TemporaryUpload {
     fn drop(&mut self) {
         if !self.retain {
-            let _ = std::fs::remove_dir_all(&self.directory);
+            if let Some(path) = self.generated_path.take() {
+                // One-shot cleanup for an unbound request, including cancellation.
+                // A possibly-bound file is retained until its receipt is known.
+                tokio::spawn(async move {
+                    let _ = tokio::fs::remove_file(path).await;
+                });
+            } else {
+                let _ = std::fs::remove_dir_all(&self.directory);
+            }
         }
     }
 }
@@ -132,14 +180,31 @@ struct ReceivedUpload {
     hash: String,
     size: u64,
     prefix: Vec<u8>,
+    pasted_preview: Option<String>,
 }
 async fn receive(
     mut field: axum::extract::multipart::Field<'_>,
     state: &WebState,
     session: &Arc<Session>,
+    intent: Option<&UploadIntent>,
 ) -> Result<ReceivedUpload> {
-    let temporary = TemporaryUpload::create()?;
-    let file = tokio::fs::File::create(temporary.path()).await?;
+    let pasted = intent.is_some_and(|intent| intent.target.is_pasted_text());
+    let temporary = if pasted {
+        TemporaryUpload::pasted_text(state, session, intent.unwrap()).await?
+    } else {
+        TemporaryUpload::create()?
+    };
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options.open(temporary.path()).await?;
+    let mut preview = pasted.then(TextPreview::default);
+    let max_bytes = if pasted {
+        MAX_PASTED_TEXT_BYTES
+    } else {
+        MAX_BYTES
+    };
     let mut file = tokio::io::BufWriter::with_capacity(64 * 1024, file);
     let mut digest = Sha256::new();
     let mut size = 0u64;
@@ -156,7 +221,10 @@ async fn receive(
         let Some(chunk) = chunk else { break };
 
         size += chunk.len() as u64;
-        ensure!(size <= MAX_BYTES as u64, "upload_too_large");
+        ensure!(size <= max_bytes as u64, "upload_too_large");
+        if let Some(preview) = &mut preview {
+            preview.push(&chunk)?;
+        }
         prefix.extend_from_slice(&chunk[..chunk.len().min(12 - prefix.len())]);
         digest.update(&chunk);
         tokio::time::timeout(RECEIVE_IDLE, file.write_all(&chunk)).await??;
@@ -168,7 +236,56 @@ async fn receive(
         hash: format!("{:x}", digest.finalize()),
         size,
         prefix,
+        pasted_preview: preview.map(TextPreview::finish).transpose()?,
     })
+}
+
+// Validate UTF-8 as chunks arrive and keep only the card's display prefix.
+// The file itself preserves every byte, including whitespace and line endings.
+#[derive(Default)]
+struct TextPreview {
+    tail: Vec<u8>,
+    text: String,
+    count: usize,
+    space: bool,
+}
+impl TextPreview {
+    fn push(&mut self, bytes: &[u8]) -> Result<()> {
+        self.tail.extend_from_slice(bytes);
+        let end = match std::str::from_utf8(&self.tail) {
+            Ok(_) => self.tail.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(_) => anyhow::bail!("invalid_upload"),
+        };
+        for ch in std::str::from_utf8(&self.tail[..end])?.chars() {
+            if self.count >= 160 {
+                break;
+            }
+            if ch.is_whitespace()
+                || ch.is_control()
+                || matches!(ch, '\u{feff}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+            {
+                self.space = self.count > 0;
+                continue;
+            }
+            if self.space {
+                self.text.push(' ');
+                self.count += 1;
+            }
+            if self.count == 160 {
+                break;
+            }
+            self.text.push(ch);
+            self.count += 1;
+            self.space = false;
+        }
+        self.tail.drain(..end);
+        Ok(())
+    }
+    fn finish(self) -> Result<String> {
+        ensure!(self.tail.is_empty(), "invalid_upload");
+        Ok(self.text.trim_end().to_owned())
+    }
 }
 
 async fn receive_intent(mut field: axum::extract::multipart::Field<'_>) -> Result<String> {
@@ -227,7 +344,7 @@ pub async fn upload(
                 }
             }
             Some("file") if contents.is_none() => {
-                contents = match receive(field, &state, &session).await {
+                contents = match receive(field, &state, &session, intent.as_ref()).await {
                     Ok(upload) => Some(upload),
                     Err(failure) => {
                         return match failure.to_string().as_str() {
@@ -248,6 +365,9 @@ pub async fn upload(
     let (Some(intent), Some(contents)) = (intent, contents) else {
         return error(StatusCode::BAD_REQUEST, "invalid_upload");
     };
+    if intent.target.is_pasted_text() && contents.pasted_preview.is_none() {
+        return error(StatusCode::BAD_REQUEST, "invalid_upload");
+    }
     if command.is_some_and(|id| id != intent.command_id) {
         return error(StatusCode::BAD_REQUEST, "invalid_upload");
     }
@@ -284,7 +404,9 @@ pub async fn upload(
         let mut temporary = contents.temporary;
         let path = temporary.path();
         async {
-            let media = if contents.prefix.starts_with(b"\x89PNG\r\n\x1a\n") {
+            let media = if intent.target.is_pasted_text() {
+                Some("text/plain;charset=utf-8")
+            } else if contents.prefix.starts_with(b"\x89PNG\r\n\x1a\n") {
                 Some("image/png")
             } else if contents.prefix.starts_with(b"\xff\xd8\xff") {
                 Some("image/jpeg")
@@ -297,6 +419,7 @@ pub async fn upload(
             };
             let mut source = observe_source_attachment(&path, &intent.display_name, media)?;
             source.id = intent.command_id.clone();
+            source.pasted_text_preview = contents.pasted_preview;
             if let Some(attempt) = &mut attempt {
                 attempt.may_bind = true;
             }
@@ -409,7 +532,7 @@ pub async fn reconcile(
 fn project_upload(intent: &UploadIntent, value: serde_json::Value) -> serde_json::Value {
     use rovai_core::web_upload::UploadTarget;
     let operation = match intent.target {
-        UploadTarget::Camp => return value,
+        UploadTarget::Camp | UploadTarget::PastedText => return value,
         UploadTarget::SingleChat { .. } | UploadTarget::SingleChatPending { .. } => {
             operations::Operation::SingleChatGet
         }

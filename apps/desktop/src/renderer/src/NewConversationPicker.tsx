@@ -5,7 +5,7 @@ import { NavigationIcon } from './NavigationIcon'
 import { UiText, uiAttribute } from './interface-language'
 
 /** One draft owner; only the picker presentation changes on phones. */
-export function NewConversationPicker({ mobile, open, onOpenChange, busy, title, trigger, menu, children, multiple = false }: {
+export function NewConversationPicker({ mobile, open, onOpenChange, busy, title, trigger, menu, children, multiple = false, backLabel = uiAttribute('返回新对话') }: {
   mobile: boolean
   open: boolean
   onOpenChange(open: boolean): void
@@ -15,6 +15,7 @@ export function NewConversationPicker({ mobile, open, onOpenChange, busy, title,
   menu: ReactNode
   children: ReactNode
   multiple?: boolean
+  backLabel?: string
 }): React.JSX.Element {
   const backRef = useRef<HTMLButtonElement>(null)
   const changeOpen = (next: boolean): void => { if (!busy) onOpenChange(next) }
@@ -31,7 +32,7 @@ export function NewConversationPicker({ mobile, open, onOpenChange, busy, title,
         onOpenAutoFocus={event => { event.preventDefault(); backRef.current?.focus() }}
         onEscapeKeyDown={event => { event.stopPropagation(); if (busy) event.preventDefault() }}>
         <header className="compact-header">
-          <Dialog.Close asChild><button ref={backRef} className="compact-close" type="button" aria-label={uiAttribute("返回新对话")} disabled={busy}><NavigationIcon name="arrow-left" /></button></Dialog.Close>
+          <Dialog.Close asChild><button ref={backRef} className="compact-close" type="button" aria-label={backLabel} disabled={busy}><NavigationIcon name="arrow-left" /></button></Dialog.Close>
           <Dialog.Title>{title}</Dialog.Title>
         </header>
         <div className="compact-body new-camp-picker-body">{children}</div>

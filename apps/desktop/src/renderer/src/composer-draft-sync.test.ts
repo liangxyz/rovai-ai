@@ -13,6 +13,7 @@ import {
   ComposerDraftSync,
   COMPOSER_DRAFT_RETRY_DELAYS_MS,
   ROVAI_ATOM_PRESENTATION_TAG,
+  ROVAI_INPUT_HISTORY_PREVIEW_TAG,
   StaleComposerSyncEpochError
 } from './composer-draft-sync'
 import {
@@ -47,6 +48,60 @@ function replaceText(editor: LexicalEditor, value: string): void {
 afterEach(() => vi.useRealTimers())
 
 describe('ComposerDraftSync', () => {
+  it('previews live recipients while autosave and leave flush retain the original dirty draft', async () => {
+    vi.useFakeTimers()
+    const editor = createComposerEditor('saved')
+    const persist = vi.fn(async (_document: ComposerDocument) => {})
+    const localChange = vi.fn()
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      atomIsAvailable: () => true, persist, onLocalDocumentChange: localChange
+    })
+    const unregister = editor.registerUpdateListener(payload => sync.handleEditorUpdate(payload))
+    replaceText(editor, 'unsaved draft')
+    const draft = editor.getEditorState()
+    const historical: ComposerDocument = { version: 2, segments: [
+      { kind: 'atom', atom: { type: 'member', agentId: 'history-recipient' } },
+      { kind: 'text', text: ' history' }
+    ] }
+    editor.update(() => $replaceEditorWithComposerDocument(historical),
+      { discrete: true, tag: ROVAI_INPUT_HISTORY_PREVIEW_TAG })
+    expect(sync.getStatus().memberAgentIds).toEqual(['history-recipient'])
+    expect(localChange).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(350)
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(editorStateText(persist.mock.calls[0][0])).toBe('unsaved draft')
+    expect(editorStateText((await sync.flush()).document)).toBe('unsaved draft')
+    editor.setEditorState(draft, { tag: ROVAI_INPUT_HISTORY_PREVIEW_TAG })
+    sync.restoreHistoryDraft()
+    expect(sync.getStatus().memberAgentIds).toEqual([])
+    expect(editorStateText((await sync.flush()).document)).toBe('unsaved draft')
+    unregister()
+    sync.destroy()
+  })
+
+  it('adopts preview before sending and lets ordinary edits leave preview without losing persistence', async () => {
+    const editor = createComposerEditor('original')
+    const persist = vi.fn(async (_document: ComposerDocument) => {})
+    const localChange = vi.fn()
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      atomIsAvailable: () => true, persist, onLocalDocumentChange: localChange
+    })
+    const unregister = editor.registerUpdateListener(payload => sync.handleEditorUpdate(payload))
+    const show = (text: string) => editor.update(() => $replaceEditorWithComposerDocument({
+      version: 2, segments: [{ kind: 'text', text }]
+    }), { discrete: true, tag: ROVAI_INPUT_HISTORY_PREVIEW_TAG })
+    show('send this')
+    sync.adoptHistoryPreview()
+    expect(editorStateText((await sync.flush()).document)).toBe('send this')
+    expect(localChange).toHaveBeenCalledTimes(1)
+    show('second history')
+    replaceText(editor, 'second history edited')
+    expect(editorStateText((await sync.flush()).document)).toBe('second history edited')
+    expect(persist.mock.calls.map(([document]) => editorStateText(document))).toEqual(['send this', 'second history edited'])
+    unregister()
+    sync.destroy()
+  })
+
   it('derives pending member identities from the live editor after each atom removal', () => {
     const editor = createComposerEditor()
     const seen: string[][] = []

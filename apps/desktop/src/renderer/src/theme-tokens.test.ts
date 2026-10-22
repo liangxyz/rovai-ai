@@ -269,7 +269,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--diff-add-soft']).toBe('#d9f1e2')
     expect(day['--diff-remove-soft']).toBe('#f5dede')
     expect(contrast(day['--mention-ink'], day['--surface'])).toBeGreaterThanOrEqual(4.5)
-    expect(css).toContain('.camp-workspace { background: var(--conversation-surface); }')
+    expect(css).toMatch(/\.camp-workspace\s*\{[^}]*background: var\(--conversation-surface\)[^}]*\}/)
     expect(css).toContain('border-left: 1px solid var(--conversation-inspector-line)')
     expect(css).toContain('background: var(--inspector-surface)')
     expect(css).toContain('.new-conversation-workspace { background: var(--home-surface); }')
@@ -490,7 +490,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
       /\.conversation-bubble:is\(\.user, \.external_principal\):has\(\.message-attachments\) \.message-surface\s*\{[^}]*width: 100%[^}]*max-width: none/
     )
     expect(css).toMatch(/\.user-message-files\s*\{[^}]*justify-content: flex-end/)
-    expect(css).toMatch(/\.attachment-card\s*\{[^}]*--user-file-card-max-width:\s*280px/)
+    expect(css).toMatch(/\.attachment-card\s*\{[^}]*--user-file-card-max-width:\s*224px/)
+    expect(css).toMatch(/\.single-chat-message-attachments \.user-timeline\s*\{[^}]*width: fit-content[^}]*max-width: min\(var\(--user-file-card-max-width\), 100%\)/)
+    expect(css).toMatch(/\.agent-timeline\s*\{[^}]*width: 100%[^}]*min-height: 56px/)
+    expect(css).toMatch(/\.agent-output-files\s*\{[^}]*width: min\(620px, 100%\)/)
     expect(css).toMatch(/\.user-timeline\s*\{[^}]*max-width:\s*min\(var\(--user-file-card-max-width\), 100%\)/)
     expect(css).toMatch(/\.composer-attachment-card\s*\{[^}]*max-width:\s*min\(var\(--user-composer-max-width\), var\(--user-file-card-max-width\)\)/)
     expect(css).toMatch(

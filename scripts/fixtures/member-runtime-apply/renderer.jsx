@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 import '../../../apps/web/src/styles.css'
@@ -87,7 +88,7 @@ function Fixture() {
     hold: index => { held = members[index].agentId }, release: () => { release?.(); release = null },
     change: (index, config, publish = true) => { members[index] = { ...members[index], version: members[index].version + 1, runtimeConfiguration: config }; if (publish) void reload() },
     leave: () => ref.current.requestTransition(() => setLeft(true)),
-    language: value => changeInterfaceLanguage({ setInterfaceLanguage: async interfaceLanguage => ({ interfaceLanguage }) }, value)
+    language: value => changeInterfaceLanguage(languageTestApi, value)
   }
   return <MobileLayoutProvider value={mobile}><NavigationShell platform="darwin" browser data-mobile-view={mobile ? 'members' : undefined}>
     <ThreadNavigation navigationId="global-navigation" view="members" state="ready" navigation={navigation} activeThreadId={null} currentProjectKey="fixture"

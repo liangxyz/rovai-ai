@@ -2927,6 +2927,7 @@ for line in sys.stdin:
                 source.kind,
                 &rovai_core::agent_profile::ModelSelection::RuntimeDefault,
                 EnvironmentEdit {
+                    inherit_common: None,
                     expected_revision: revision,
                     json: json!({"LAUNCH_VALUE":value}).to_string(),
                 },

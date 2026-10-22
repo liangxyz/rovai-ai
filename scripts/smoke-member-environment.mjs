@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { createCipheriv, randomBytes } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -36,13 +37,12 @@ try {
       environment: { expectedRevision: revision, json: JSON.stringify(values) }
     }
   })
-  const get = (extra = {}) => core.request('member.runtimeEnvironment.get', { memberId, adapterKind: kind, ...extra })
+  const get = () => core.request('member.runtimeEnvironment.get', { memberId, adapterKind: kind })
   const first = payload(initial.version, 0, { ANTHROPIC_BASE_URL: 'https://a.example', ANTHROPIC_API_KEY: secret, LITERAL: "'$HOME'\n~ $(false)" })
   const applied = await core.request('members.runtime.set', first)
   assert.equal(applied.status, 'applied')
   assert.deepEqual(await core.request('members.runtime.set', first), applied, 'Exact command replay remains idempotent')
-  assert.equal((await get()).environment.ANTHROPIC_API_KEY, '<saved>')
-  assert.equal((await get({ reveal: true })).environment.ANTHROPIC_API_KEY, secret)
+  assert.equal((await get()).environment.ANTHROPIC_API_KEY, secret)
   assert.equal((await core.request('member.runtimeEnvironment.get', { memberId: 'agent_2', adapterKind: kind })).revision, 0)
   assert.equal((await core.request('member.runtimeEnvironment.get', { memberId, adapterKind: 'pi' })).revision, 0)
   const profile = await core.request('members.get', { agentId: memberId })
@@ -52,7 +52,7 @@ try {
   assert.equal((await get()).revision, 1, 'Profile CAS failure cannot commit environment')
   await assert.rejects(core.request('members.runtime.set', payload(profile.version, 0, {})), /environment changed/)
   assert.equal((await core.request('members.runtime.set', payload(profile.version, 1,
-    { ANTHROPIC_BASE_URL: 'https://b.example', ANTHROPIC_API_KEY: '<saved>', ANTHROPIC_MODEL: 'provider-model' }))).status, 'applied')
+    { ANTHROPIC_BASE_URL: 'https://b.example', ANTHROPIC_API_KEY: secret, ANTHROPIC_MODEL: 'provider-model' }))).status, 'applied')
   const updated = await core.request('members.get', { agentId: memberId })
   const modelOnly = payload(updated.version, 2, {})
   delete modelOnly.command.environment
@@ -91,7 +91,7 @@ try {
   core = startCore()
   await core.request('health.check')
   assert.equal((await get()).revision, 2)
-  assert.equal((await get({ reveal: true })).environment.ANTHROPIC_API_KEY, secret)
+  assert.equal((await get()).environment.ANTHROPIC_API_KEY, secret)
   const persisted = await core.request('members.get', { agentId: memberId })
   assert.equal((await core.request('members.runtime.set', payload(persisted.version, 2, {}))).status, 'applied')
   assert.deepEqual((await get()).environment, {})
@@ -99,15 +99,17 @@ try {
   await core.stop()
   const database = await readFile(join(data, 'rovai.sqlite'))
   assert.ok(!database.includes(Buffer.from(secret)), 'Credentials are encrypted in persisted SQLite')
-  // The Core is stopped. Convert only this disposable fixture to the exact prior schema.
+  // Archive migration/rollback is owned by member_environment::tests. Seed only
+  // this encrypted current-schema archive to exercise the Owner API and diagnostics.
+  const nonce = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', await readFile(join(data, 'member-environment/key')), nonce)
+  cipher.setAAD(Buffer.from(`legacy:${kind}`))
+  const ciphertext = Buffer.concat([nonce, cipher.update(JSON.stringify({ ANTHROPIC_API_KEY: secret })), cipher.final(), cipher.getAuthTag()])
   const legacy = new DatabaseSync(join(data, 'rovai.sqlite'))
-  legacy.exec(`BEGIN;
-    DROP TABLE IF EXISTS conversation_runtime_environment; DROP TABLE member_runtime_environment; DROP TABLE IF EXISTS runtime_environment_plan; DROP TABLE runtime_environment_legacy;
-    DELETE FROM schema_migration WHERE version IN (191,192,193,194);
-    UPDATE rovai_data_contract SET projection_schema_version=140 WHERE singleton=1;`)
-  legacy.prepare('INSERT INTO runtime_startup_setting(runtime_kind,revision,configuration_json,updated_at) VALUES(?,1,?,datetime(\'now\'))').run(kind,
-    JSON.stringify({ programPath: null, environment: [{ name: 'ANTHROPIC_API_KEY', value: secret }] }))
-  legacy.exec('COMMIT'); legacy.close()
+  try {
+    legacy.prepare('INSERT INTO runtime_environment_legacy(runtime_kind,identity,ciphertext,variable_count) VALUES(?,?,?,1)')
+      .run(kind, crypto.randomUUID(), ciphertext)
+  } finally { legacy.close() }
   core = startCore()
   await core.request('health.check')
   const report = await core.request('diagnostics.check')
@@ -116,16 +118,16 @@ try {
   assert.equal(issue.status, 'attention')
   assert.ok(!JSON.stringify(report).includes(secret))
   const archived = (await core.request('runtime.environmentLegacy.list'))[0]
-  assert.equal((await core.request('runtime.environmentLegacy.get', { runtimeKind: kind })).ANTHROPIC_API_KEY, '<saved>')
+  assert.equal((await core.request('runtime.environmentLegacy.get', { runtimeKind: kind })).ANTHROPIC_API_KEY, secret)
   await core.request('runtime.environmentLegacy.acknowledge', { runtimeKind: kind, identity: archived.identity })
   assert.deepEqual((await core.request('runtime.startup.get', { runtimeKind: kind })).configuration.environment, [])
   await core.stop()
   core = startCore()
   await core.request('health.check')
   assert.equal((await core.request('runtime.environmentLegacy.list'))[0].handled, true)
-  assert.equal((await core.request('runtime.environmentLegacy.get', { runtimeKind: kind, reveal: true })).ANTHROPIC_API_KEY, secret)
+  assert.equal((await core.request('runtime.environmentLegacy.get', { runtimeKind: kind })).ANTHROPIC_API_KEY, secret)
   assert.equal((await core.request('diagnostics.check')).checks.find(check => check.subjectKind === 'legacy_runtime_environment').status, 'ok')
-  console.log(JSON.stringify({ ok: true, checks: ['private-read', 'masked-read', 'member-and-runtime-scope', 'command-replay', 'atomic-CAS', 'configuration-pass-through', 'model-conflict', 'retired-runtime-input', 'member-session-scope', 'session-reset-CAS', 'restart', 'clear-overlay', 'encrypted-storage', 'public-redaction', 'legacy-migration', 'legacy-diagnostic', 'legacy-acknowledgment-restart'] }))
+  console.log(JSON.stringify({ ok: true, checks: ['private-plaintext-read', 'member-and-runtime-scope', 'command-replay', 'atomic-CAS', 'configuration-pass-through', 'model-conflict', 'retired-runtime-input', 'member-session-scope', 'session-reset-CAS', 'restart', 'clear-overlay', 'encrypted-storage', 'public-redaction', 'legacy-archive-read', 'legacy-diagnostic', 'legacy-acknowledgment-restart'] }))
 } finally {
   await core?.stop()
   await removeEphemeralRuntimeCampFilesRoot(data, { homeDirectory: home })

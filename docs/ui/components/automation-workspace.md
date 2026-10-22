@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-automation-workspace
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-10-21
 ---
 
 # Automation 工作区
@@ -60,6 +60,9 @@ Renderer 使用 `cron-parser` 提供就地反馈，最终接受与求值仍由 C
 再次触发；“运行一次”仍可用，显式执行后定义继续保持关闭。
 
 ## 状态与结果
+
+创建、手动运行、开启、关闭和删除不显示操作 Toast；手动运行回执的 started、skipped、failed
+也不另外弹出提示或新增局部反馈，继续刷新列表与执行历史。请求拒绝、读取或保存失败仍在原有错误区域显示。
 
 运行时间区显示 Core 返回的下次运行，详情下方展示执行历史。历史通过 `automations.runs.list` 每页读取 20 条，提供更早记录
 入口；事件与低频刷新更新已展开的历史，不能只更新 `lastRun` 而让被新跳过记录遮住的活跃运行长期停留在旧状态。

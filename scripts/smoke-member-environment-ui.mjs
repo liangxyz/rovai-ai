@@ -21,8 +21,9 @@ import ${source('styles.css')};
 import {MemberEnvironmentEditor,useMemberEnvironment} from ${source('MemberEnvironmentEditor.tsx')};
 import {ThreadClientProvider} from ${source('camp-client.tsx')};
 import {changeInterfaceLanguage} from ${source('interface-language.ts')};
+import {languageTestApi} from ${source('interface-language-test-api.ts')};
 let revision=1;
-let values={ANTHROPIC_BASE_URL:'https://fixture.example',ANTHROPIC_API_KEY:'<saved>'};
+let values={ANTHROPIC_BASE_URL:'https://fixture.example',ANTHROPIC_API_KEY:'fixture-visible-key'};
 const client={platform:'darwin',onEvent:()=>()=>{},request:async(method)=>{
   if(method==='member.runtimeEnvironment.get')return {revision,environment:values};
   throw Error(method);
@@ -30,7 +31,7 @@ const client={platform:'darwin',onEvent:()=>()=>{},request:async(method)=>{
 function Editor(){
  const [version,setVersion]=useState(1);
  const env=useMemberEnvironment('member-a','claude-code-cli',version,undefined,false);
- window.fixture={language:language=>changeInterfaceLanguage({setInterfaceLanguage:async value=>({interfaceLanguage:value})},language),update:env.update};
+ window.fixture={dirty:env.dirty,language:language=>changeInterfaceLanguage(languageTestApi,language),update:env.update};
  return <main style={{maxWidth:560,padding:20,margin:'0 auto'}}>
   <MemberEnvironmentEditor environment={env} disabled={false}/>
   <button data-save onClick={async()=>{const edit=env.edit();if(edit){values=JSON.parse(edit.json);revision++;setVersion(v=>v+1);await env.savedSuccessfully()}}}>Save</button>
@@ -55,15 +56,18 @@ app.whenReady().then(async()=>{
  assert.equal(await run('document.querySelector("textarea").getBoundingClientRect().height'),104);
  await run('document.querySelector("textarea").focus()');
  assert.equal(await run('getComputedStyle(document.querySelector("textarea")).boxShadow'),'none');
- await run('window.fixture.update(JSON.stringify({ANTHROPIC_BASE_URL:"https://changed.example",ANTHROPIC_API_KEY:"<saved>"},null,2))');await sleep(60);await click('[data-save]');
- await wait('document.body.innerText.includes("已保存")');
+ await run('window.fixture.update(JSON.stringify({ANTHROPIC_BASE_URL:"https://changed.example",ANTHROPIC_API_KEY:"fixture-visible-key", RETRY_COUNT:0, ENABLED:false, EMPTY:""},null,2))');await sleep(60);await click('[data-save]');
+ await wait('!window.fixture.dirty && JSON.parse(document.querySelector("textarea").value).RETRY_COUNT === "0"');
+ assert.equal(await run('JSON.parse(document.querySelector("textarea").value).ENABLED'), 'false');
+ assert.equal(await run('JSON.parse(document.querySelector("textarea").value).EMPTY'), '');
+ assert.equal(await run('document.querySelectorAll(".environment-reveal").length'),0);
  assert.equal(await run('document.querySelectorAll("[role=alert]").length'),0);
  w.setContentSize(390,844);await run('window.fixture.language("en")');await sleep(200);
  assert.equal(await run('document.body.innerText.includes("Saving does not affect running processes")'),false);
  assert.equal(await run('getComputedStyle(document.querySelector("textarea")).fontSize'),'16px');
  assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'));
  writeFileSync(join(root,'mobile-en.png'),(await w.webContents.capturePage()).toPNG());
- console.log(JSON.stringify({ok:true,checks:['saved-marker','no-combination-confirmation','no-process-start-timing-copy','mobile-english','no-overflow','short-editor-no-focus-ring']}));app.exit(0);
+ console.log(JSON.stringify({ok:true,checks:['plaintext-scalars-save','no-combination-confirmation','no-process-start-timing-copy','mobile-english','no-overflow','short-editor-no-focus-ring']}));app.exit(0);
 }).catch(e=>{console.error(e);app.exit(1)});
 `)
 let child, closed, passed = false

@@ -62,6 +62,8 @@ pub(super) fn reconcile(
                 user_command_envelope(params.command_id, params.command),
             )
         }
+        "teams.save" => user!(rovai_core::teams::SaveTeamCommand),
+        "teams.delete" => user!(rovai_core::teams::DeleteTeamCommand),
         "missions.update" => user!(crate::mission::UpdateMissionCommand),
         "missions.status" => user!(crate::mission::StatusMissionCommand),
         "missions.start" => user!(crate::mission::StartMissionCommand),
@@ -75,6 +77,9 @@ pub(super) fn reconcile(
         "members.reorder" => user!(ReorderAgentProfilesCommand),
         "notifications.preference.update" => user!(UpdateNotificationPreferenceCommand),
         "notifications.acknowledge" => user!(AcknowledgeNotificationEpisodeCommand),
+        "notifications.acknowledgeCampInterruptions" => {
+            user!(AcknowledgeThreadInterruptionsCommand)
+        }
         "notifications.acknowledgeVisibleSources" => {
             user!(AcknowledgeVisibleNotificationSourcesCommand)
         }
@@ -258,6 +263,7 @@ pub(super) fn reconcile(
                 user_command_envelope(
                     params.command_id,
                     CreateThreadCommand {
+                        team: params.team,
                         name: params.name,
                         project_binding_kind,
                         project_path: path.to_string_lossy().into_owned(),

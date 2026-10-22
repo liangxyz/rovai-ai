@@ -96,7 +96,9 @@ app.whenReady().then(async () => {
     assert.deepEqual(after.explicitReferenceTypes, [
       { title: 'src/report/run_report.py', type: 'code' },
       { title: '../outside/config.toml', type: 'config' },
-      { title: 'run_report.py:44-46', type: 'code' }
+      { title: 'run_report.py:44-46', type: 'code' },
+      { title: 'src/report/run_report.py', type: 'code' },
+      { title: 'src/report/run_report.py', type: 'code' }
     ])
     assert.equal(after.inlineFileLinkCount, 0)
     assert.ok(after.inertInlineCodes.includes('src/report/run_report.py'))
@@ -201,6 +203,19 @@ app.whenReady().then(async () => {
     assert.equal(after.opens.at(-1).rawReference, '../outside/config.toml')
     assert.equal(after.chooseRootCalls, 0)
     assert.equal(after.notices.at(-1), '文件访问已失效')
+  })
+  await check('literal HTML remains visible without extra file-link margins in both themes', async () => {
+    for (const theme of ['day', 'night']) {
+      await run(`window.navigationTest.theme('${theme}')`)
+      await run('window.navigationTest.literalSpacingPreview()')
+      const current = await state()
+      assert.deepEqual(current.literalSpacing, [
+        { text: '文</b>前侧间距', start: '0px', end: '0px' },
+        { text: '后侧间距<b>文', start: '0px', end: '0px' }
+      ])
+      measurements.literalSpacing = current.literalSpacing
+      await capture(`literal-spacing-${theme}`)
+    }
   })
   await check('production agent messages keep long code and tables inside the conversation through preview resizing', async () => {
     await run('window.navigationTest.surface("wide-message")')

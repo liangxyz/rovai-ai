@@ -59,6 +59,7 @@ app.whenReady().then(async () => {
     window.webContents.debugger.attach('1.3')
     await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await wait(`!!document.querySelector('#camp-message[contenteditable="true"]')`)
+    await require('./long-text-paste.cjs')({ evaluate, wait, window, evidence })
     await evaluate('invitationTest.focus()')
     await window.webContents.debugger.sendCommand('Input.insertText', { text: '@' })
     await click('.structured-mention-menu [aria-label="邀请其他队员"]')

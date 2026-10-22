@@ -7,10 +7,10 @@ import { initializeInterfaceLanguage, changeInterfaceLanguage } from '@renderer/
 import '@renderer/styles.css'
 import '@renderer/member-editor.css'
 
-let preferences = { ...DEFAULT_GENERAL_PREFERENCES }
+let preferences = { ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguagePreference: 'zh-CN', interfaceLanguage: 'zh-CN' }
 const api = {
   get: async () => preferences,
-  setInterfaceLanguage: async interfaceLanguage => (preferences = { ...preferences, interfaceLanguage }),
+  setInterfaceLanguagePreference: async preference => (preferences = { ...preferences, interfaceLanguagePreference: preference, interfaceLanguage: preference === 'system' ? preferences.systemLanguage : preference, languageRevision: preferences.languageRevision + 1 }),
   setStartupLocationMode: async startupLocationMode => (preferences = { ...preferences, startupLocationMode }),
   setWorldMapEnabled: async worldMapEnabled => (preferences = { ...preferences, worldMapEnabled })
 }

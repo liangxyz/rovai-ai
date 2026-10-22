@@ -276,10 +276,19 @@ pub async fn acp_capability_probe_at_for_purpose(
 }
 
 fn probe_redactor(kind: AdapterKind) -> Option<rovai_core::runtime_custom_api::CredentialRedactor> {
-    rovai_core::runtime_discovery::custom_api_snapshot(kind)
+    let environment = rovai_core::member_environment::LaunchEnvironment {
+        values: Some(rovai_core::runtime_discovery::runtime_environment(kind)),
+        overlay: None,
+    }
+    .redactor();
+    let native = rovai_core::runtime_discovery::custom_api_snapshot(kind)
         .ok()
         .flatten()
-        .and_then(|api| api.redactor().ok())
+        .and_then(|api| api.redactor().ok());
+    Some(match native {
+        Some(native) => environment.extend(native),
+        None => environment,
+    })
 }
 
 fn redact_probe(kind: AdapterKind, result: &mut AgentRuntimeProbeResult) {

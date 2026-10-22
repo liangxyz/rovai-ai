@@ -18,6 +18,7 @@ import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desk
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const threadId = 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v'
+const inputHistoryMode = new URLSearchParams(location.search).has('inputHistory')
 const copiedLinks: string[] = []
 const recoveredDrafts = new Map<string, unknown>()
 let recoveryWrites = 0
@@ -188,6 +189,15 @@ type Phase = 'terminal' | 'queued' | 'thinking' | 'narration' | 'running' | 'ret
 let currentPhase: Phase = 'terminal'
 const eventListeners = new Set<(event: CoreEvent) => void>()
 let phaseListener: ((phase: Phase) => void) | null = null
+const historyPending = (body: string) => ({
+  id: 'history-pending', conversationId, enqueueSequence: 1, revision: 1, state: 'queued' as const,
+  body, lastAttemptErrorCode: null, attachments: [], quotes: []
+})
+if (inputHistoryMode) {
+  terminalSnapshot.messages = terminalSnapshot.messages.filter(message => message.id !== 'message-user-2')
+    .map(message => message.authorType === 'user' ? { ...message, authorId: 'local_user', body: 'private older' } : message)
+  terminalSnapshot.pendingInputs = { ...terminalSnapshot.pendingInputs, items: [historyPending('private newest')] }
+}
 let currentSnapshot = terminalSnapshot
 let releaseSend: (() => void) | null = null
 let sendHeld = false
@@ -208,6 +218,7 @@ function setMode(phase: Phase, notify = true): void {
   if (phase === 'terminal') currentSnapshot = terminalSnapshot
   else {
     const next = runningSnapshot()
+    if (inputHistoryMode) next.draft = currentSnapshot.draft
     const run = next.agentRuns.at(-1)!
     const complete = phase === 'complete' || phase === 'failed'
     run.status = phase === 'queued' ? 'queued' : phase === 'waiting' ? 'waiting' : complete
@@ -315,6 +326,11 @@ Object.assign(window, {
       requests.push({ method, params })
       if (method === 'singleChat.list') return [currentSnapshot.conversation]
       if (method === 'singleChat.get') return currentSnapshot
+      if (inputHistoryMode && method === 'messageQuotes.mutateDraft') {
+        currentSnapshot = { ...currentSnapshot,
+          draft: { ...currentSnapshot.draft, revision: currentSnapshot.draft.revision + 1, quotes: [] } }
+        return currentSnapshot
+      }
       if (method === 'agentRunExecution.page') return { runtimePhase: currentPhase === 'thinking' ? 'thinking' : 'executing', runtimeThinkingTitle: null }
       if (method === 'singleChat.pendingInputs.edit') {
         const { commandId, command } = params as unknown as { commandId: string,
@@ -335,6 +351,7 @@ Object.assign(window, {
         pendingReturnReceipts.set(commandId, { status: 'applied', code: 'single_chat.pending_input_returned_to_composer',
           payload: { pendingInputId: item.id, body: item.body, draft: structuredClone(currentSnapshot.draft) } } as unknown as StoredCommandResult)
         for (const listener of eventListeners) listener({ method: 'single_chat.changed', params: { threadId, conversationId, reason: 'pending_input_edited' } })
+        if (inputHistoryMode) return structuredClone(pendingReturnReceipts.get(commandId))
         throw new Error('Fixture lost the successful withdrawal response')
       }
       if (method === 'singleChat.open') return {
@@ -359,7 +376,7 @@ Object.assign(window, {
         status: 'accepted', code: 'single_chat.reply_queued', payload: {
           conversationId,
           conversationVersion: currentSnapshot.conversation.version + 1,
-          conversationMessageId: 'message-keyboard-fixture',
+          ...(inputHistoryMode ? { pendingInputId: 'pending-history-send' } : { conversationMessageId: 'message-keyboard-fixture' }),
           threadTurnId: 'turn-keyboard-fixture',
           agentRunId: 'run-keyboard-fixture'
         }
@@ -445,6 +462,33 @@ createRoot(document.getElementById('root')!).render(<ThreadClientProvider client
 
 Object.assign(window, {
   singleChatTest: {
+    inputHistoryState: () => ({
+      reads: requests.filter(request => request.method.endsWith('.inputHistory')).length,
+      queue: currentSnapshot.pendingInputs.items.map(item => item.body)
+    }),
+    publishHistoryPending: () => {
+      currentSnapshot = { ...currentSnapshot,
+        messages: [...currentSnapshot.messages, { ...currentSnapshot.messages[0],
+          id: 'published-history', sequence: 4, body: 'private published' }],
+        pendingInputs: { ...currentSnapshot.pendingInputs, items: [] } }
+      emitChange()
+    },
+    replaceHistoryPending: (body: string) => {
+      currentSnapshot = { ...currentSnapshot,
+        pendingInputs: { ...currentSnapshot.pendingInputs, items: [historyPending(body)] } }
+      emitChange()
+    },
+    showHistoryQuote: () => {
+      currentSnapshot = { ...currentSnapshot, draft: { ...currentSnapshot.draft,
+        revision: currentSnapshot.draft.revision + 1, quotes: [{
+          version: 1, quoteId: 'history-quote', source: { scope: 'single_chat', campId: threadId,
+            conversationId, messageId: 'message-agent-1' },
+          authorAtCapture: { type: 'agent', agentId: 'agent_1', displayName: '爱丽丝' },
+          text: '引用选文', format: 'plain_text', capturedAt: '2026-10-21T00:00:00Z',
+          sourceContentDigest: 'fixture', snapshotDigest: 'fixture'
+        }] } }
+      emitChange()
+    },
     restoreDraft: () => restorePanel(),
     showPanel: (visible: boolean) => showPanel(visible),
     showWebLinks: (target: string) => {

@@ -1,3 +1,4 @@
+import { TeamPicker, TeamAvatarSummary } from './TeamPicker'
 import { rejectedMissionMemberIds } from './useMissions'
 import { missionDescriptionContent, missionDescriptionText, missionMentionIds, unavailableMissionMentionIds } from './mission-description'
 import { useThreadClient } from './camp-client'
@@ -9,6 +10,7 @@ import * as Popover from '@radix-ui/react-popover'
 import type {
   AdapterInstallation,
   AgentProfile,
+  Team,
   ThreadCreationPreflight,
   CreateThreadRequest,
   NewConversationDefaults,
@@ -51,6 +53,12 @@ export function NewConversationDialog({
   recoveryAttachments = [],
   initialWorkspace,
   initialSelection,
+  initialTeamId = null,
+  initialTeam = null,
+  teams = [],
+  teamsLoading = false,
+  teamsError = null,
+  onRetryTeams,
   attentionMessage,
   projects,
   missionTagCatalog = [],
@@ -70,6 +78,12 @@ export function NewConversationDialog({
   recoveryAttachments?: ReturnType<typeof missionAttachmentDrafts>
   initialWorkspace: WorkspaceSelection | null
   initialSelection?: NewConversationDefaults | null
+  initialTeamId?: string | null
+  initialTeam?: Team | null
+  teams?: Team[]
+  teamsLoading?: boolean
+  teamsError?: string | null
+  onRetryTeams?(): void
   attentionMessage?: string | null
   projects: ProjectNavigationGroup[]
   missionTagCatalog?: string[]
@@ -93,6 +107,9 @@ export function NewConversationDialog({
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const [leadMenuOpen, setLeadMenuOpen] = useState(false)
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([])
+  const [teamId, setTeamId] = useState<string | null>(null)
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
+  const customSelection = useRef({ memberIds: [] as string[], leadId: '' })
   const [leadId, setLeadId] = useState('')
   const [optionalOpen, setOptionalOpen] = useState(false)
   const [name, setName] = useState('')
@@ -124,6 +141,7 @@ export function NewConversationDialog({
     [agents]
   )
   const preferredInitialSelection = initialSelection ?? null
+  const availableTeams = useMemo(() => teamsLoading || teamsError ? [] : teams, [teams, teamsLoading, teamsError])
   const initialSelectionPlan = useMemo(
     () => planInitialThreadSelection(preflight, preferredInitialSelection),
     [preferredInitialSelection, preflight.presentMembers]
@@ -145,7 +163,7 @@ export function NewConversationDialog({
   const leadProfile = lead ? profileById.get(lead.agentId) : undefined
   const projectActionsDisabled = projectWorkspaceActionsDisabled(busy, projectAccessReady)
   const projectSubmissionBlocked = workspaceSubmissionBlocked(workspace, projectAccessReady)
-  const submissionBlocked = busy || projectSubmissionBlocked || availableMembers.length === 0
+  const submissionBlocked = Boolean(teamId && !selectedTeam) || busy || projectSubmissionBlocked || availableMembers.length === 0
     || isMission && unavailableIds.length > 0 || hasUnavailableSelection || (selectedMemberIds.length > 0 && !lead) || Boolean(nameError)
 
   useEffect(() => {
@@ -157,7 +175,17 @@ export function NewConversationDialog({
       if (!isMission) draftInitializedRef.current = false
       return
     }
-    if (draftInitializedRef.current) return
+    if (draftInitializedRef.current) {
+      // A late library may complete the initial selection, but never replace
+      // a selected snapshot or reset the user's name, workspace or Custom draft.
+      const loaded = !isMission && teamId && !selectedTeam ? availableTeams.find(team => team.id === teamId) : null
+      if (loaded) {
+        setSelectedTeam(loaded)
+        setSelectedMemberIds(loaded.memberAgentIds)
+        setLeadId(loaded.defaultLeadAgentId)
+      }
+      return
+    }
     draftInitializedRef.current = true
     const { memberIds, leadId: recommendedLead } = initialSelectionPlan
     setWorkspace(initialWorkspace)
@@ -165,8 +193,12 @@ export function NewConversationDialog({
     setProjectMenuOpen(false)
     setMemberMenuOpen(false)
     setLeadMenuOpen(false)
-    setSelectedMemberIds(memberIds)
-    setLeadId(recommendedLead)
+    customSelection.current = { memberIds, leadId: recommendedLead }
+    const team = isMission ? null : initialTeam ?? availableTeams.find(team => team.id === initialTeamId)
+    setTeamId(isMission ? null : team?.id ?? initialTeamId)
+    setSelectedTeam(team ?? null)
+    setSelectedMemberIds(team?.memberAgentIds ?? memberIds)
+    setLeadId(team?.defaultLeadAgentId ?? recommendedLead)
     setOptionalOpen(false)
     setName('')
     setDescription('')
@@ -178,7 +210,7 @@ export function NewConversationDialog({
     setQuickHelpOpen(false)
     setMemberError(null)
     setSubmitError(null)
-  }, [initialSelectionPlan, initialWorkspace, isMission, open, recovery])
+  }, [initialSelectionPlan, initialWorkspace, initialTeamId, initialTeam, availableTeams, teamId, selectedTeam, isMission, open, recovery])
 
   const pendingGitInspectionPath = workspace && !hasGitObservation(workspace)
     ? workspace.projectPath
@@ -267,6 +299,7 @@ export function NewConversationDialog({
     setSubmitError(null)
     try {
       await onCreate({
+        ...(selectedTeam && !isMission ? { team: { teamId: selectedTeam.id, expectedVersion: selectedTeam.version } } : {}),
         name: normalizedName || null,
         workspace: workspace ? { projectPath: workspace.projectPath } : null,
         memberAgentIds: selectedMemberIds,
@@ -370,7 +403,17 @@ export function NewConversationDialog({
               </div>}
               {!isMission && <>{workspace && <div className="compact-row-detail"><span title={projectDetail}>{projectDetail}</span>{gitPresentation.kind === 'metadata' && <span className="compact-git">{gitPresentation.label}</span>}{gitPresentation.kind === 'loading' && <span role="status">{gitPresentation.label}</span>}</div>}
               {gitPresentation.kind === 'warning' && <div className="new-camp-workspace-warning" role="alert"><div><strong>{gitPresentation.label}</strong><span>{gitPresentation.detail}</span></div></div>}
-              <div className="compact-row">
+              <div className="compact-row"><span>{uiAttribute('团队与队员')}</span><TeamPicker teams={availableTeams} selectedTeam={selectedTeam} agents={agents} value={teamId} busy={busy} onChange={id => {
+                if (!teamId) customSelection.current = { memberIds: selectedMemberIds, leadId }
+                const team = availableTeams.find(team => team.id === id) ?? null
+                setTeamId(id); setSelectedTeam(team); setMemberError(null); setSubmitError(null)
+                setSelectedMemberIds(team?.memberAgentIds ?? customSelection.current.memberIds)
+                setLeadId(team?.defaultLeadAgentId ?? customSelection.current.leadId)
+              }}/></div>
+              {teamsLoading && <p className="compact-row-detail" role="status">{uiAttribute('正在载入团队…')}</p>}
+              {!teamsLoading && teamsError && <div className="compact-inline-error" role="alert">{uiAttribute('团队列表读取失败：{0}', teamsError)}{onRetryTeams && <button type="button" className="compact-text-button" disabled={busy} onClick={onRetryTeams}>{uiAttribute('重试')}</button>}</div>}
+              {teamId && <div className="team-conversation-summary"><TeamAvatarSummary ids={selectedTeam?.memberAgentIds ?? []} agents={agents}/><span>{selectedTeam ? uiAttribute('{0} 位队员 · 队长 {1}', String(selectedTeam.memberAgentIds.length), profileById.get(selectedTeam.defaultLeadAgentId)?.displayName ?? uiAttribute('不可用')) : uiAttribute('团队不可用')}</span></div>}
+              {!teamId && <div className="compact-row">
                 <span id="new-camp-members-label"><UiText zh={"队员"} /></span>
                 <NewConversationPicker mobile={mobile} open={memberMenuOpen} onOpenChange={setMemberMenuOpen} busy={busy} title={uiAttribute("选择队员")} multiple
                   trigger={<button ref={memberTriggerRef} className="compact-picker member-trigger" aria-invalid={Boolean(memberError)} aria-describedby={memberError ? 'new-camp-members-error' : undefined} type="button" aria-labelledby="new-camp-members-label new-camp-members-value" disabled={busy || !preflight.presentMembers.length}>
@@ -399,7 +442,7 @@ export function NewConversationDialog({
                     </label>
                   })}
                 </NewConversationPicker>
-              </div>
+              </div>}
               </>}
               {isMission && <>
                 {gitPresentation.kind === 'warning' && <p className="compact-inline-error" role="alert">{gitPresentation.label}：{gitPresentation.detail}</p>}
@@ -411,7 +454,7 @@ export function NewConversationDialog({
                 {memberError && <p id="new-camp-members-error" role="alert" className="compact-inline-error new-camp-members-error">{memberError}</p>}
                 {availableMembers.length === 0 && <p className="new-camp-empty-note"><UiText zh={"暂无可用队员，请先在「队员」中配置智能体。"} /></p>}
                 {hasUnavailableSelection && <p className="compact-inline-error" role="alert"><UiText zh={"所选队员已不可用，请重新选择。"} /></p>}
-                <div className="compact-row">
+                {!teamId && <div className="compact-row">
                 <span id="new-camp-lead-label"><UiText zh={"队长"} /></span>
                 <NewConversationPicker mobile={mobile} open={leadMenuOpen} onOpenChange={setLeadMenuOpen} busy={busy} title={uiAttribute("选择队长")}
                   trigger={<button className="compact-picker" type="button" aria-labelledby="new-camp-lead-label new-camp-lead-value" disabled={busy || selectedAvailableMembers.length === 0}>
@@ -435,7 +478,7 @@ export function NewConversationDialog({
                     <span>{member.displayName}<small>{profileById.get(member.agentId)?.teamRole || uiAttribute('队员')}</small></span>{leadId === member.agentId && <DialogControlIcon name="check" />}
                   </button>)}
                 </NewConversationPicker>
-              </div>
+              </div>}
               </>}
               {!isMission && <div className="compact-name-disclosure">
                 <button className="compact-text-button" type="button" aria-expanded={optionalOpen} aria-controls="new-camp-optional-panel" disabled={busy} onClick={() => setOptionalOpen((current) => !current)}><DialogControlIcon name={optionalOpen ? 'chevron' : 'plus'} />{optionalOpen ? uiAttribute("对话名称") : normalizedName ? uiAttribute("对话名称：{0}", String(normalizedName)) : uiAttribute("添加对话名称")}<span><UiText zh={"可选"} /></span></button>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -28,6 +28,9 @@ test('the production preload preserves structured rejections through a real cont
     })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
+    const skillLibraryRoot = join(fixture, 'user-data', 'managed-skill-library')
+    await mkdir(skillLibraryRoot, { recursive: true })
+    process.stdout.write(`Automatic acceptance userData: ${join(fixture, 'user-data')}; Skill Library: ${skillLibraryRoot}; no Core/SQLite/Runtime\n`)
     child = spawn(electron, [
       join(root, 'scripts/fixtures/rovai-request-context-bridge.cjs'),
       preload,

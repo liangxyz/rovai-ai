@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import { NavigationShell } from '../../../apps/desktop/src/renderer/src/NavigationShell'
@@ -36,7 +37,7 @@ function PreviewControls({ setTheme }: any) {
     snippets, documents, getState: model.get,
     quote: () => projectQuoteBody(document.querySelector('.conversation-bubble.agent .safe-markdown') as HTMLElement).text,
     find: () => createFileFindDomIndex(document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-markdown .safe-markdown') as HTMLElement).text,
-    language: (interfaceLanguage: string) => changeInterfaceLanguage({ setInterfaceLanguage: async () => ({ interfaceLanguage }) } as any, interfaceLanguage as any)
+    language: (interfaceLanguage: string) => changeInterfaceLanguage(languageTestApi, interfaceLanguage as any)
   } })
   return null
 }

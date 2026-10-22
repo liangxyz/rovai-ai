@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NavigationThreadTarget } from '@contracts'
 import { navigationThreadSearch, startNavigationThreadLookup } from './camp-navigation-search'
@@ -49,10 +50,7 @@ describe('navigation search routing', () => {
   })
 
   it('finds the first-run Thread by its displayed or saved title and returns original data', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     const firstRunThread = { ...target, title: '初次集结' }
     const userThread = { ...firstRunThread, id: 'camp-user' }
     await changeInterfaceLanguage(languageApi, 'en')

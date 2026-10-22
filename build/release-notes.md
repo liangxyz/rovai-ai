@@ -1,33 +1,39 @@
-# Rovai AI v0.4.18
+# Rovai AI v0.4.19
 
 <!-- lang:zh-CN -->
 
-本次更新合并上游 v0.4.15 的全部变更。主要调整会话执行条、记忆审核和附件展示，并修复部分智能体的原生问卷与执行异常处理。
+本次更新合并上游 v0.4.16 的全部变更。主要新增智能体通用环境变量、输入历史和回复详情，支持长文本粘贴转附件，并调整会话提醒、设置入口与操作反馈。
 
-- 【交互】**会话执行条增加运行时长。** 运行中实时显示用时，点击时间或状态文字可定位到对应执行记录；同时调整为整行浅灰样式，使用独立加载图标和常驻停止按钮。
-- 【交互】**精简执行入口与空状态。** 移除重复的运行名单提示，将执行浮层的位置菜单移至标题栏；暂无执行记录时，也能在浮层、底部和右侧之间切换。
-- 【界面】**调整记忆页的列表与详情展示。** 列表增加队员头像，正文使用独立阅读区域，统一“新增”“修订”按钮的尺寸和对齐，改善大屏及高倍缩放下的布局。
-- 【交互】**共同记忆审核改为居中弹窗。** 查看、编辑、接受和拒绝可在同一窗口完成，处理后自动切换下一条。在记忆页关闭后重新打开，可继续编辑草稿；遇到版本冲突或提交结果不明时，先刷新核对状态，避免重复提交。
-- 【界面】**附件卡片优先显示文件名。** 文件格式移至名称下方，减少对文件名的挤占；长文件名可通过悬浮提示或文件菜单完整查看，同时扩大移除按钮的点击区域。
-- 【界面】**调整深色模式的代码底色。** 会话中的代码块和行内代码改用更中性的灰色背景，减弱偏蓝色调，保留原有语法高亮。
-- 【修复】**修正原生问卷被当作执行授权的问题。** Claude Code、Copilot、Qwen、ZCode 和 OpenCode V2 禁用暂不支持的原生提问工具；Kimi 等返回的意外问卷会取消处理，避免自动选中答案或误报执行成功。
-- 【修复】**修复 Claude Code 部分执行失败后，后续消息一直排队的问题。** 当执行已经结束并返回通信错误时，正确标记失败，确认旧执行清理完成后继续处理排队消息，不再一直显示运行中。
+- 【功能】**支持智能体通用环境变量。** 在智能体启动设置中保存通用配置，使用同一种智能体的队员可选择继承或独立配置；同名变量以队员设置为准，并可查看合并结果。修改在新进程启动时生效，不打断正在运行的任务。
+- 【交互】**环境变量填写更方便。** 支持直接输入字符串、数字和布尔值，保存时统一转为字符串。编辑器直接显示变量值，空配置提供简短 JSON 示例；保存失败时保留原始草稿。
+- 【功能】**公屏和单聊支持查看历史输入。** 在输入框起点按 ↑ 浏览已加载的历史输入，可修改后再次发送；按 Esc 或向下翻过最新一条，可恢复原草稿和光标位置。
+- 【功能】**新增回复详情。** 点击消息中的回复块，可集中查看同一回复链的内容和相关执行过程，支持调整宽度、完整阅读、复制和回到原文，查看时保留当前输入草稿。
+- 【功能】**长文本粘贴自动转为附件。** 桌面端公屏单次粘贴超过 10,000 个字符的纯文本时，自动生成保留全文的 `.txt` 附件，卡片显示内容开头。已修正 Windows 路径处理，支持附件预览、重启恢复和移除。
+- 【功能】**界面语言支持“跟随系统”。** 桌面端根据本机语言、Web 端根据浏览器语言选择简体中文或英文，也可手动指定；切换时不重载页面、不清空草稿或中断执行。
+- 【功能】**增加执行中断提醒。** 因应用退出或已确认的执行异常中断时，侧栏会话显示提醒蓝点；打开并查看会话后自动确认，也可手动标记已读。
+- 【界面】**调整设置入口与会话展示。** “智能体”移至设置中“能力”分组的首项；会话顶栏调整字号与字重，区分项目名和会话名。用户附件卡片更紧凑，队员交付的文件列表保留原有宽度。
+- 【交互】**统一会话浮层的收起操作。** 单聊、执行、队员和任务浮层使用一致的收起按钮与 Esc 提示；修正打开回复详情后，执行和队员浮层收起按钮无法点击的问题。
+- 【交互】**减少重复的操作提示。** 移除复制、撤回、成员管理、定时任务及长文本转换等操作的重复成功提示；执行来源定位统一使用已有的“回到最新”按钮。
+- 【修复】**修复部分合法文件名无法作为附件发送的问题。** 包含时间冒号等字符的附件名称会原样保留，不再被错误拒绝或改写。
 
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.17...v0.4.18)
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.18...v0.4.19)
 
 ---
 
 <!-- lang:en -->
 
-This release merges all upstream v0.4.15 changes. It updates conversation execution bars, Memory review, and attachment cards, and fixes native questionnaire handling and execution failures in several agents.
+This release merges all upstream v0.4.16 changes. It adds shared agent environment settings, input history, reply details, and text attachments for long pastes. It also updates conversation reminders, settings navigation, and action feedback.
 
-- [Interaction] **Show elapsed time in conversation execution bars.** Running executions display their elapsed time. Click the time or status text to open the corresponding execution record. The bar also uses a light gray row, a separate loading indicator, and an always-visible stop button.
-- [Interaction] **Simplify the execution entry and empty state.** Remove the repeated running-member tooltip and move the execution popover's placement menu into its header. Switch between popover, bottom, and right-side placement even when there are no execution records.
-- [UI] **Refine the Memory list and detail view.** Add teammate avatars to list entries, give memory text its own reading area, and align the sizes and positions of the Add and Revise buttons for large and zoomed layouts.
-- [Interaction] **Review shared memories in a centered dialog.** View, edit, accept, and reject candidates in one window, then move automatically to the next item. Closing and reopening the dialog on the Memory page preserves editing drafts. Refresh and check the latest state before retrying after a version conflict or an uncertain submission result to avoid duplicate submissions.
-- [UI] **Give filenames more space in attachment cards.** Move the file format below the name. Full names remain available in tooltips and the file menu, and the removal button has a larger click target.
-- [UI] **Use more neutral code backgrounds in dark mode.** Conversation code blocks and inline code use gray backgrounds with less blue tint while retaining syntax highlighting.
-- [Fix] **Keep native questionnaires separate from execution approvals.** Disable unsupported native question tools in Claude Code, Copilot, Qwen, ZCode, and OpenCode V2. Cancel unexpected questionnaires from Kimi and other affected agents instead of automatically selecting an answer or incorrectly reporting success.
-- [Fix] **Release queued messages after certain Claude Code failures.** When an execution has ended with a transport error, mark it as failed and process queued messages after the old execution has been cleaned up, rather than leaving it running indefinitely.
+- [Feature] **Share environment variables between teammates using the same agent.** Save common settings in the agent's startup settings. Teammates can inherit them or use independent settings, override matching names, and inspect the merged result. Changes apply when a new process starts without interrupting running tasks.
+- [Interaction] **Enter environment variables more easily.** Values can be strings, numbers, or booleans and are converted to strings when saved. The editor displays values directly and shows a short JSON example for empty settings. Failed saves preserve the original draft.
+- [Feature] **Recall previous input in public conversations and direct chats.** Press the up arrow at the start of the input to browse inputs from loaded messages, edit them, and send again. Press Esc or move down past the newest entry to restore the original draft and cursor position.
+- [Feature] **Read related messages in reply details.** Click a message's reply block to read its reply chain and inspect related executions. Resize the pane, switch to full reading, copy messages, or return to their original locations without losing the current input draft.
+- [Feature] **Turn long text pastes into attachments.** A single plain-text paste exceeding 10,000 characters in a Desktop public conversation becomes a complete `.txt` attachment, with the beginning of its contents shown on the card. Windows path handling has been corrected, including attachment preview, recovery after restarting, and removal.
+- [Feature] **Follow the system interface language.** Desktop uses the local device's language and Web uses the browser's language to select Simplified Chinese or English, with manual selection still available. Switching does not reload the page, clear drafts, or interrupt executions.
+- [Feature] **Show reminders for interrupted executions.** A conversation's sidebar entry displays a reminder dot when an execution is interrupted by an App exit or a confirmed execution loss. Opening and viewing the conversation acknowledges the reminder; it can also be marked as read manually.
+- [UI] **Adjust settings navigation and conversation presentation.** Move Agents to the first item in the Capabilities settings group. Distinguish project and conversation names with updated header typography. User attachment cards are more compact, while teammate file lists retain their existing width.
+- [Interaction] **Make conversation panel dismissal consistent.** Direct chat, execution, teammate, and task panels use consistent collapse buttons and Esc hints. Fix collapse buttons becoming unclickable in execution and teammate panels after opening reply details.
+- [Interaction] **Remove repeated action notices.** Remove redundant success notices for copying, withdrawing messages, managing teammates, scheduled tasks, and converting long pastes. Execution source navigation uses the existing return-to-latest button.
+- [Fix] **Accept valid attachment filenames that were previously rejected.** Preserve display names containing characters such as colons in timestamps instead of rejecting or rewriting them.
 
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.17...v0.4.18)
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.18...v0.4.19)

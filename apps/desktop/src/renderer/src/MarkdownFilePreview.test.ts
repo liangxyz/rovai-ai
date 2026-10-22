@@ -14,7 +14,11 @@ describe('MarkdownFilePreview', () => {
         'last_updated: 2026-09-19',
         '---',
         '',
-        '# File Preview'
+        '# File Preview',
+        '',
+        '<!-- private-metadata -->',
+        '',
+        '<div>hidden-html-body</div>'
       ].join('\n')
     }))
 
@@ -23,6 +27,8 @@ describe('MarkdownFilePreview', () => {
     expect(markup).toContain('<dt>document_type</dt><dd><span class="file-preview-metadata-value">contract</span></dd>')
     expect(markup).toContain('<h1 data-markdown-heading="File Preview">File Preview</h1>')
     expect(markup).not.toContain('data-markdown-heading="document_type')
+    expect(markup).not.toContain('private-metadata')
+    expect(markup).not.toContain('hidden-html-body')
   })
 
   it('renders nested values as selectable text without interpreting embedded HTML', () => {

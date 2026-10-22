@@ -2,7 +2,7 @@
 document_type: architecture
 authority: camp-activation-component-boundary
 status: accepted
-last_updated: 2026-10-03
+last_updated: 2026-10-21
 ---
 
 # Camp Activation Lifecycle
@@ -63,7 +63,7 @@ activation trigger; the trigger's deletion rolls back with a failed first-send t
 
 - [Camp lifecycle invariants](foundational-invariants.md#camp-lifecycle)
 - [Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)
-- [Camp Composer Draft v16](../contracts/camp-composer-draft-v16.md)
+- [Camp Composer Draft v18](../contracts/camp-composer-draft-v18.md)
 
 ## AI 队员创建
 

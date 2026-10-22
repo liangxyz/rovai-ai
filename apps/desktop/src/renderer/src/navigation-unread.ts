@@ -1,4 +1,4 @@
-import type { NavigationThreadItem, NavigationThreadReadState } from '@contracts'
+import type { NavigationPreferencesApi, NavigationPreferencesSnapshot, NavigationThreadItem, NavigationThreadReadState } from '@contracts'
 
 /** Running and unread are separate facts, even though legacy marker picks one. */
 export function navigationThreadHasUnread(thread: NavigationThreadItem, state?: NavigationThreadReadState): boolean {
@@ -21,5 +21,29 @@ export function navigationThreadReadState(
       ? previous?.readThroughGlobalSequence ?? 0
       : Math.max(previous?.readThroughGlobalSequence ?? 0,
         thread.lastSeenGlobalSequence ?? 0, thread.latestCompletionGlobalSequence)
+  }
+}
+
+/** A lost write receipt is not proof of failure. Read the local owner once,
+ * without replaying a write that could clear a newer manual reminder. */
+export async function saveNavigationThreadReadState(
+  owner: Pick<NavigationPreferencesApi, 'setThreadReadState' | 'get'>,
+  threadId: string,
+  state: NavigationThreadReadState | null
+): Promise<{ snapshot: NavigationPreferencesSnapshot | null; confirmed: boolean }> {
+  try {
+    return { snapshot: await owner.setThreadReadState(threadId, state), confirmed: true }
+  } catch {
+    try {
+      const snapshot = await owner.get()
+      const actual = snapshot.threadReadStates[threadId]
+      const confirmed = !snapshot.readError && (state === null
+        ? actual === undefined
+        : actual?.manualUnread === state.manualUnread
+          && actual.readThroughGlobalSequence >= state.readThroughGlobalSequence)
+      return { snapshot, confirmed }
+    } catch {
+      return { snapshot: null, confirmed: false }
+    }
   }
 }

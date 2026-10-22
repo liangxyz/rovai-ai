@@ -15442,13 +15442,19 @@ mod tests {
             if provider == DINGTALK_PROVIDER {
                 use_dingtalk_observation_identity(&mut observation);
             }
+            // The safe on-disk leaf adds "file-" beyond this 120-code-point label.
+            let document_name = if scenario == "ready" {
+                format!("{}:说明.txt", "a".repeat(113))
+            } else {
+                "说明.txt".to_string()
+            };
             observation.attachment_summaries = vec![
                 ChannelAttachmentSummaryInput {
                     name: "参考图.png".into(),
                     media_type: Some("image".into()),
                 },
                 ChannelAttachmentSummaryInput {
-                    name: "说明.txt".into(),
+                    name: document_name.clone(),
                     media_type: Some("file".into()),
                 },
             ];
@@ -15462,7 +15468,7 @@ mod tests {
                 InboundResource {
                     file_key: "file_key".into(),
                     download_code: None,
-                    name: "说明.txt".into(),
+                    name: document_name.clone(),
                     kind: if scenario == "folder" {
                         "folder"
                     } else {
@@ -15759,6 +15765,15 @@ mod tests {
             );
             assert_eq!(sources[0].media_type.as_deref(), Some("image/png"));
             assert_eq!(sources[0].display_name, "参考图.png");
+            assert_eq!(sources[1].display_name, document_name.replace(':', "_"));
+            assert_eq!(
+                Path::new(&sources[1].source_path).file_name().unwrap(),
+                format!("file-{}", sources[1].display_name).as_str()
+            );
+            assert_eq!(
+                sources[1].media_type.as_deref(),
+                Some("text/plain; charset=utf-8")
+            );
             let (message_id, boundary, body): (String, i64, String) = database
                 .connection()
                 .query_row(

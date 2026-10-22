@@ -71,7 +71,7 @@ release header; the source and update manifest remain intact.
 ## 多语言发布与展示
 
 [App Update v7](../contracts/app-update-v7.md)拥有双语发布、精确分段、空段准入、回退和文档级定义规则；
-[Interface Language v1](../contracts/interface-language-v1.md)继续拥有未改变的界面语言偏好 API。
+[Interface Language v2](../contracts/interface-language-v2.md)拥有客户端本地语言偏好与解析结果 API。
 发布源保留公共版本首标题，通过顶层独立 `<!-- lang:en -->` 与 `<!-- lang:zh-CN -->` 注释提供正文。
 发布检查与 Server draft 组装共用 Renderer 的 CommonMark/GFM 解析和非空判断；新发布要求双语，
 读取历史或单语说明则不增加此要求。

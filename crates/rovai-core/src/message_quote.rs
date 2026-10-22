@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const MAX_QUOTE_SCALARS: usize = 12_000;
-pub const QUOTE_PROJECTION_VERSION: u32 = 2;
+pub const QUOTE_PROJECTION_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -659,7 +659,7 @@ fn quote_markdown_options() -> Options<'static> {
     options
 }
 
-/// MessageQuoteTextProjection v2. Pair with Renderer DOM projection and shared fixtures.
+/// MessageQuoteTextProjection v3. Pair with Renderer DOM projection and shared fixtures.
 /// Structural separators are deferred; selected whitespace inside actual text/code is untouched.
 pub fn project_quote_text(body: &str) -> String {
     fn append(output: &mut String, boundary: &mut usize, text: &str) {
@@ -744,6 +744,16 @@ pub fn project_quote_text(body: &str) -> String {
                 boundary = boundary.max(2);
             }
             (NodeValue::Text(text), true) => append(&mut output, &mut boundary, text),
+            (NodeValue::HtmlInline(text), true) => append(&mut output, &mut boundary, text),
+            (NodeValue::HtmlBlock(html), true) => {
+                // Comrak terminates HTML blocks with LF; remark's raw node ends
+                // at the last source line. Keep all internal whitespace literal.
+                append(
+                    &mut output,
+                    &mut boundary,
+                    html.literal.strip_suffix('\n').unwrap_or(&html.literal),
+                );
+            }
             (NodeValue::Code(code), true) => append(&mut output, &mut boundary, &code.literal),
             (NodeValue::Strikethrough, _) => {
                 // Comrak also accepts single tildes. SafeMarkdown deliberately
@@ -757,7 +767,7 @@ pub fn project_quote_text(body: &str) -> String {
                 }
             }
             (NodeValue::SoftBreak | NodeValue::LineBreak, true) => output.push('\n'),
-            // Matches SafeMarkdown skipHtml and omitted images/checkbox UI.
+            // Images and checkbox UI remain outside the selectable message body.
             _ => {}
         }
     }
@@ -1017,7 +1027,7 @@ mod tests {
     #[test]
     fn readable_projection_preserves_selected_text_without_markdown_wrappers() {
         let cases: Vec<Value> = serde_json::from_str(include_str!(
-            "../../../packages/contracts/fixtures/message-quote-projection-v2.json"
+            "../../../packages/contracts/fixtures/message-quote-projection-v3.json"
         ))
         .unwrap();
         for case in cases {
@@ -1106,10 +1116,25 @@ mod tests {
             projection_digest: format!("{:x}", Sha256::digest(legacy_quote.text.as_bytes())),
         });
         legacy_quote.snapshot_digest = legacy_quote.digest().unwrap();
-        let saved = serde_json::to_string(&vec![quote.clone(), legacy_quote.clone()]).unwrap();
+        let mut legacy_html_quote = quote.clone();
+        legacy_html_quote.quote_id = "legacy-html-quote".into();
+        legacy_html_quote.text = "attachments//.txt".into();
+        legacy_html_quote.locator = Some(MessageQuoteLocator {
+            projection_version: 2,
+            start_scalar: 0,
+            end_scalar: legacy_html_quote.text.chars().count(),
+            projection_digest: format!("{:x}", Sha256::digest(legacy_html_quote.text.as_bytes())),
+        });
+        legacy_html_quote.snapshot_digest = legacy_html_quote.digest().unwrap();
+        let saved = serde_json::to_string(&vec![
+            quote.clone(),
+            legacy_quote.clone(),
+            legacy_html_quote.clone(),
+        ])
+        .unwrap();
         // The same capture seam owns plain/structured CJK sources and local display names.
         let projection_cases: Vec<Value> = serde_json::from_str(include_str!(
-            "../../../packages/contracts/fixtures/message-quote-projection-v2.json"
+            "../../../packages/contracts/fixtures/message-quote-projection-v3.json"
         ))
         .unwrap();
         for case in projection_cases
@@ -1161,12 +1186,23 @@ mod tests {
             .unwrap();
         transaction.execute("DELETE FROM camp_message", []).unwrap();
         let frozen = parse_quotes(&saved).unwrap();
-        assert_eq!(frozen, vec![quote.clone(), legacy_quote.clone()]);
+        assert_eq!(
+            frozen,
+            vec![
+                quote.clone(),
+                legacy_quote.clone(),
+                legacy_html_quote.clone()
+            ]
+        );
         assert_eq!(
             legacy_quote.model_projection()["text"],
             "**有冲突。**我上一条建议"
         );
         assert_eq!(serde_json::to_string(&frozen).unwrap(), saved);
+        assert_eq!(
+            legacy_html_quote.model_projection()["text"],
+            "attachments//.txt"
+        );
         let model = quote.model_projection();
         assert_eq!(model["source"]["author"]["displayName"], "芝士");
         assert!(model["source"].get("threadId").is_none());

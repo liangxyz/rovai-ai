@@ -16,7 +16,7 @@ export function quoteDomOffset(text: string, scalar: number): number {
   return offset
 }
 
-/** Mirrors MessageQuoteTextProjection v2; positions address actual DOM text, never card/UI copy. */
+/** Mirrors MessageQuoteTextProjection v3; positions address actual DOM text, never card/UI copy. */
 export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text: string; positions: TextPosition[] } {
   let text = ''
   let boundary = 0

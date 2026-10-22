@@ -3147,6 +3147,7 @@ fn load_prepared_attachments(
                 Ok(LocalAttachmentSourceView {
                     id,
                     display_name,
+                    pasted_text_preview: None,
                     kind: summary.kind,
                     file_count: Some(summary.file_count),
                     media_type: Some(media_type),

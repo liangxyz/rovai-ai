@@ -153,8 +153,10 @@ Renderer 独立计算运行与未读：Run 的 loading 与 `latestCompletionGlob
 显式打开只有在完整投影成功展示后才清除手动提醒；取消离开、失败、缓存预览、自动恢复与聚焦均不清除。
 真实查看仍由既有 `navigation.campViewed` 确认，手动操作不伪造查看或回退 Core 水位。
 
-用户停止 Run 不写入 `manualUnread`，停止回执与终态刷新也不新增未读提醒；蓝点仍由回复水位或
-显式标记未读决定。已有本机提醒沿用显式打开／标记已读的清除规则。
+用户停止 Run 不写入 `manualUnread`，停止回执与终态刷新也不新增未读提醒。蓝点组合回复水位、
+显式标记未读及通知模块的退出提醒；已有本机提醒沿用显式打开／标记已读的清除规则。
+退出提醒由通知事件和既有恢复刷新驱动，普通快照/command 进度不能触发重读；
+正式 Thread 展示后按观察边界确认，见[退出提醒](notification-episodes.md#app-退出中断提醒)。
 
 Desktop 的 `revealProjectDirectory` 由 Main 验证绝对目录仍存在，然后调用系统文件管理器定位目录本身；
 此能力不暴露给远程 Web。复制项目路径沿用 Renderer 的剪贴板能力，失败反馈保持可恢复。

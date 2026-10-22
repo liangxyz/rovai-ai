@@ -21,6 +21,7 @@ export const COMPOSER_DRAFT_RETRY_DELAYS_MS = [500, 1_500] as const
 export const ROVAI_ATOM_PRESENTATION_TAG = 'rovai:atom-presentation'
 export const ROVAI_COMPOSER_INITIALIZE_TAG = 'rovai:composer-initialize'
 export const ROVAI_COMPOSER_REPLACE_TAG = 'rovai:composer-replace'
+export const ROVAI_INPUT_HISTORY_PREVIEW_TAG = 'rovai:input-history-preview'
 
 export interface ComposerPersistContext {
   localVersion: number
@@ -39,6 +40,7 @@ export interface ComposerDraftSyncBindings<Draft = unknown> {
   currentDraft?: () => Draft | null
   atomIsAvailable(node: ComposerAtomNode): boolean
   onLocalDocumentChange?: (document: ComposerDocument) => void
+  onEffectiveDocumentChange?: (document: ComposerDocument) => void
   onSaved?: (localVersion: number, document: ComposerDocument) => void
   onStatusChange?: (status: ComposerLocalStatus) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -80,6 +82,7 @@ export class ComposerDraftSync<Draft = unknown> {
   readonly editor: LexicalEditor
   private bindings: ComposerDraftSyncBindings<Draft>
   private latestEditorState: EditorState
+  private previewEditorState: EditorState | null = null
   private localVersion = 0
   private savedVersion = 0
   private savingVersion: number | null = null
@@ -116,6 +119,7 @@ export class ComposerDraftSync<Draft = unknown> {
     this.clearTimers()
     this.epoch += 1
     this.latestEditorState = editorState
+    this.previewEditorState = null
     this.localVersion = 0
     this.savedVersion = 0
     this.savingVersion = null
@@ -125,9 +129,22 @@ export class ComposerDraftSync<Draft = unknown> {
     this.setPersistenceStatus({ state: 'saved' })
     this.setPersistenceError(null)
     this.rebuildContributions(editorState)
+    this.bindings.onEffectiveDocumentChange?.(editorStateToComposerDocument(editorState))
   }
 
   handleEditorUpdate(payload: UpdateListenerPayload): void {
+    if (payload.tags.has(ROVAI_INPUT_HISTORY_PREVIEW_TAG)) {
+      this.previewEditorState = payload.editorState
+      this.rebuildContributions(payload.editorState)
+      this.bindings.onEffectiveDocumentChange?.(editorStateToComposerDocument(payload.editorState))
+      return
+    }
+    if (this.previewEditorState && (payload.tags.has(ROVAI_ATOM_PRESENTATION_TAG)
+      || (payload.dirtyLeaves.size === 0 && payload.dirtyElements.size === 0))) {
+      this.previewEditorState = payload.editorState
+      this.rebuildContributions(payload.editorState)
+      return
+    }
     this.latestEditorState = payload.editorState
     if (
       payload.tags.has(ROVAI_ATOM_PRESENTATION_TAG)
@@ -136,15 +153,35 @@ export class ComposerDraftSync<Draft = unknown> {
     ) return
     if (payload.dirtyLeaves.size === 0 && payload.dirtyElements.size === 0) return
 
+    this.previewEditorState = null
     this.applyDirtyLeaves(payload.editorState, payload.dirtyLeaves, payload.dirtyElements.size > 0)
     this.localVersion += 1
-    try { this.bindings.onLocalDocumentChange?.(editorStateToComposerDocument(payload.editorState)) }
-    catch (error) { this.setPersistenceError(error instanceof Error ? error : new Error(String(error))) }
+    if (this.bindings.onLocalDocumentChange || this.bindings.onEffectiveDocumentChange) {
+      const document = editorStateToComposerDocument(payload.editorState)
+      try { this.bindings.onLocalDocumentChange?.(document) }
+      catch (error) { this.setPersistenceError(error instanceof Error ? error : new Error(String(error))) }
+      this.bindings.onEffectiveDocumentChange?.(document)
+    }
     this.retryAttempt = 0
     this.clearRetryTimer()
     this.setDirty(true)
     this.setPersistenceStatus({ state: 'dirty' })
     if (this.bindings.persist) this.scheduleSave()
+  }
+
+  /** Preview changes status only; timers, retries and flush keep the real draft. */
+  restoreHistoryDraft(): void {
+    this.previewEditorState = null
+    this.rebuildContributions(this.latestEditorState)
+    this.bindings.onEffectiveDocumentChange?.(editorStateToComposerDocument(this.latestEditorState))
+  }
+
+  adoptHistoryPreview(): void {
+    const preview = this.previewEditorState
+    if (!preview) return
+    this.previewEditorState = null
+    this.restoreLocalState(preview)
+    this.bindings.onLocalDocumentChange?.(editorStateToComposerDocument(preview))
   }
 
   restoreLocalState(editorState: EditorState): void {
@@ -381,7 +418,8 @@ export class ComposerDraftSync<Draft = unknown> {
   }
 
   private refreshAtomAvailability(): void {
-    this.latestEditorState.read(() => {
+    const state = this.previewEditorState ?? this.latestEditorState
+    state.read(() => {
       for (const key of this.contributions.keys()) {
         const node = $getNodeByKey(key)
         if ($isComposerAtomNode(node)) {

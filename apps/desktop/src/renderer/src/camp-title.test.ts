@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { describe, expect, it } from 'vitest'
 import type { ThreadChannelSource } from '@contracts'
 import { formatThreadTitle } from './camp-title'
@@ -47,10 +48,7 @@ describe('Thread display titles', () => {
   })
 
   it('localizes only the identified first-run default without changing saved titles', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     const firstRunThread = { id: 'camp-first', title: '初次集结' }
     expect(formatThreadTitle(firstRunThread, 'camp-first')).toBe('初次集结')
     await changeInterfaceLanguage(languageApi, 'en')
@@ -70,10 +68,7 @@ describe('Thread display titles', () => {
   })
 
   it('translates only the channel decoration in English', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       expect(formatThreadTitle({

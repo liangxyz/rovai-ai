@@ -12,17 +12,17 @@ export function LegacyEnvironmentIssue({ check, disabled, onHandled }: { check: 
   const kind = check.subjectId as AdapterKind, handled = check.status === 'ok'
   const count = check.facts.find(fact => fact.key === 'variableCount')?.value ?? '0'
   const identity = check.facts.find(fact => fact.key === 'identity')?.value
-  const [open, setOpen] = useState(false), [revealed, setRevealed] = useState(false)
+  const [open, setOpen] = useState(false)
   const [values, setValues] = useState<Record<string,string> | null>(null)
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
   const sequence = useRef(0)
-  const read = async (reveal: boolean): Promise<void> => {
+  const read = async (): Promise<void> => {
     const request = ++sequence.current
     setError(null)
     try {
-      const next = await client.request<Record<string,string>>('runtime.environmentLegacy.get', { runtimeKind: kind, reveal })
+      const next = await client.request<Record<string,string>>('runtime.environmentLegacy.get', { runtimeKind: kind })
       if (request !== sequence.current) return
-      setValues(next); setRevealed(reveal)
+      setValues(next)
     } catch (error) { if (request === sequence.current) setError(readErrorMessage(error)) }
   }
   const acknowledge = async (): Promise<void> => {
@@ -39,10 +39,10 @@ export function LegacyEnvironmentIssue({ check, disabled, onHandled }: { check: 
     <div className="diagnostics-issue-action">{!handled && <button type="button" className="quiet-button compact" disabled={disabled || busy} onClick={() => void acknowledge()}>{busy ? t('正在记录…') : t('标记已处理')}</button>}</div>
     <details className="diagnostics-details legacy-environment-details" open={open} onToggle={event => {
       const expanded = event.currentTarget.open; setOpen(expanded)
-      if (expanded) void read(false)
-      else { sequence.current++; setValues(null); setRevealed(false) }
+      if (expanded) void read()
+      else { sequence.current++; setValues(null) }
     }}><summary><span>{t('查看旧配置')}</span><DialogControlIcon name="chevron"/></summary>
-      {open && <div className="legacy-json-view"><textarea readOnly aria-label={t('{0} 旧环境配置 JSON', adapterLabel(kind))} rows={Math.min(Number(count) + 2, 12)} value={values ? JSON.stringify(values, null, 2) : ''} spellCheck={false}/><div><span>{t('只读配置')}</span><button type="button" className="quiet-button environment-reveal" disabled={!values} aria-pressed={revealed} onClick={() => void read(!revealed)}><DialogControlIcon name={revealed ? 'eye-off' : 'eye'}/>{revealed ? t('隐藏密钥') : t('显示密钥')}</button></div></div>}
+      {open && <div className="legacy-json-view"><textarea readOnly aria-label={t('{0} 旧环境配置 JSON', adapterLabel(kind))} rows={Math.min(Number(count) + 2, 12)} value={values ? JSON.stringify(values, null, 2) : ''} spellCheck={false}/><div><span>{t('只读配置')}</span></div></div>}
     </details>
     {error && <p className="environment-error legacy-error" role="alert">{error}</p>}
   </article>

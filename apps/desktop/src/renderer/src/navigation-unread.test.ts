@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import type { NavigationThreadItem } from '@contracts'
-import { navigationThreadHasUnread, navigationThreadReadState } from './navigation-unread'
+import { describe, expect, it, vi } from 'vitest'
+import type { NavigationPreferencesSnapshot, NavigationThreadItem } from '@contracts'
+import { navigationThreadHasUnread, navigationThreadReadState, saveNavigationThreadReadState } from './navigation-unread'
 
 const thread: NavigationThreadItem = {
   id: 'rvcamp_01h47kvsy5fk1shh6w1g60eec0', title: 'Concurrent replies', activationState: 'active',
@@ -36,5 +36,41 @@ describe('navigation read intent', () => {
   it('preserves older marker-only fixtures without inventing unread state', () => {
     expect(navigationThreadHasUnread({ ...thread, lastSeenGlobalSequence: undefined })).toBe(false)
     expect(navigationThreadHasUnread({ ...thread, lastSeenGlobalSequence: undefined, marker: 'unread_completed' })).toBe(true)
+  })
+
+  it('reads back an uncertain local write before allowing the Core acknowledgement step', async () => {
+    const desired = navigationThreadReadState(thread, false)
+    const snapshot: NavigationPreferencesSnapshot = {
+      schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: true, pins: [],
+      removedProjects: [], projectOrder: null, projectNames: {},
+      threadReadStates: { [thread.id]: { ...desired, readThroughGlobalSequence: 30 } }
+    }
+    const owner = { setThreadReadState: vi.fn().mockRejectedValue(new Error('lost receipt')),
+      get: vi.fn().mockResolvedValue(snapshot) }
+    expect(await saveNavigationThreadReadState(owner, thread.id, desired)).toEqual({ snapshot, confirmed: true })
+    expect(owner.setThreadReadState).toHaveBeenCalledExactlyOnceWith(thread.id, desired)
+    expect(owner.get).toHaveBeenCalledTimes(1)
+
+    // A later manual reminder cannot be cleared by retrying the old local step.
+    snapshot.threadReadStates[thread.id].manualUnread = true
+    owner.setThreadReadState.mockClear()
+    expect(await saveNavigationThreadReadState(owner, thread.id, desired)).toEqual({ snapshot, confirmed: false })
+    expect(snapshot.threadReadStates[thread.id].manualUnread).toBe(true)
+    expect(owner.setThreadReadState).toHaveBeenCalledTimes(1)
+
+    // Neither an older watermark nor a degraded/default snapshot proves success.
+    snapshot.threadReadStates[thread.id] = { ...desired, readThroughGlobalSequence: 10 }
+    expect((await saveNavigationThreadReadState(owner, thread.id, desired)).confirmed).toBe(false)
+    snapshot.threadReadStates[thread.id] = desired
+    snapshot.readError = 'preferences unavailable'
+    expect((await saveNavigationThreadReadState(owner, thread.id, desired)).confirmed).toBe(false)
+    owner.get.mockRejectedValue(new Error('read unavailable'))
+    expect(await saveNavigationThreadReadState(owner, thread.id, desired)).toEqual({ snapshot: null, confirmed: false })
+
+    // A reliable write receipt does not introduce an extra owner read.
+    owner.get.mockClear()
+    owner.setThreadReadState.mockResolvedValue(snapshot)
+    expect((await saveNavigationThreadReadState(owner, thread.id, desired)).confirmed).toBe(true)
+    expect(owner.get).not.toHaveBeenCalled()
   })
 })

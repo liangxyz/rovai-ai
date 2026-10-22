@@ -58,12 +58,6 @@ export async function provisionFirstRun(
   if (!initialSnapshot.runtimeSelection?.model) {
     throw new Error(uiAttribute('请先完成智能体与模型配置。'))
   }
-  const presets = builtinMemberPresetsForLanguage(language)
-  const preset = presets.find(
-    (candidate) => candidate.role === initialSnapshot.selectedMemberRole
-  )
-  if (!preset) throw new Error(uiAttribute('所选队员预设已不可用。'))
-  const identity = presetIdentity(preset)
 
   let runtimePermissions: AdapterPermissionConfig
   if (initialSnapshot.provisioning) {
@@ -93,9 +87,17 @@ export async function provisionFirstRun(
   }
 
   let current = requireProvisioningSnapshot(
-    await api.onboarding.beginProvisioning(initialSnapshot.runtimeSelection, runtimePermissions)
+    await api.onboarding.beginProvisioning(initialSnapshot.runtimeSelection, runtimePermissions, initialSnapshot.provisioning?.interfaceLanguage ?? language)
   )
   onCheckpoint(current)
+  language = current.provisioning.interfaceLanguage
+  const presets = builtinMemberPresetsForLanguage(language)
+  const preset = presets.find(
+    (candidate) => candidate.role === initialSnapshot.selectedMemberRole
+  )
+  if (!preset) throw new Error(uiAttribute('所选队员预设已不可用。'))
+  const identity = presetIdentity(preset)
+
 
   if (!current.provisioning.memberAgentId) {
     const existingMembers = await api.request<AgentProfile[]>('members.list')

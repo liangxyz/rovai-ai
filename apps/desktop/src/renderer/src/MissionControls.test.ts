@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -12,11 +13,7 @@ const component = readFileSync(new URL('./MissionControls.tsx', import.meta.url)
 const styles = readFileSync(new URL('./mission.css', import.meta.url), 'utf8')
 
 describe('Mission status language', () => {
-  const preferences = {
-    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
-      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
-    })
-  } as GeneralPreferencesApi
+  const preferences = languageTestApi
 
   afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
 

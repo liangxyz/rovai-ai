@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { describe, expect, it } from 'vitest'
 import type { AgentRunView, ThreadMemberView, GeneralPreferencesApi } from '@contracts'
 import type { LiveExecutionProgress } from './ui-model'
@@ -107,10 +108,7 @@ describe('Thread world map model', () => {
   })
 
   it('localizes structured file activity in the world map without translating Runtime detail', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       const read = {

@@ -54,11 +54,11 @@ Object.assign(window, { rovai: {
     if (method === 'notifications.inbox') {
       if (holdInbox) await new Promise<void>(resolve => pendingInbox.push(resolve))
       if (failedInboxReads > 0) { failedInboxReads--; throw new Error('Temporary inbox failure') }
-      return { schemaVersion: 9, throughChangeSequence: sequence, unreadCount: journal.length, items: [], nextCursor: null }
+      return { schemaVersion: 11, throughChangeSequence: sequence, unreadCount: journal.length, items: [], nextCursor: null }
     }
     if (method === 'notifications.changesSince') {
       changeReads++
-      const batch = { schemaVersion: 9, requestedAfterChangeSequence: request.afterChangeSequence,
+      const batch = { schemaVersion: 11, requestedAfterChangeSequence: request.afterChangeSequence,
       nextChangeSequence: sequence, throughChangeSequence: sequence, retainedFloorChangeSequence: 0,
       taskCapability: taskSnapshot(), hasMore: false, resetRequired: false,
       changes: journal.filter(change => change.changeSequence > request.afterChangeSequence && (tasksEnabled || change.episode?.kind !== 'task')) }

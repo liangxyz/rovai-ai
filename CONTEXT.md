@@ -27,6 +27,10 @@ Skills. Current collaboration uses ordinary multi-target public messages and ord
 returns, count replies or produce a completion Run. Frozen historical Gather records remain read-only evidence.
 _Avoid_: current operation, multi-send alias, renamed aggregate, reply counter, completion wakeup
 
+**Team**:
+A User-owned named Thread creation template containing a member roster, Default Lead and optional guidelines. Selecting it copies authoritative creation inputs in one transaction; it never owns or synchronizes an existing Thread. Custom creation defaults remain independent. See [Team Templates v1](docs/contracts/team-templates-v1.md).
+_Avoid_: live Thread membership, automatically migrated default team, editable conversation guidance
+
 **Thread**:
 A shared collaboration aggregate containing participants, public discussion, private Agent continuities, resources, and outcomes. Its Core-owned Activation State is `pending | active`: explicit Dialog creation becomes Active immediately and may validly contain no public messages, while one-click creation begins as a Pending Thread Draft and becomes Active only with its first accepted user message. A Thread created without a user-configured name starts as `未命名对话`; its first accepted user message generates the name only while the user has never explicitly named or renamed that Thread. The product may present an Active Thread as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Thread aggregate; Rovai-ai does not model Thread archive or trash.
 _Avoid_: Public Conversation, Task, Project, Archived Thread
@@ -1079,11 +1083,11 @@ The single fenced, pre-input attempt to load an existing Native Session when com
 _Avoid_: AgentRun retry, blind Resume, duplicate input delivery, Conversation replacement
 
 **Native Session Bootstrap**:
-The complete model-facing Session startup configuration transiently formatted in the fixed order Session Charter, latest Member Identity Bootstrap Projection, then Memory Entrypoint. Every Runtime receives it for a new Native Session; Claude Code and Codex also receive it on Resume, using the original stable components and latest committed identity. Stable Charter and Entrypoint evidence persists, but the complete Bootstrap bytes and identity do not.
+The complete model-facing Session startup configuration transiently formatted in the fixed order Session Charter, latest Member Identity Bootstrap Projection, optional frozen Team Guidance, Platform Skills, then optional Memory Entrypoint. Team Guidance is fixed when its public Thread is created, omitted for Single Chat, and never refreshed by Team edits. Every Runtime receives it for a new Native Session; Claude Code and Codex also receive it on Resume, using the original stable components and latest committed identity. Stable Charter and Entrypoint evidence persists, but the complete Bootstrap bytes and identity do not.
 _Avoid_: AgentRun context, immutable complete prompt, Member Identity Snapshot, Runtime hot update, complete Bootstrap evidence
 
 **Native Session Bootstrap Evidence**:
-The immutable Core evidence for one Native Binding generation's stable Session Charter, Memory Entrypoint, observed Memory revisions, authorization basis and delivery mode. Its component digest excludes Member Identity and cannot prove or reconstruct the complete Native Session Bootstrap or combined first payload.
+The immutable Core evidence for one Native Binding generation's stable Session Charter, Platform Skills, optional immutable Thread Team Guidance, Memory Entrypoint, observed Memory revisions, authorization basis and delivery mode. Its component digest excludes Member Identity and cannot prove or reconstruct the complete Native Session Bootstrap or combined first payload.
 _Avoid_: complete Bootstrap snapshot, Member Identity history, Runtime prompt digest, proof of model adoption
 
 **Bootstrap Redelivery Requirement**:

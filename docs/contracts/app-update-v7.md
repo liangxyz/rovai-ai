@@ -5,7 +5,7 @@ version: 7
 status: accepted
 authority: app-update-release-notes-language-selection
 source_version: v1.72
-last_updated: 2026-10-03
+last_updated: 2026-10-22
 ---
 
 # App Update v7 Contract
@@ -49,7 +49,9 @@ Marker examples inside fenced or indented code, inline code, blockquotes, lists,
 not boundaries. A malformed standalone language comment, duplicate tag after case normalization, a marker mixed with
 other line content, an ambiguous HTML block containing marker syntax, a parsing failure or unavailable boundary
 positions must fail open to the complete original notes, not truncate or guess a section. Notes with no valid markers
-also retain their complete original text. This fallback still uses `SafeMarkdown`; it does not enable raw HTML.
+also retain their complete original text. This fallback still uses `SafeMarkdown` with explicit `rawHtmlPolicy="drop"`; raw HTML and comments remain hidden.
+Unlike literal message text, language metadata must not become visible on full-text fallback. The independent
+release-note content eligibility check retains the same drop policy; neither policy executes raw HTML.
 
 ## Content eligibility and fallback
 

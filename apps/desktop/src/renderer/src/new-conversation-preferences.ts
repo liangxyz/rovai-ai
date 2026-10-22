@@ -1,6 +1,8 @@
 import { isNewConversationMemberAvailable } from './new-conversation-availability'
 import type {
   AgentProfile,
+  Team,
+  TeamSelection,
   GeneralPreferencesSnapshot,
   NavigationThreadItem,
   NavigationSnapshot,
@@ -33,6 +35,7 @@ export interface CurrentProjectAccessInput {
 
 export interface ResolvedNewConversationDefaults {
   defaults: NewConversationDefaults
+  team?: TeamSelection
   members: AgentProfile[]
   lead: AgentProfile
 }
@@ -196,10 +199,12 @@ export function navigationIncludingCurrentWorkspace(
 
 export function resolveNewConversationDefaults(
   preferences: GeneralPreferencesSnapshot | null,
-  agents: AgentProfile[]
+  agents: AgentProfile[],
+  teams: Team[] = []
 ): ResolvedNewConversationDefaults | null {
-  const defaults = preferences?.newConversationDefaults
-  if (!defaults || preferences.newConversationDefaultsRequireConfirmation) return null
+  const team = preferences?.newConversationTeamId ? teams.find(team => team.id === preferences.newConversationTeamId) : undefined
+  const defaults = preferences?.newConversationTeamId ? team : preferences?.newConversationDefaults
+  if (!defaults || preferences?.newConversationDefaultsRequireConfirmation) return null
   const profileById = new Map(agents.map((agent) => [agent.agentId, agent]))
   const members = defaults.memberAgentIds.flatMap((agentId) => {
     const agent = profileById.get(agentId)
@@ -216,15 +221,16 @@ export function resolveNewConversationDefaults(
     || lead.removedAt !== null
     || !defaults.memberAgentIds.includes(lead.agentId)
   ) return null
-  return { defaults, members, lead }
+  return { defaults, members, lead, ...(team ? { team: { teamId: team.id, expectedVersion: team.version } } : {}) }
 }
 
 // A temporary runtime outage blocks one-click creation without invalidating the saved team.
 export function resolveAvailableNewConversationDefaults(
   preferences: GeneralPreferencesSnapshot | null,
-  agents: AgentProfile[]
+  agents: AgentProfile[],
+  teams: Team[] = []
 ): ResolvedNewConversationDefaults | null {
-  const resolved = resolveNewConversationDefaults(preferences, agents)
+  const resolved = resolveNewConversationDefaults(preferences, agents, teams)
   return resolved?.members.every((agent) => isNewConversationMemberAvailable({
     runtimeConfigured: agent.runtimeConfiguration !== null,
     runtimeReadiness: agent.runtimeReadiness.status
@@ -233,21 +239,23 @@ export function resolveAvailableNewConversationDefaults(
 
 export function defaultsNeedInvalidation(
   preferences: GeneralPreferencesSnapshot | null,
-  agents: AgentProfile[]
+  agents: AgentProfile[],
+  teams: Team[] = []
 ): boolean {
   return Boolean(
-    preferences?.newConversationDefaults
-    && !preferences.newConversationDefaultsRequireConfirmation
-    && !resolveNewConversationDefaults(preferences, agents)
+    (preferences?.newConversationDefaults || preferences?.newConversationTeamId)
+    && !preferences?.newConversationDefaultsRequireConfirmation
+    && !resolveNewConversationDefaults(preferences, agents, teams)
   )
 }
 
 export function shouldInvalidateNewConversationDefaults(
   preferences: GeneralPreferencesSnapshot | null,
   agents: AgentProfile[],
-  overviewReady: boolean
+  overviewReady: boolean,
+  teams: Team[] = []
 ): boolean {
-  return overviewReady && defaultsNeedInvalidation(preferences, agents)
+  return overviewReady && defaultsNeedInvalidation(preferences, agents, teams)
 }
 
 /** Saved directories own membership after the single legacy import. Before it,

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import type {
   AttachmentPreviewResult,
   LocalAttachmentAvailability,
@@ -10,6 +10,7 @@ import type {
 } from '@contracts'
 import { isAttachmentId, type DesktopAttachmentTarget } from './attachment-desktop'
 import { classifyFilePreview } from './file-preview/file-preview-classifier'
+import { pastedTextPreview } from '../shared/pasted-text-preview'
 
 const REGISTRY_SCHEMA_VERSION = 1
 const MAX_PREVIEW_BYTES = 8 * 1024 * 1024
@@ -26,6 +27,10 @@ interface RegistryEntry {
   observedByteSize: number | null
   createdAt: string
   updatedAt: string
+  /** Only Main's long-paste creation path can grant physical deletion authority. */
+  generatedBy?: 'long_text_paste'
+  enteredSendFlow?: boolean
+  pastedTextPreview?: string
 }
 
 interface PersistedRegistry {
@@ -62,6 +67,8 @@ function validEntry(value: unknown): value is RegistryEntry {
       || (Number.isInteger(entry.observedByteSize) && Number(entry.observedByteSize) >= 0))
     && typeof entry.createdAt === 'string'
     && typeof entry.updatedAt === 'string'
+    && (entry.pastedTextPreview === undefined || (typeof entry.pastedTextPreview === 'string'
+      && Array.from(entry.pastedTextPreview).length <= 160))
 }
 
 export class LocalComposerAttachmentRegistry {
@@ -79,6 +86,8 @@ export class LocalComposerAttachmentRegistry {
     sourcePath: string
     displayName: string
     mediaType: string | null
+    generatedBy?: 'long_text_paste'
+    pastedTextPreview?: string
   }): Promise<LocalAttachmentSourceView> {
     await this.#ensureLoaded()
     const attachmentId = randomUUID()
@@ -92,7 +101,9 @@ export class LocalComposerAttachmentRegistry {
       mediaType: input.mediaType,
       observedByteSize: null,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      ...(input.generatedBy ? { generatedBy: input.generatedBy, enteredSendFlow: false } : {}),
+      ...(input.generatedBy && input.pastedTextPreview !== undefined ? { pastedTextPreview: input.pastedTextPreview } : {})
     }, true)
     if (inspected.view.availability !== 'available' || !inspected.entry) {
       throw new Error('附件当前不可读取。')
@@ -131,6 +142,63 @@ export class LocalComposerAttachmentRegistry {
           this.#entries.delete(key)
         }
       }
+    })
+  }
+
+  /** Called only after the replacement local draft has been saved. */
+  async removePastedText(
+    threadId: string,
+    attachmentId: string,
+    resolveOutputRoot: () => Promise<string>
+  ): Promise<'deleted' | 'retained'> {
+    await this.#ensureLoaded()
+    let outcome: 'deleted' | 'retained' = 'retained'
+    await this.#mutate(async () => {
+      const key = entryKey(threadId, attachmentId)
+      const entry = this.#entries.get(key)
+      // Missing/old/malformed provenance never grants deletion authority.
+      if (!entry || entry.generatedBy !== 'long_text_paste') return false
+      if (entry.enteredSendFlow === false) {
+        const root = await resolveOutputRoot()
+        if (dirname(entry.sourcePath) !== root
+          || !entry.sourcePath.endsWith('.txt')
+          || !isAttachmentId(entry.sourcePath.slice(root.length + 1, -4))) return false
+        // Unlink the exact generated entry, never a user-supplied replacement.
+        // Parent symlinks are checked again because the directory may have changed.
+        await assertNoSymlinkParents(root)
+        await unlink(entry.sourcePath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error
+        })
+        outcome = 'deleted'
+      }
+      this.#entries.delete(key)
+    })
+    return outcome
+  }
+
+  /** Persist the one-way protection before Main forwards a publication request.
+   * Sources are the final request snapshot, not all entries owned by this Thread.
+   * An empty/later snapshot never clears protection from an earlier request.
+   * This shares #mutation with physical deletion; no per-send state is required.
+   */
+  async protectForSend(threadId: string, sources: readonly { id: string; sourcePath: string }[]): Promise<void> {
+    if (sources.length === 0) return
+    await this.#ensureLoaded()
+    await this.#mutate(() => {
+      const ids = new Set(sources.map(source => source.id))
+      const paths = new Set(sources.map(source => source.sourcePath))
+      let changed = false
+      for (const [key, entry] of this.#entries) {
+        if (entry.generatedBy === 'long_text_paste'
+          && entry.enteredSendFlow !== true
+          // The same source can be selected as an external file in another
+          // Thread. IDs are Thread-scoped; exact source paths protect their owner.
+          && ((entry.threadId === threadId && ids.has(entry.attachmentId)) || paths.has(entry.sourcePath))) {
+          this.#entries.set(key, { ...entry, enteredSendFlow: true })
+          changed = true
+        }
+      }
+      return changed
     })
   }
 
@@ -240,6 +308,8 @@ export class LocalComposerAttachmentRegistry {
       byteSize: entry.observedByteSize,
       previewKind: image ? 'image' : 'none',
       availability,
+      ...(entry.generatedBy === 'long_text_paste' ? { generatedBy: entry.generatedBy } : {}),
+      ...(entry.pastedTextPreview !== undefined ? { pastedTextPreview: entry.pastedTextPreview } : {}),
       sourcePath: availability === 'missing' ? undefined : entry.sourcePath
     }
   }
@@ -262,11 +332,11 @@ export class LocalComposerAttachmentRegistry {
     await this.#loaded
   }
 
-  async #mutate(operation: () => void): Promise<void> {
+  async #mutate(operation: () => void | boolean | Promise<void | boolean>): Promise<void> {
     const next = this.#mutation.then(async () => {
       const previous = new Map(this.#entries)
-      operation()
       try {
+        if (await operation() === false) return
         await this.#persist()
       } catch (error) {
         this.#entries.clear()
@@ -284,10 +354,18 @@ export class LocalComposerAttachmentRegistry {
       Date.parse(right[1].updatedAt) - Date.parse(left[1].updatedAt)
     )
     this.#entries.clear()
+    let ordinaryEntries = 0
     for (const [key, entry] of sorted) {
-      if (this.#entries.size >= MAX_ENTRIES) break
+      // Generated entries are retained until explicit draft release or Thread
+      // deletion. They may still own recovery, protection, or failed cleanup.
+      if (entry.generatedBy === 'long_text_paste') {
+        this.#entries.set(key, entry)
+        continue
+      }
+      if (ordinaryEntries >= MAX_ENTRIES) continue
       if (Number.isFinite(Date.parse(entry.updatedAt)) && Date.parse(entry.updatedAt) < cutoff) continue
       this.#entries.set(key, entry)
+      ordinaryEntries += 1
     }
   }
 
@@ -305,4 +383,37 @@ export class LocalComposerAttachmentRegistry {
       await unlink(temporary).catch(() => undefined)
     }
   }
+}
+
+export async function assertNoSymlinkParents(directory: string): Promise<void> {
+  for (let path = directory; ; path = dirname(path)) {
+    // Node lstat rejects a namespaced Windows drive root (\\?\C:\).
+    // Keep the namespace on every other component, including long paths.
+    const metadataPath = process.platform === 'win32' && /^\\\\\?\\[a-z]:\\$/iu.test(path)
+      ? path.slice(4)
+      : path
+    const info = await lstat(metadataPath)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('附件目录已变化。')
+    if (dirname(path) === path) break
+  }
+}
+
+/** The root comes from Host/Core. No platform layout is reconstructed here. */
+export async function createPastedTextAttachment(
+  registry: LocalComposerAttachmentRegistry,
+  threadId: string,
+  outputRoot: string,
+  displayName: string,
+  bytes: Uint8Array
+): Promise<LocalAttachmentSourceView> {
+  await assertNoSymlinkParents(outputRoot)
+  const sourcePath = join(outputRoot, `${randomUUID()}.txt`)
+  await writeFile(sourcePath, bytes, { flag: 'wx', mode: 0o600 })
+  // Report failure promptly so Renderer restores its original text first.
+  // A write/registry failure before returning an identity can leave a residue
+  // for normal Thread deletion; it does not create a second recovery protocol.
+  return registry.prepare({
+    threadId, sourcePath, displayName, mediaType: 'text/plain;charset=utf-8', generatedBy: 'long_text_paste',
+    pastedTextPreview: pastedTextPreview(bytes)
+  })
 }

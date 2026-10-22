@@ -36,7 +36,9 @@ export function AttachmentLocationItems({ path, label, onNotify }: {
       <small className="attachment-location-path">{label}</small>
     </DropdownMenu.Label>
     <DropdownMenu.Item className="attachment-context-menu-item attachment-context-menu-text" onSelect={() => {
-      void writeClipboardText(path).then(copied => onNotify(copied ? uiAttribute('已复制完整路径') : uiAttribute('未能复制路径，请重试。'))).catch(() => onNotify(uiAttribute('未能复制路径，请重试。')))
+      void writeClipboardText(path).then(copied => {
+        if (!copied) onNotify(uiAttribute('未能复制路径，请重试。'))
+      }).catch(() => onNotify(uiAttribute('未能复制路径，请重试。')))
     }}><UiText zh={"复制完整路径"} /></DropdownMenu.Item>
   </>
 }

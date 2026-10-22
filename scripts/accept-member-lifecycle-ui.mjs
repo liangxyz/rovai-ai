@@ -732,7 +732,8 @@ try {
       cause: error
     })
   }
-  await waitForText(running.cdp, '.app-toast', '1 位队员已加入')
+  assert(!await evaluate(running.cdp, `Boolean(document.querySelector('.app-toast'))`),
+    'Successful invitation must not show a toast')
 
   await focusElement(
     running.cdp,
@@ -787,7 +788,8 @@ try {
   await waitForExpression(running.cdp,
     `document.querySelectorAll('.camp-inspector-member-row').length === 1
       && !document.querySelector('.camp-member-removal-dialog')`, 30_000)
-  await waitForText(running.cdp, '.app-toast', `已将${membershipCandidate.displayName}移出当前会话`)
+  assert(!await evaluate(running.cdp, `Boolean(document.querySelector('.app-toast'))`),
+    'Successful removal must not show a toast')
 
   await mouseClick(running.cdp, '.camp-add-member-button', '邀请', true)
   await waitForSelector(running.cdp, '.camp-member-dialog')
@@ -803,7 +805,8 @@ try {
   await waitForExpression(running.cdp,
     `document.querySelectorAll('.camp-inspector-member-row').length === 2
       && !document.querySelector('.camp-member-dialog')`, 30_000)
-  await waitForText(running.cdp, '.app-toast', '1 位队员已加入')
+  assert(!await evaluate(running.cdp, `Boolean(document.querySelector('.app-toast'))`),
+    'Successful invitation must not show a toast')
   const membershipSnapshot = await request(running.cdp, 'camps.snapshot', {
     threadId: membershipCampId
   })

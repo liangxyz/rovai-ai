@@ -245,7 +245,7 @@ describe('global Web connection recovery', () => {
     client.clear()
   })
 
-  it('keeps an unknown upload intent after refresh, unlocks the page, and reuses it when the exact file is selected', async () => {
+  it.each([undefined, { kind: 'pasted_text' as const }])('keeps an unknown upload intent after refresh and reuses it on exact-file selection (%j)', async target => {
     const saved = storage(), intents: unknown[] = []
     let completed = false
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
@@ -259,7 +259,7 @@ describe('global Web connection recovery', () => {
     })
     const first = new ConsoleClient(origin, fetcher, saved)
     await first.login('test')
-    void first.uploadFile('t', 1, new File(['original'], 'test.txt'))
+    void first.uploadFile('t', 1, new File(['original'], 'test.txt'), target)
     await vi.waitFor(() => expect(first.connectionState).toBe('offline'))
     const restored = new ConsoleClient(origin, fetcher, saved)
     await restored.restore()
@@ -268,7 +268,7 @@ describe('global Web connection recovery', () => {
     expect(restored.pendingCommandCount).toBe(1)
     expect(JSON.parse(saved.getItem(RECOVERY_KEY)!).uploads).toEqual(intents)
     completed = true
-    await restored.uploadFile('t', 99, new File(['original'], 'test.txt'))
+    await restored.uploadFile('t', 99, new File(['original'], 'test.txt'), target)
     expect(intents).toHaveLength(2)
     expect(intents[1]).toEqual(intents[0])
     expect(restored.pendingCommandCount).toBe(0)

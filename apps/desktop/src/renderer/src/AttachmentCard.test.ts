@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { ThreadMessageAttachmentView, LocalAttachmentOwnerLocator } from '@contracts'
 import { AttachmentCard } from './AttachmentCard'
+import { changeInterfaceLanguage } from './interface-language'
+import { languageTestApi } from './interface-language-test-api'
 
 vi.mock('./FilePreviewContext', () => ({
   useOptionalFilePreview: () => ({ open: vi.fn() })
@@ -35,6 +37,27 @@ const composerLocators: Array<[string, LocalAttachmentOwnerLocator, boolean]> = 
 ]]
 
 describe('AttachmentCard composer actions', () => {
+  it('shows escaped pasted content and a localized label while preserving file identity in every presentation', async () => {
+    try {
+      for (const [language, label, empty] of [['zh-CN', '粘贴内容', '空白文本'], ['en', 'Pasted text', 'Whitespace only']] as const) {
+        await changeInterfaceLanguage(languageTestApi, language)
+        for (const presentation of ['composer', 'user-timeline', 'agent-timeline'] as const) {
+          for (const pastedTextPreview of ['# Claude Code <script>', '']) {
+            const markup = renderToStaticMarkup(createElement(AttachmentCard, {
+              attachment: { ...fileAttachment, displayName: '粘贴内容-1.txt', pastedTextPreview },
+              locator: { owner: 'composer', threadId: 'camp-1', attachmentRefId: fileAttachment.id },
+              presentation
+            }))
+            expect(markup).toContain(pastedTextPreview ? '# Claude Code &lt;script&gt;' : empty)
+            expect(markup).toContain(`<small>${label}</small>`)
+            expect(markup).toContain('粘贴内容-1.txt')
+            expect(markup).not.toContain('file-extension-label')
+          }
+        }
+      }
+    } finally { await changeInterfaceLanguage(languageTestApi, 'zh-CN') }
+  })
+
   it.each(composerLocators)('exposes preview and applicable context actions in the %s', (_name, locator, hasContextMenu) => {
     const markup = renderToStaticMarkup(createElement(AttachmentCard, {
       attachment: fileAttachment,

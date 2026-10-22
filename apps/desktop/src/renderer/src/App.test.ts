@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { RemoteConnectionStatus } from './RemoteConnectionStatus'
 import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 import { DEFAULT_APPEARANCE } from '../../shared/appearance'
@@ -281,7 +282,7 @@ describe('application toast semantics', () => {
       onClose: () => undefined
     }))
     const neutral = renderToStaticMarkup(createElement(AppToast, {
-      toast: { message: '已复制会话 ID', tone: 'neutral' },
+      toast: { message: '响应模式未保存，请重试。', tone: 'neutral' },
       onClose: () => undefined
     }))
 
@@ -319,14 +320,14 @@ describe('accepted Thread deletion tombstone', () => {
 })
 
 describe('availability-first workspace gate', () => {
-  it('covers the ordinary page frame with loading before the first Supervisor snapshot', () => {
+  it('holds locale-dependent page copy until the local language snapshot is restored', () => {
     vi.stubGlobal('document', { documentElement: { dataset: {}, style: {} } })
     vi.stubGlobal('window', { rovai: { platform: 'darwin' } })
     try {
       const markup = renderToStaticMarkup(createElement(App))
-      expect(markup).toContain('unified-sidebar')
+      expect(markup).toContain('language-bootstrap')
+      expect(markup).not.toContain('unified-sidebar')
       expect(markup).not.toContain('bootstrap-shell')
-      expect(markup).toContain('startup-loading-canvas')
       expect(markup).not.toContain('sidebar-empty')
       expect(markup).not.toContain('onboarding-app-shell')
     } finally {
@@ -1542,10 +1543,7 @@ describe('task event projections', () => {
   })
 
   it('localizes file change summaries and evidence labels in English', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       const changes = {
@@ -2232,7 +2230,8 @@ describe('task event projections', () => {
         mediaType: 'text/plain',
         byteSize: 12,
         previewKind: 'none',
-        availability: 'available'
+        availability: 'available',
+        pastedTextPreview: '正文开头'
       }],
       replyIntent: null,
       continuationIntent: null,
@@ -2251,7 +2250,8 @@ describe('task event projections', () => {
         displayName: '说明.txt',
         kind: 'file',
         mediaType: 'text/plain',
-        observedByteSize: 12
+        observedByteSize: 12,
+        pastedTextPreview: '正文开头'
       }],
       quotes: [],
       replyToThreadMessageId: null,
@@ -2264,7 +2264,7 @@ describe('task event projections', () => {
     expect(optimisticThreadMessage(null, 'command-attachment-only', draft)).toMatchObject({
       body: '',
       content: [],
-      attachments: [{ id: 'attachment-only' }]
+      attachments: [{ id: 'attachment-only', pastedTextPreview: '正文开头' }]
     })
   })
 
@@ -2723,10 +2723,7 @@ describe('task event projections', () => {
   })
 
   it('shows the localized first-run title in navigation and recent chats across language changes', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     const thread = {
       id: 'camp-first', title: '初次集结', activationState: 'active' as const,
       projectBindingKind: 'quick_chat' as const, projectPath: '/tmp/quick-chat', defaultLead: null,
@@ -3397,10 +3394,10 @@ describe('task event projections', () => {
     expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')
     expect(capabilitiesGroup).toContain('data-navigation-icon="radio-tower"')
+    expect(capabilitiesGroup.indexOf('<strong>智能体</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Skills</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>工具箱</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>工具箱</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>智能体</strong>'))
-    expect(capabilitiesGroup.indexOf('<strong>智能体</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>远程连接</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>工具箱</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>远程连接</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>远程连接</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>渠道</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(supportGroup).toContain('<strong>运行监控</strong>')
@@ -3429,7 +3426,7 @@ describe('task event projections', () => {
       onReload: async () => undefined,
       onAppearanceChange: async (preferences: import('@contracts').AppearancePreferences) => ({ ...preferences, resolvedTheme: 'day' as const })
     }
-    const contentBySection: Record<NavigationSettingsSection, string> = {
+    const contentBySection: Record<Exclude<NavigationSettingsSection, 'memory'>, string> = {
       remote: '远程连接',
       general: '通用',
       skills: 'Skills',
@@ -4876,10 +4873,7 @@ describe('task event projections', () => {
   })
 
   it('shows app-owned model and effort labels in English', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       expect(memberRuntimeConfigurationPresentation(configuredRuntime('codex-cli'), null)).toEqual({
@@ -5380,7 +5374,7 @@ describe('task event projections', () => {
     expect(unavailableAuthorMarkup).toContain('<strong>洛可</strong>')
   })
 
-  it('renders GFM while removing raw HTML and remote images', () => {
+  it('renders GFM and literal HTML while suppressing remote images', () => {
     const markup = renderToStaticMarkup(createElement(
       SafeMarkdown,
       null,
@@ -5392,7 +5386,7 @@ describe('task event projections', () => {
     expect(markup).toContain('<code>PASS</code>')
     expect(markup).not.toContain('<script')
     expect(markup).not.toContain('<img')
-    expect(markup).not.toContain('alert(1)')
+    expect(markup).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
   })
 
   it('renders durable Task records below a single explicit creation action', () => {
@@ -5898,7 +5892,7 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
   })
 
-  it('omits a renderless Runtime narration fragment after a Tool', () => {
+  it('keeps literal Runtime markup after a Tool', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'tool-1', agentRunId: 'run-renderless-narration', eventType: 'runtime.action',
       payload: { toolCallId: 'tool-1', title: 'Edit', status: 'completed' },
@@ -5909,7 +5903,8 @@ describe('task event projections', () => {
       createdAt: '2026-08-27T10:45:17Z'
     }], 'run-renderless-narration')
 
-    expect(progress.items.map((item) => item.kind)).toEqual(['tool'])
+    expect(progress.items.map((item) => item.kind)).toEqual(['tool', 'narration'])
+    expect(progress.items[1]).toMatchObject({ body: '</think>' })
   })
 
   it('shows the latest Claude API retry while the AgentRun is still running', () => {
@@ -6250,10 +6245,7 @@ describe('task event projections', () => {
     expect(networkBlockedMarkup).toContain('自动恢复已停止')
     expect(networkBlockedMarkup).not.toContain('process-spinner')
 
-    const languageApi = {
-      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       const englishMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {

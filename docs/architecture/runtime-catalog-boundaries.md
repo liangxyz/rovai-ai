@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-20
+last_updated: 2026-10-22
 ---
 
 # Runtime Catalog Boundaries
@@ -143,21 +143,23 @@ continuation、Built-in Tool、Approval、cancel、terminal、process cleanup �
 
 ## 本机启动设置
 
-Runtime Startup Settings 只保存本机程序路径。环境覆盖属于当前 Host 的具体队员实例和 Runtime，
-由 Core 私有存储管理；Host 环境与队员环境同名覆盖、不同名追加，删除队员条目恢复继承。
+Runtime Startup Settings 保存本机程序路径及按 Runtime 隔离的通用环境变量。环境由 Core 私有加密存储管理，
+新 CLI 按 Host、可选的 Runtime 通用配置、队员覆盖合并，同名后者优先、不同名追加；删除队员条目恢复下层值。
+队员可选择是否继承通用配置，新队员默认继承，升级前非空队员配置保持独立。
 已启动进程不受保存影响，旧 Agents 环境不再参与启动/检查，独立只读归档由诊断提供人工迁移参考。
 
-新建 CLI 时合并当时的 Host＋队员环境，领取 Run 不读取；健康 Warm 复用不读取或解密最新配置。
+新建 CLI 时合并当时的 Host＋通用＋队员环境，领取 Run 不读取；健康 Warm 复用不读取或解密最新配置。
 活着的 CLI 及其工具子进程保持启动环境，重建/冷恢复使用当前配置。环境不进入会话或 Run 历史，
 旧快照缺失或损坏不阻断执行；真实队员配置错误只失败对应任务，数据库整体错误仍上报。
 进程只在同一 Camp、同一队员的当前会话内复用，继续遵循各 Adapter 的工作目录、恢复与停止策略。
 值不进入成员资料、公开命令、工具、事件或诊断导出；Owner 管理面使用遮蔽读取及显式查看。
 程序绝对路径仍属于安装发现，不由队员 PATH 偷换。详细字段、CAS、凭据保护、CLI 资格与迁移见
-[Runtime Launch v59](../contracts/runtime-launch-and-verification-v59.md)。
+[Runtime Launch v69](../contracts/runtime-launch-and-verification-v69.md)。
+正式检查与模型目录使用 Host＋通用配置；保存使相关缓存和旧检查失效，不主动替换 Warm。
 
 ### Claude Code 与 Codex 原生配置
 
-原生连接编辑已按 User 要求退出。启动设置只拥有程序路径，队员环境由独立私有入口拥有，不再读取到表单或编辑
+原生连接编辑已按 User 要求退出。启动设置拥有路径及通用变量，队员环境由独立私有入口拥有；不读取到表单或编辑
 原生地址、Key、连接方式和模型列表，不再观察账号或生成原生目录。移除入口不修改任何已有原生配置，
 原生 CLI 继续读取其文件、环境、认证与模型设置。
 
@@ -300,10 +302,11 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
 
 ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界 message。通用 ACP Host 还可以从
-精确白名单标量路径提取 Provider detail；当前只接受字符串 `error.data.error`，并在进入诊断或公开 failure
-前复用统一的路径、凭据、控制字符和长度清洗。对象、数组、其他 `error.data` 路径及完整原始对象一律忽略，
+精确白名单标量路径提取 Provider detail；接受字符串 `error.data`，或对象中的字符串 `error.data.error`，
+并在进入诊断或公开 failure 前复用统一的路径、凭据、控制字符和长度清洗。其他对象字段、非字符串值及完整原始对象一律忽略，
 不能由各 Adapter 自行扩展或把原始 `error.data` 交给 Renderer。Prompt activity 与 matching response 已证明
 输入 accepted 时，公开 failure 的 retryable 必须为 false，不能用 Provider 可重试分类覆盖 Core 的防重放门禁。
+字段与历史读取规则见 [Runtime Launch v71](../contracts/runtime-launch-and-verification-v71.md)。
 
 `runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
 权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为
@@ -584,7 +587,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
 [Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)。
 复用 Kimi Host 时从当前 AgentRun 的冻结配置设置 Session 模式，不继承原 Host 创建时的模式。
-Host＋队员环境按 [v59](../contracts/runtime-launch-and-verification-v59.md) 在进程创建时读取；保存配置不替换
+Host＋通用＋队员环境按 [v68](../contracts/runtime-launch-and-verification-v69.md) 在进程创建时读取；保存配置不替换
 当前 Host。会话重置通过既有 native binding 身份隔离，原生配置与协议兼容判断继续保留，不新增环境摘要。
 CodeBuddy 的显式模型通过 Host 启动参数 `--model` 选择，因此它参与进程兼容；Runtime-default
 不传该参数，Session/Turn 选项变化不因完整 Run 配置摘要而重启 Host。

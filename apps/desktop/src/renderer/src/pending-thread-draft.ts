@@ -39,8 +39,9 @@ export class PendingThreadDraftPersistence {
     return activatedThreads.get(this.client)?.has(threadId) ?? false
   }
 
-  async persist(draft: ThreadComposerDraftView): Promise<void> {
+  async persist(draft: ThreadComposerDraftView, onSaved?: () => void): Promise<void> {
     this.save(draft)
+    onSaved?.()
     if (this.isActivated(draft.threadId)) return
     const present = hasPendingThreadDraftInput(draft)
     if (this.acknowledged.get(draft.threadId) === present) return

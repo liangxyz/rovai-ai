@@ -8,8 +8,9 @@ import { Icon } from './MissionControls'
 import { UiText, uiAttribute } from './interface-language'
 
 /** Presentation only: the App coordinator still owns navigation and leave guards. */
-export function MobileSettingsLayout({ overview, section, appearance, menuOpen, triggerRef, onOpenMenu, onBack, onSectionChange, children }: {
+export function MobileSettingsLayout({ overview, section, appearance, menuOpen, triggerRef, onOpenMenu, onBack, onSectionChange, pendingMemoryCount = 0, children }: {
   overview: boolean
+  pendingMemoryCount?: number
   section: SettingsSection
   appearance: AppearanceSnapshot
   menuOpen: boolean
@@ -43,6 +44,7 @@ export function MobileSettingsLayout({ overview, section, appearance, menuOpen, 
           <h2 id={`mobile-settings-${group.key}`}>{uiAttribute(group.label)}</h2>
           <div className="settings-index-rows">{group.items.map(item => <button type="button" key={item.key} data-setting={item.key} onClick={() => onSectionChange(item.key)}>
             <NavigationIcon name={item.icon} /><span>{uiAttribute(item.label)}</span>
+            {item.key === 'memory' && pendingMemoryCount > 0 && <small>{pendingMemoryCount}</small>}
             {item.key === 'general' && <small><UiText zh={"新对话与会话"} /></small>}
             {item.key === 'appearance' && <small>{appearance.preference === 'system' ? uiAttribute("跟随系统") : appearance.resolvedTheme === 'night' ? uiAttribute("夜间") : uiAttribute("日间")}</small>}
             <Icon name="chevron-right" />

@@ -1244,3 +1244,223 @@ fn user_anchor_preview_resolves_first_valid_direct_reply() {
         assert!(unavailable.first_reply.is_none());
     }
 }
+
+// New owner: complete reply components, scoped traversal, bounded hydration and
+// tombstone continuity. Direct-reply preview cannot prove descendants or paging.
+#[test]
+fn reply_pages_follow_only_scoped_parent_links_and_hydrate_one_page() {
+    let (mut database, camp_id, _, _) = business_fixture();
+    for (id, sequence, parent) in [
+        ("reply-root", 100, None),
+        ("reply-a", 101, Some("reply-root")),
+        ("reply-b", 102, Some("reply-root")),
+        ("reply-c", 103, Some("reply-a")),
+        ("other-root", 104, None),
+        ("other-batch-reply", 105, Some("other-root")),
+    ] {
+        database.connection().execute("INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,
+          structured_content_json,content_digest,address_mode,addressed_agent_ids_json,reply_to_camp_message_id,created_at,updated_at)
+          VALUES (?1,?2,?3,'user','local_user',?1,?4,'sha256:reply','default','[]',?5,'2026-10-21','2026-10-21')",
+          params![id,camp_id,sequence,serde_json::to_string(&json!([{"kind":"text","text":id}])).unwrap(),parent]).unwrap();
+    }
+    let mut request: ReplyPageParams = serde_json::from_value(json!({
+      "threadId":camp_id,"messageId":"reply-c","limit":2,
+      "runAnchorMessageIds":["reply-root","reply-c","other-root"]
+    }))
+    .unwrap();
+    let changes = database.connection().total_changes();
+    let first = ReadModelService
+        .reply_page(&mut database, &request)
+        .unwrap();
+    assert_eq!(first.root_message_id.as_deref(), Some("reply-root"));
+    assert_eq!(first.reply_count, 3);
+    assert_eq!(
+        first
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["reply-root", "reply-a"]
+    );
+    assert_eq!(first.run_anchor_message_ids, ["reply-root", "reply-c"]);
+    assert!(!first.has_earlier && first.has_later);
+    request.sequence = 101;
+    let next = ReadModelService
+        .reply_page(&mut database, &request)
+        .unwrap();
+    assert_eq!(
+        next.messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["reply-b", "reply-c"]
+    );
+    assert!(next.has_earlier && !next.has_later);
+    request.sequence = 102;
+    request.before = true;
+    assert_eq!(
+        serde_json::to_value(
+            ReadModelService
+                .reply_page(&mut database, &request)
+                .unwrap()
+        )
+        .unwrap()["messages"],
+        serde_json::to_value(first).unwrap()["messages"]
+    );
+    assert_eq!(database.connection().total_changes(), changes);
+
+    // Structural parents survive unavailable content; withdrawal never leaks text.
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET tombstoned_at='2026-10-21' WHERE id='reply-a'",
+            [],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET recall_state='withdrawn' WHERE id='reply-b'",
+            [],
+        )
+        .unwrap();
+    request.sequence = 0;
+    request.before = false;
+    request.limit = 100;
+    let removed = ReadModelService
+        .reply_page(&mut database, &request)
+        .unwrap();
+    assert_eq!(
+        removed
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["reply-root", "reply-b", "reply-c"]
+    );
+    assert!(removed.messages[1].withdrawn);
+    assert!(!removed.messages[1].body.contains("reply-b"));
+    // A corrupt forward parent/cycle terminates at the same root.
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET reply_to_camp_message_id='reply-c' WHERE id='reply-root'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        ReadModelService
+            .reply_page(&mut database, &request)
+            .unwrap()
+            .messages
+            .len(),
+        3
+    );
+    for missing in ["reply-a", "missing-or-other-thread"] {
+        request.message_id = missing.into();
+        let result = ReadModelService
+            .reply_page(&mut database, &request)
+            .unwrap();
+        assert!(!result.source_available && result.messages.is_empty());
+    }
+    request.message_id = "reply-c".into();
+    // The relationship query cannot inspect batches, turns, events or evidence.
+    // Hydration retains the shared per-page source-model/withdrawal metadata reads.
+    database
+        .connection()
+        .authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name:
+                    "agent_run_input" | "camp_turn" | "event_log" | "agent_run_execution_evidence",
+                ..
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+    let chain_count = database
+        .connection()
+        .prepare(replies::REPLY_CHAIN_SQL)
+        .unwrap()
+        .query_map(params![camp_id, "reply-c"], |row| row.get::<_, String>(0))
+        .unwrap()
+        .count();
+    assert_eq!(chain_count, 4);
+    database
+        .connection()
+        .authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name: "event_log" | "agent_run_execution_evidence",
+                ..
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+    ReadModelService
+        .reply_page(&mut database, &request)
+        .unwrap();
+    database
+        .connection()
+        .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+    let plan = database
+        .connection()
+        .prepare(&format!("EXPLAIN QUERY PLAN {}", replies::REPLY_CHAIN_SQL))
+        .unwrap()
+        .query_map(params![camp_id, "reply-c"], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+    assert!(plan.contains("camp_message_direct_reply_idx (camp_id=? AND reply_to_camp_message_id=? AND sequence>?)"), "{plan}");
+    let steps = |database: &Database| {
+        let mut query = database
+            .connection()
+            .prepare(replies::REPLY_CHAIN_SQL)
+            .unwrap();
+        let count = query
+            .query_map(params![camp_id, "reply-c"], |r| r.get::<_, String>(0))
+            .unwrap()
+            .count();
+        (count, query.get_status(rusqlite::StatementStatus::VmStep))
+    };
+    let baseline = steps(&database);
+    database.connection().execute("WITH RECURSIVE n(i) AS (VALUES(1000) UNION ALL SELECT i+1 FROM n WHERE i<11000)
+      INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,structured_content_json,content_digest,address_mode,addressed_agent_ids_json,created_at,updated_at)
+      SELECT 'reply-unrelated-'||i,?1,i,'user','local_user','not loaded','[]','sha256:unrelated','default','[]','2026-10-21','2026-10-21' FROM n", [&camp_id]).unwrap();
+    let unrelated = steps(&database);
+    assert_eq!(unrelated.0, baseline.0);
+    // Index end/seek bookkeeping can change by a few instructions; 10,001
+    // unrelated messages must not introduce work proportional to their count.
+    assert!(
+        unrelated.1 <= baseline.1 + 32,
+        "{baseline:?} -> {unrelated:?}"
+    );
+    eprintln!(
+        "reply_chain unrelated=10001 vm_steps_before={} vm_steps_after={}",
+        baseline.1, unrelated.1
+    );
+    // A long component is traversed by identities; hydration remains one bounded page.
+    database
+        .connection()
+        .execute(
+            "UPDATE camp_message SET reply_to_camp_message_id='reply-c' WHERE sequence>=1000",
+            [],
+        )
+        .unwrap();
+    let long = ReadModelService
+        .reply_page(&mut database, &request)
+        .unwrap();
+    assert_eq!(long.reply_count, 10003);
+    assert_eq!(long.messages.len(), 100);
+    assert!(long.has_later);
+    let long_steps = steps(&database);
+    assert_eq!(long_steps.0, 10005);
+    // One indexed child lookup per node, not repeated scans of the component.
+    assert!(long_steps.1 < 1_000_000, "{long_steps:?}");
+    eprintln!(
+        "reply_chain nodes={} vm_steps={} hydrated={}",
+        long_steps.0,
+        long_steps.1,
+        long.messages.len()
+    );
+}

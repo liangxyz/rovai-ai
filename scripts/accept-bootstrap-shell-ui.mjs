@@ -108,7 +108,7 @@ try {
     && window.rovai.supervisor.getSnapshot().then((snapshot) => snapshot.fullCoreState === 'blocked')`, 45_000)
   const locallyReadLanguage = await evaluate(running.cdp,
     `window.rovai.desktopSession.getInterfaceLanguage()`, true)
-  assert(locallyReadLanguage === 'en', `Bootstrap language read did not return the saved preference: ${locallyReadLanguage}`)
+  assert(locallyReadLanguage.interfaceLanguage === 'en' && locallyReadLanguage.interfaceLanguagePreference === 'en', `Bootstrap language read did not return the saved preference: ${locallyReadLanguage}`)
   await setTheme(running.cdp, 'day')
   await wait(350)
   const englishBlocked = await inspectBootstrap(running.cdp)

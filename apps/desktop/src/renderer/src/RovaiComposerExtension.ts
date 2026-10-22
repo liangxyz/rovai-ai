@@ -46,6 +46,7 @@ import {
   ROVAI_COMPOSER_REPLACE_TAG
 } from './composer-draft-sync'
 import { ROVAI_COMPOSER_CLIPBOARD_MIME } from './composer-document'
+import { isLongTextPaste } from './long-text-paste'
 
 export interface ComposerExtensionRuntime<Result = unknown> {
   sync: ComposerDraftSync<Result>
@@ -54,6 +55,7 @@ export interface ComposerExtensionRuntime<Result = unknown> {
   shouldSubmitEnter?(event: KeyboardEvent | null): boolean
   backspaceAtStart(): void
   pasteFiles(files: File[]): void
+  pasteLongText?(text: string): boolean
   plainText(document: ComposerDocument): string
   recoverClipboard(value: string): ComposerDocument | null
   activateAtom(node: ComposerAtomNode, trigger: HTMLElement, focusPanel: boolean): void
@@ -260,14 +262,19 @@ export const ComposerClipboardExtension = defineExtension({
         const structured = clipboard.getData(ROVAI_COMPOSER_CLIPBOARD_MIME)
         const document = structured ? runtime.recoverClipboard(structured) : null
         event.preventDefault()
+        const hasAtoms = document?.segments.some(segment => segment.kind === 'atom') ?? false
+        const plainText = document
+          ? runtime.plainText(document)
+          : clipboard.getData('text/plain') || htmlClipboardToPlainText(clipboard.getData('text/html'))
+        if (!hasAtoms && runtime.pasteLongText && isLongTextPaste(plainText) && runtime.pasteLongText(plainText)) {
+          return true
+        }
         $addUpdateTag(PASTE_TAG)
         $restoreComposerAtomSelection()
         if (document) {
           $insertComposerDocument(document)
         } else {
           const selection = $getSelection()
-          const plainText = clipboard.getData('text/plain')
-            || htmlClipboardToPlainText(clipboard.getData('text/html'))
           if ($isRangeSelection(selection)) selection.insertRawText(plainText)
         }
         return true

@@ -5,6 +5,8 @@ use super::*;
 #[serde(rename_all = "camelCase")]
 pub(super) struct BootstrapContents {
     pub session_charter: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_guidance: Option<String>,
     pub platform_skills: String,
     pub memory_entrypoint: String,
     pub observed_memory_revisions: Vec<Value>,
@@ -44,6 +46,11 @@ impl BootstrapContents {
             omitted.join("; ")
         );
         Ok(Self {
+            team_guidance: if snapshot.invocation_kind == "single_chat" {
+                None
+            } else {
+                crate::teams::thread_guidance(connection, &snapshot.camp_id)?
+            },
             session_charter,
             platform_skills: format!(
                 "[ROVAI_PLATFORM_SKILLS]\n{}\n[/ROVAI_PLATFORM_SKILLS]",
@@ -59,6 +66,7 @@ impl BootstrapContents {
         render_session_bootstrap(
             &self.session_charter,
             member_identity,
+            self.team_guidance.as_deref(),
             Some(&self.platform_skills),
             &self.memory_entrypoint,
         )

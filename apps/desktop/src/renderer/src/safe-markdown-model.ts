@@ -1,4 +1,5 @@
 export * from '../../shared/execution-presentation/safe-markdown-model'
+import type { RawHtmlPolicy } from '../../shared/execution-presentation/safe-markdown-model'
 import remarkGfm from 'remark-gfm'
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkCjkFriendlyStrikethrough from 'remark-cjk-friendly-gfm-strikethrough/parseOnly'
@@ -167,12 +168,13 @@ function isMarkdownFileReference(node: MarkdownNode): boolean {
     && Boolean(parseFileReference(node.url))
 }
 
-function appendInlineFlowTokens(node: MarkdownNode, tokens: InlineFlowToken[]): void {
+function appendInlineFlowTokens(node: MarkdownNode, tokens: InlineFlowToken[], rawHtmlPolicy: RawHtmlPolicy): void {
   if (isMarkdownFileReference(node)) {
     tokens.push({ kind: 'fileReference', node })
     return
   }
-  if ((node.type === 'text' || node.type === 'inlineCode') && typeof node.value === 'string') {
+  if ((node.type === 'text' || node.type === 'inlineCode' || node.type === 'html' && rawHtmlPolicy === 'text')
+    && typeof node.value === 'string') {
     if (node.value) tokens.push({ kind: 'text', value: node.value })
     return
   }
@@ -180,10 +182,10 @@ function appendInlineFlowTokens(node: MarkdownNode, tokens: InlineFlowToken[]): 
     tokens.push({ kind: 'boundary' })
     return
   }
-  // SafeMarkdown omits raw HTML and images in message mode, so neither creates
-  // a visible character boundary for the surrounding rendered prose.
+  // Images, definitions and dropped HTML do not contribute visible neighbors.
+  // Literal HTML above affects spacing only; its contents are never reparsed.
   if (omittedNodeTypes.has(String(node.type))) return
-  for (const child of markdownNodeChildren(node)) appendInlineFlowTokens(child, tokens)
+  for (const child of markdownNodeChildren(node)) appendInlineFlowTokens(child, tokens, rawHtmlPolicy)
 }
 
 function firstCodePoint(value: string): string {
@@ -207,12 +209,13 @@ function inlineTokenTouchesBodyText(token: InlineFlowToken | undefined, edge: 's
 
 export function visitMarkdownFileReferences(
   root: MarkdownNode,
-  visitor: (node: MarkdownNode, spacing: FileReferenceInlineSpacing) => void
+  visitor: (node: MarkdownNode, spacing: FileReferenceInlineSpacing) => void,
+  rawHtmlPolicy: RawHtmlPolicy = 'text'
 ): void {
   const visitBlocks = (node: MarkdownNode): void => {
     if (inlineFlowNodeTypes.has(String(node.type))) {
       const tokens: InlineFlowToken[] = []
-      appendInlineFlowTokens(node, tokens)
+      appendInlineFlowTokens(node, tokens, rawHtmlPolicy)
       for (const [index, token] of tokens.entries()) {
         if (token.kind !== 'fileReference') continue
         visitor(token.node, {

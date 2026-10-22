@@ -123,6 +123,10 @@ describe('console transport', () => {
     expect(scoped.push('event: invalidate\ndata: {"messages":[{"threadId":"t","indexChanged":false,"throughGlobalSequence":42}]}\n\n')).toBe(true)
     expect(scoped.takeChanges()).toEqual([{ messages: [{ threadId: 't', indexChanged: false, throughGlobalSequence: 42 }] }])
     expect(scoped.takeChanges()).toEqual([])
+    scoped.push('event: invalidate\ndata: {"notificationsChanged":true,"private":"ignored"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [], notificationsChanged: true }])
+    scoped.push('event: invalidate\ndata: {"notificationsChanged":"true"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [] }])
   })
 
   it('retains an unknown command across reauthentication and only looks up its original receipt', async () => {

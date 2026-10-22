@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.md");
 const SINGLE_CHAT_SESSION_CHARTER: &str = include_str!("../resources/charter-rovai-single-chat.md");
+const NATIVE_BACKGROUND_COMPLETION_RULE: &str = "Do not background required finite commands or native subagents. If a tool backgrounds them, collect results and complete authorized follow-up before your final response. Do not assume background completion will resume your work.";
 const SINGLE_CHAT_GUIDANCE: &str = include_str!("../resources/single-chat-guidance-v3.json");
 const CHANNEL_FILE_DELIVERY_GUIDANCE: &str = "This Thread is connected to an external channel. Local file paths and Runtime image previews are not delivered there; when the recipient needs the file itself, include `--file <path>` in the corresponding `rovai send` message.";
 // Historical ContextManifest v22-v25 rows remain readable after the v1.60
@@ -271,6 +272,7 @@ pub struct PreparedSessionBootstrap {
 
 #[derive(Debug, Clone)]
 struct PreparedBootstrapEvidence {
+    team_guidance: Option<String>,
     evidence_id: String,
     session_charter: String,
     platform_skills: Option<String>,
@@ -3181,8 +3183,25 @@ fn build_session_charter(
     has_active_file_delivery_binding: bool,
     is_mission: bool,
 ) -> Result<String> {
+    let with_completion_rule = |mut charter: String| -> Result<String> {
+        if matches!(
+            run_snapshot_adapter_kind(snapshot)?,
+            AdapterKind::ClaudeCodeCli | AdapterKind::CodebuddyCli
+        ) {
+            let authority = charter
+                .lines()
+                .find(|line| line.starts_with("- Follow current user instructions;"))
+                .context("Session Charter user instruction rule is missing")?;
+            let position = charter.find(authority).unwrap() + authority.len();
+            charter.insert_str(
+                position,
+                &format!("\n- {NATIVE_BACKGROUND_COMPLETION_RULE}"),
+            );
+        }
+        Ok(charter)
+    };
     if snapshot.invocation_kind == "single_chat" {
-        return Ok(SINGLE_CHAT_SESSION_CHARTER.trim().to_string());
+        return with_completion_rule(SINGLE_CHAT_SESSION_CHARTER.trim().to_string());
     }
     let file_guidance = if has_active_file_delivery_binding {
         format!("\n- {CHANNEL_FILE_DELIVERY_GUIDANCE}")
@@ -3194,7 +3213,7 @@ fn build_session_charter(
          - The User owns the Thread objective. The User or current Default Lead coordinates member responsibilities.\n\
          - Follow current user instructions; preserve existing user work. Prefer current evidence to Memory, history and cached context.\n\
          - Use `rovai thread read` only for needed, missing context. History boundaries do not prove reading or completion.";
-    Ok(format!(
+    with_completion_rule(format!(
         "Rovai-ai Session Charter\n\n{authority_guidance}\n\
          - When no work can proceed without another Agent's reply, end the Run and resume on reply. Do not poll history or execution status.\n\n{}{}{}",
         BUILTIN_CLI_CHARTER.trim(),
@@ -3283,7 +3302,10 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         {
             anyhow::bail!("Native Session Bootstrap evidence Blob digest mismatch");
         }
-        if contract_version == NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION {
+        if matches!(
+            contract_version.as_str(),
+            "native_session_bootstrap_v5" | NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION
+        ) {
             let section = platform_skills
                 .as_deref()
                 .context("new Bootstrap platform Skills are missing")?;
@@ -3297,6 +3319,8 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
                 "unsupported frozen Bootstrap Skills evidence"
             );
         }
+        let team_guidance =
+            frozen_team_guidance(database.connection(), snapshot, &contract_version)?;
         return Ok(PreparedBootstrapEvidence {
             evidence_id,
             session_charter: charter,
@@ -3307,7 +3331,9 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
                 &charter_digest,
                 platform_digest.as_deref(),
                 &entrypoint_digest,
+                team_guidance.as_deref(),
             )?,
+            team_guidance,
             native_binding_id: native_binding_id.to_string(),
             native_binding_generation,
             delivery_mode,
@@ -3325,6 +3351,7 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             snapshot,
         )?,
     };
+    let team_guidance = contents.team_guidance;
     let charter = contents.session_charter;
     let entrypoint = contents.memory_entrypoint;
     let observed = contents.observed_memory_revisions;
@@ -3420,7 +3447,9 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             &charter_digest,
             Some(&platform_digest),
             &entrypoint_digest,
+            team_guidance.as_deref(),
         )?,
+        team_guidance,
         native_binding_id: native_binding_id.to_string(),
         native_binding_generation,
         delivery_mode,
@@ -3439,6 +3468,7 @@ fn format_session_bootstrap_for_snapshot(
     let payload = render_session_bootstrap(
         &evidence.session_charter,
         &member_identity,
+        evidence.team_guidance.as_deref(),
         evidence.platform_skills.as_deref(),
         &evidence.memory_entrypoint,
     )?;
@@ -3496,6 +3526,7 @@ fn load_latest_member_identity<R: ContextReadConnection>(
 fn render_session_bootstrap(
     charter: &str,
     member_identity: &MemberIdentityBootstrapProjection,
+    team_guidance: Option<&str>,
     platform_skills: Option<&str>,
     memory_entrypoint: &str,
 ) -> Result<String> {
@@ -3504,6 +3535,11 @@ fn render_session_bootstrap(
         charter.trim(),
         serde_json::to_string_pretty(member_identity)?,
     );
+    if let Some(guidance) = team_guidance.filter(|text| !text.is_empty()) {
+        bootstrap.push_str(&format!(
+            "\n\n[TEAM_GUIDANCE]\n{guidance}\n[/TEAM_GUIDANCE]"
+        ));
+    }
     if let Some(platform_skills) = platform_skills {
         bootstrap.push_str("\n\n");
         bootstrap.push_str(platform_skills);
@@ -3568,18 +3604,37 @@ fn bootstrap_evidence_digest_for(
     charter_digest: &str,
     platform_digest: Option<&str>,
     memory_entrypoint_digest: &str,
+    team_guidance: Option<&str>,
 ) -> Result<String> {
     match contract_version {
         "native_session_bootstrap_v4" => Ok(bootstrap_evidence_digest(
             charter_digest,
             memory_entrypoint_digest,
         )),
-        NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION => Ok(sha256_text(&format!(
+        "native_session_bootstrap_v5" => Ok(sha256_text(&format!(
             "{contract_version}\n{charter_digest}\n{}\n{memory_entrypoint_digest}",
+            platform_digest.context("Bootstrap platform digest is missing")?
+        ))),
+        NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION => Ok(sha256_text(&format!(
+            "{contract_version}\n{charter_digest}\n{}\n{}\n{memory_entrypoint_digest}",
+            sha256_text(team_guidance.unwrap_or("")),
             platform_digest.context("Bootstrap platform digest is missing")?
         ))),
         _ => anyhow::bail!("unsupported Native Session Bootstrap contract"),
     }
+}
+
+fn frozen_team_guidance(
+    connection: &rusqlite::Connection,
+    snapshot: &RunSnapshot,
+    contract: &str,
+) -> Result<Option<String>> {
+    if contract != NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION
+        || snapshot.invocation_kind == "single_chat"
+    {
+        return Ok(None);
+    }
+    crate::teams::thread_guidance(connection, &snapshot.camp_id)
 }
 
 fn bootstrap_required_for_snapshot<R: ContextReadConnection>(
@@ -7435,11 +7490,13 @@ fn load_existing_manifest(
         [&row.7],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
+    let team_guidance = frozen_team_guidance(database.connection(), snapshot, &bootstrap_contract)?;
     let bootstrap_digest = bootstrap_evidence_digest_for(
         &bootstrap_contract,
         &row.9,
         platform_digest.as_deref(),
         &row.11,
+        team_guidance.as_deref(),
     )?;
     let bootstrap_required = requires_new_native_session
         || snapshot.native_charter_digest.as_deref() != Some(bootstrap_digest.as_str());
@@ -7466,6 +7523,7 @@ fn load_existing_manifest(
         let bootstrap = render_session_bootstrap(
             &charter,
             &member_identity,
+            team_guidance.as_deref(),
             platform_section.as_deref(),
             &entrypoint,
         )?;
@@ -8114,7 +8172,9 @@ fn load_delivery_target(
                    runtime_input_delivery.bootstrap_redelivery_revision,
                    context_manifest.mission_details_version,
                    bootstrap.contract_version,
-                   platform.section_digest, context_manifest.id, context_manifest.source_delivery_id, runtime_input_delivery.input_sequence
+                   platform.section_digest, context_manifest.id, context_manifest.source_delivery_id, runtime_input_delivery.input_sequence,
+                   CASE WHEN agent_run.invocation_kind <> 'single_chat' AND bootstrap.contract_version='native_session_bootstrap_v6'
+                       THEN (SELECT guidance FROM thread_team_bootstrap WHERE camp_id=COALESCE(agent_run.camp_id,camp_turn.camp_id)) END
             FROM runtime_input_delivery
             JOIN context_manifest
               ON context_manifest.id = runtime_input_delivery.context_manifest_id
@@ -8146,6 +8206,7 @@ fn load_delivery_target(
                         &row.get::<_, String>(8)?,
                         row.get::<_, Option<String>>(18)?.as_deref(),
                         &row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(22)?.as_deref(),
                     )
                     .map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -9057,7 +9118,8 @@ mod slow_tests {
             working_principles: String::new(),
             growth_topic: String::new(),
         };
-        let formatted = render_session_bootstrap("charter", &identity, None, "entrypoint").unwrap();
+        let formatted =
+            render_session_bootstrap("charter", &identity, None, None, "entrypoint").unwrap();
         assert_eq!(
             formatted,
             "[SESSION_CHARTER]\ncharter\n[/SESSION_CHARTER]\n\n\
@@ -9065,6 +9127,58 @@ mod slow_tests {
 \"teamRole\": \"\",\n  \"professionalResponsibilities\": \"line one\\nline two\",\n  \
 \"personalityTraits\": [],\n  \"workingPrinciples\": \"\",\n  \"growthTopic\": \"\"\n}\n\
 [/MEMBER_IDENTITY]\n\n[MEMORY_ENTRYPOINT]\nentrypoint\n[/MEMORY_ENTRYPOINT]"
+        );
+        let guidance = "简洁回答。\n先验证关键假设。";
+        let with_guidance = render_session_bootstrap(
+            "charter",
+            &identity,
+            Some(guidance),
+            Some("[ROVAI_PLATFORM_SKILLS]\n{}\n[/ROVAI_PLATFORM_SKILLS]"),
+            "entrypoint",
+        )
+        .unwrap();
+        assert!(with_guidance.contains(&format!("[/MEMBER_IDENTITY]\n\n[TEAM_GUIDANCE]\n{guidance}\n[/TEAM_GUIDANCE]\n\n[ROVAI_PLATFORM_SKILLS]")));
+        assert_eq!(with_guidance.matches("[TEAM_GUIDANCE]").count(), 1);
+        assert_eq!(
+            render_session_bootstrap("charter", &identity, Some(""), None, "entrypoint").unwrap(),
+            formatted
+        );
+        let legacy = bootstrap_evidence_digest_for(
+            "native_session_bootstrap_v5",
+            "charter",
+            Some("skills"),
+            "memory",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy,
+            bootstrap_evidence_digest_for(
+                "native_session_bootstrap_v5",
+                "charter",
+                Some("skills"),
+                "memory",
+                Some(guidance)
+            )
+            .unwrap()
+        );
+        assert_ne!(
+            bootstrap_evidence_digest_for(
+                NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
+                "charter",
+                Some("skills"),
+                "memory",
+                None
+            )
+            .unwrap(),
+            bootstrap_evidence_digest_for(
+                NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
+                "charter",
+                Some("skills"),
+                "memory",
+                Some(guidance)
+            )
+            .unwrap()
         );
         for mode in [
             CharterDeliveryMode::NativeAppend,
@@ -9099,7 +9213,7 @@ mod slow_tests {
             growth_topic: String::new(),
         };
         let formatted =
-            render_session_bootstrap("single chat charter", &identity, None, "").unwrap();
+            render_session_bootstrap("single chat charter", &identity, None, None, "").unwrap();
         assert!(formatted.contains("[SESSION_CHARTER]"));
         assert!(formatted.contains("[MEMBER_IDENTITY]"));
         assert!(!formatted.contains("[MEMORY_ENTRYPOINT]"));
@@ -11205,6 +11319,17 @@ mod slow_tests {
             if expected_version >= 36 {
                 fixture.database.connection().execute("UPDATE camp_message SET author_type='agent',author_id='agent_2' WHERE id=(SELECT message_id FROM agent_run_input WHERE agent_run_id=?1)", [&fixture.run_id]).unwrap();
                 freeze_fixture_claim(&mut fixture);
+                if expected_version == 38 {
+                    // Construct an actual historical claim; the current fixture now claims v40.
+                    let connection = fixture.database.connection();
+                    let guard: String = connection.query_row("SELECT sql FROM sqlite_master WHERE name='agent_run_input_context_projection_immutable'", [], |row| row.get(0)).unwrap();
+                    let tx = connection.unchecked_transaction().unwrap();
+                    tx.execute_batch("DROP TRIGGER agent_run_input_context_projection_immutable")
+                        .unwrap();
+                    tx.execute("UPDATE agent_run_input SET context_manifest_version=38 WHERE agent_run_id=?1", [&fixture.run_id]).unwrap();
+                    tx.execute_batch(&guard).unwrap();
+                    tx.commit().unwrap();
+                }
                 if expected_version == 36 {
                     let mut claimed = claim::load(fixture.database.connection(), &fixture.run_id)
                         .unwrap()
@@ -11520,7 +11645,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             (manifest_version, formatter_version, facts_version),
-            (39, 39, 10)
+            (40, 40, 11)
         );
         assert_eq!(profile_json, None);
         assert_eq!(
@@ -13470,6 +13595,7 @@ mod slow_tests {
     #[test]
     fn newly_bound_session_bootstraps_on_its_current_generation() {
         let mut fixture = fixture();
+        fixture.database.connection().execute("INSERT INTO thread_team_bootstrap(camp_id,guidance) VALUES(?1,'固定指引：先验证，再交付。')", [&fixture.camp_id]).unwrap();
         // Worst JSON expansion: each valid scalar becomes six serialized bytes.
         let long_responsibilities = "\0".repeat(10_000);
         fixture
@@ -13500,6 +13626,22 @@ mod slow_tests {
         let ContextMaterialization::Ready(prepared) = materialized else {
             panic!("newly bound Session should materialize without another generation")
         };
+        assert!(
+            prepared
+                .runtime_payload
+                .contains("[TEAM_GUIDANCE]\n固定指引：先验证，再交付。\n[/TEAM_GUIDANCE]")
+        );
+        assert!(!prepared.rendered_payload.contains("TEAM_GUIDANCE"));
+        assert!(
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE thread_team_bootstrap SET guidance='changed' WHERE camp_id=?1",
+                    [&fixture.camp_id]
+                )
+                .is_err()
+        );
         let full_json = serde_json::to_string(&long_responsibilities).unwrap();
         assert!(prepared.runtime_payload.contains(&full_json));
         assert_eq!(
@@ -13871,6 +14013,7 @@ mod slow_tests {
     #[test]
     fn single_chat_materializes_conversation_input_with_a_memory_free_bootstrap() {
         let mut fixture = fixture();
+        fixture.database.connection().execute("INSERT INTO thread_team_bootstrap(camp_id,guidance) VALUES(?1,'固定指引：先验证，再交付。')", [&fixture.camp_id]).unwrap();
         send_explicit_public_output(
             &mut fixture,
             "shared-sender-before-claim",
@@ -14058,6 +14201,7 @@ mod slow_tests {
         );
         assert!(prepared.runtime_payload.starts_with("[SESSION_CHARTER]\n"));
         assert!(prepared.runtime_payload.contains("[MEMBER_IDENTITY]"));
+        assert!(!prepared.runtime_payload.contains("[TEAM_GUIDANCE]"));
         assert!(!prepared.runtime_payload.contains("[MEMORY_ENTRYPOINT]"));
         assert!(prepared.rendered_payload.contains("只检查当前单聊输入"));
         assert!(prepared.rendered_payload.contains("[SINGLE_CHAT_GUIDANCE]"));
@@ -14758,10 +14902,22 @@ mod slow_tests {
         for adapter_kind in AdapterKind::ALL {
             snapshot.effective_config["runtimeAdapter"] = json!(adapter_kind.as_str());
             let other_charter = build_session_charter(&snapshot, false, false).unwrap();
-            assert_eq!(other_charter, charter, "{adapter_kind:?}");
+            let expected = if matches!(
+                adapter_kind,
+                AdapterKind::ClaudeCodeCli | AdapterKind::CodebuddyCli
+            ) {
+                charter.replacen(
+                    "\n- Use `rovai thread read`",
+                    &format!("\n- {NATIVE_BACKGROUND_COMPLETION_RULE}\n- Use `rovai thread read`"),
+                    1,
+                )
+            } else {
+                charter.clone()
+            };
+            assert_eq!(other_charter, expected, "{adapter_kind:?}");
             assert_eq!(
                 build_session_charter(&snapshot, true, false).unwrap(),
-                format!("{charter}\n- {CHANNEL_FILE_DELIVERY_GUIDANCE}"),
+                format!("{expected}\n- {CHANNEL_FILE_DELIVERY_GUIDANCE}"),
                 "{adapter_kind:?}"
             );
         }
@@ -14919,6 +15075,14 @@ mod slow_tests {
                 for mission in [false, true] {
                     snapshot.invocation_kind = "batch".into();
                     let common = build_session_charter(&snapshot, channel, mission).unwrap();
+                    assert_eq!(
+                        common.matches(NATIVE_BACKGROUND_COMPLETION_RULE).count(),
+                        usize::from(matches!(
+                            adapter,
+                            AdapterKind::ClaudeCodeCli | AdapterKind::CodebuddyCli
+                        )),
+                        "{adapter:?}/{channel}/{mission}"
+                    );
                     for invocation in ["direct", "a2a", "gather_completion"] {
                         snapshot.invocation_kind = invocation.into();
                         assert_eq!(
@@ -14944,9 +15108,31 @@ mod slow_tests {
             "
         );
         snapshot.invocation_kind = "single_chat".to_string();
-        for channel in [false, true] {
+        assert_eq!(
+            NATIVE_BACKGROUND_COMPLETION_RULE,
+            "Do not background required finite commands or native subagents. If a tool backgrounds them, collect results and complete authorized follow-up before your final response. Do not assume background completion will resume your work."
+        );
+        for (adapter, channel) in AdapterKind::ALL
+            .into_iter()
+            .flat_map(|adapter| [false, true].map(move |channel| (adapter, channel)))
+        {
+            snapshot.effective_config["runtimeAdapter"] = json!(adapter.as_str());
             let single_chat_charter = build_session_charter(&snapshot, channel, true).unwrap();
-            assert_eq!(single_chat_charter, SINGLE_CHAT_SESSION_CHARTER.trim());
+            let expected = if matches!(
+                adapter,
+                AdapterKind::ClaudeCodeCli | AdapterKind::CodebuddyCli
+            ) {
+                SINGLE_CHAT_SESSION_CHARTER.trim().replacen(
+                    "\n- Do not infer missing content;",
+                    &format!(
+                        "\n- {NATIVE_BACKGROUND_COMPLETION_RULE}\n- Do not infer missing content;"
+                    ),
+                    1,
+                )
+            } else {
+                SINGLE_CHAT_SESSION_CHARTER.trim().to_string()
+            };
+            assert_eq!(single_chat_charter, expected);
             assert!(!single_chat_charter.contains("Rovai Mission Contract"));
             assert!(!single_chat_charter.contains(CHANNEL_FILE_DELIVERY_GUIDANCE));
         }

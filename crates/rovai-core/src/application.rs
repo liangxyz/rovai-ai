@@ -3,7 +3,7 @@ mod steer;
 use execution_drivers::*;
 use rusqlite::OptionalExtension;
 mod config;
-mod conversation_preferences;
+use rovai_core::creation_preferences;
 mod mission;
 mod transport;
 mod web_commands;
@@ -236,9 +236,11 @@ use rovai_core::{
         NetworkRecoveryRegistration, NetworkRecoveryRegistrationOutcome, classify_network_failure,
     },
     notification::{
-        AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
-        ClearNotificationEpisodeCommand, MarkAllNotificationEpisodesReadCommand,
-        NotificationEpisodeFilter, NotificationEpisodeService, UpdateNotificationPreferenceCommand,
+        AcknowledgeNotificationEpisodeCommand, AcknowledgeThreadInterruptionsCommand,
+        AcknowledgeVisibleNotificationSourcesCommand, ClearNotificationEpisodeCommand,
+        MarkAllNotificationEpisodesReadCommand, NotificationEpisodeFilter,
+        NotificationEpisodeService, NotificationInterruptionReader,
+        NotificationThreadInterruptionsParams, UpdateNotificationPreferenceCommand,
     },
     planned_shutdown::{
         ActiveExecutionKey, ActiveExecutionSnapshot, ExecutionLaunchPermit,
@@ -495,6 +497,14 @@ fn installed_request_dispatch_test_barrier(token: &str) -> Result<RequestDispatc
         .filter(|barrier| barrier.token == token)
         .cloned()
         .context("request dispatch test barrier is not installed")
+}
+
+#[cfg(test)]
+pub(crate) async fn wait_for_pasted_text_unlink_test_barrier(id: &str) {
+    if let Ok(barrier) = installed_request_dispatch_test_barrier(id) {
+        barrier.entered.notify_one();
+        barrier.release.notified().await;
+    }
 }
 
 #[cfg(test)]
@@ -831,6 +841,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.modelCatalog.open"
             | "workspaces.inspect"
             | "camp.messages.send"
+            | "host.upload.removePastedText"
             | "camp.messages.withdraw"
             | "userAutomation.camp.send"
             | "automations.schedulerControl"
@@ -868,6 +879,7 @@ fn request_uses_independent_read_queue(method: &str) -> bool {
             | "navigation.camps"
             | "navigation.groupCamps"
             | "navigation.findCamp"
+            | "notifications.threadInterruptions"
     )
 }
 
@@ -1311,10 +1323,14 @@ struct SelectedWorkspaceParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateThreadParams {
+    #[serde(default)]
+    team: Option<rovai_core::teams::TeamSelection>,
     command_id: String,
     name: Option<String>,
     workspace: Option<SelectedWorkspaceParams>,
+    #[serde(default)]
     member_agent_ids: Vec<String>,
+    #[serde(default)]
     default_lead_agent_id: String,
     collaboration_mode: ThreadCollaborationMode,
     #[serde(default)]
@@ -2415,6 +2431,9 @@ struct Core {
     execution_wake: crate::execution_wake::ExecutionWake,
     non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Arc<Mutex<Database>>,
+    // Always acquire before database; pure-text publication bypasses this guard.
+    pasted_text_operations: Mutex<()>,
+    notification_interruption_reader: Mutex<NotificationInterruptionReader>,
     subsystems: CoreSubsystems,
     subsystem_initialization: Mutex<SubsystemInitialization>,
     removed_skill_project_roots: RemovedSkillProjectRoots,
@@ -4811,6 +4830,9 @@ impl Core {
         search: Arc<RuntimeSearchEnvironment>,
     ) -> Result<RuntimeCheckOutcome> {
         let kind = AdapterKind::Pi;
+        search
+            .startup_configuration(kind)
+            .ensure_environment_available()?;
         let service = AgentProfileService::default();
         let (initial, locator) = {
             let database = self.database.lock().await;
@@ -4941,6 +4963,9 @@ impl Core {
         search: Arc<RuntimeSearchEnvironment>,
         target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
     ) -> Result<Option<RuntimeCheckOutcome>> {
+        search
+            .startup_configuration(kind)
+            .ensure_environment_available()?;
         let service = AgentProfileService::default();
         let (installation, verified_identity) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
@@ -5198,6 +5223,7 @@ impl Core {
                     kind,
                     rovai_core::runtime_startup::RuntimeStartupConfiguration {
                         custom_api_snapshot: None,
+                        common_environment_unavailable: false,
                         program_path: Some(
                             existing_entrypoint_locator
                                 .as_ref()
@@ -7884,6 +7910,54 @@ impl Core {
                     rovai_core::draft_client::resolve_editor(&database, resume)?,
                 )?)
             }
+            "host.upload.pastedTextRoot" => {
+                let intent: rovai_core::web_upload::UploadIntent =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(json!(rovai_core::web_upload::pasted_text_root(
+                    &database,
+                    &request.client,
+                    &intent
+                )?))
+            }
+            "host.upload.removePastedText" | "host.upload.discardPastedText" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Remove {
+                    thread_id: String,
+                    attachment_ref_ids: Vec<String>,
+                }
+                let params: Remove = serde_json::from_value(request.params.clone())?;
+                anyhow::ensure!(
+                    params.attachment_ref_ids.len() <= 10,
+                    "too many attachment references"
+                );
+                if request.method == "host.upload.discardPastedText" {
+                    let database = self.database.lock().await;
+                    rovai_core::web_upload::discard_pasted_text(
+                        &database,
+                        &request.client,
+                        &params.thread_id,
+                        &params.attachment_ref_ids,
+                    )?;
+                    Ok(json!({"released": true}))
+                } else {
+                    anyhow::ensure!(
+                        params.attachment_ref_ids.len() == 1,
+                        "one generated attachment required"
+                    );
+                    let _attachments = self.pasted_text_operations.lock().await;
+                    Ok(json!(
+                        rovai_core::web_upload::remove_pasted_text(
+                            &self.database,
+                            &request.client,
+                            &params.thread_id,
+                            &params.attachment_ref_ids[0]
+                        )
+                        .await?
+                    ))
+                }
+            }
             "host.upload.restore" => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -7902,20 +7976,34 @@ impl Core {
                         .attachment_ref_ids
                         .iter()
                         .map(|id| {
-                            rovai_core::web_upload::load_composer_source(
+                            let source = rovai_core::web_upload::load_composer_source(
                                 &database,
                                 &request.client,
                                 &params.thread_id,
                                 id,
-                            )
+                            )?;
+                            let generated = rovai_core::web_upload::is_pasted_text(
+                                &database,
+                                &request.client,
+                                &params.thread_id,
+                                id,
+                            )?;
+                            Ok((source, generated))
                         })
                         .collect::<Result<Vec<_>>>()?
                 };
                 tokio::task::spawn_blocking(move || {
                     sources
                         .iter()
-                        .map(|source| match source {
-                            Some(source) => rovai_core::web_upload::composer_source_view(source),
+                        .map(|(source, generated)| match source {
+                            Some(source) => {
+                                let mut view =
+                                    rovai_core::web_upload::composer_source_view(source)?;
+                                if *generated {
+                                    view["generatedBy"] = json!("long_text_paste");
+                                }
+                                Ok(view)
+                            }
                             None => Ok(Value::Null),
                         })
                         .collect::<Result<Vec<_>>>()
@@ -9323,15 +9411,51 @@ impl Core {
                 }
                 Ok(serde_json::to_value(snapshot)?)
             }
+            "teams.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(rovai_core::teams::list(&database)?)?)
+            }
+            "teams.save" => {
+                let params: UserCommandParams<rovai_core::teams::SaveTeamCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::teams::save(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                if execution.result.status == CommandResultStatus::Applied {
+                    emit(&self.output, "teams.changed", json!({}));
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "teams.delete" => {
+                let params: UserCommandParams<rovai_core::teams::DeleteTeamCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::teams::delete(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                if execution.result.status == CommandResultStatus::Applied {
+                    emit(&self.output, "teams.changed", json!({}));
+                    emit(
+                        &self.output,
+                        "preferences.new_conversation_changed",
+                        json!({}),
+                    );
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "preferences.newConversation.get"
             | "preferences.newConversation.initialize"
             | "preferences.newConversation.setDefaults"
+            | "preferences.newConversation.setTeam"
             | "preferences.newConversation.setOneClick"
             | "preferences.newConversation.invalidate" => {
-                let database = self.database.lock().await;
-                let (snapshot, changed) = conversation_preferences::execute(
+                let mut database = self.database.lock().await;
+                let (snapshot, changed) = creation_preferences::execute(
                     &self.data_dir,
-                    &database,
+                    &mut database,
                     &request.method,
                     request.params.clone(),
                 )?;
@@ -10589,6 +10713,7 @@ impl Core {
                     );
                 }
                 let command = CreateThreadCommand {
+                    team: params.team,
                     name: params.name,
                     project_binding_kind,
                     project_path: selection.project_path,
@@ -11266,6 +11391,15 @@ impl Core {
                 drop(database);
                 Ok(serde_json::to_value(preview.format()?)?)
             }
+            "camp.messages.replies" => {
+                let params = serde_json::from_value::<rovai_core::read_model::ReplyPageParams>(
+                    request.params.clone(),
+                )?;
+                let mut database = self.database.lock().await;
+                let page = ReadModelService.reply_page(&mut database, &params)?;
+                drop(database);
+                Ok(serde_json::to_value(page)?)
+            }
             "camp.messages.around" => {
                 let params: ThreadMessageAroundParams =
                     serde_json::from_value(request.params.clone())?;
@@ -11668,6 +11802,30 @@ impl Core {
                     None => Value::Null,
                 })
             }
+            "host.camp.attachmentOutputRoot" => {
+                anyhow::ensure!(
+                    request.client.is_desktop(),
+                    "Desktop attachment owner required"
+                );
+                let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                anyhow::ensure!(
+                    database.connection().query_row(
+                        "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
+                        [params.camp_id.as_str()],
+                        |row| row.get::<_, bool>(0),
+                    )?,
+                    "Thread no longer exists"
+                );
+                // Creation already prepared this directory. A late attachment
+                // request must not recreate it after Thread deletion.
+                Ok(json!(
+                    rovai_core::storage_layout::resolve_attachment_output_root(
+                        database.connection(),
+                        params.camp_id.as_str(),
+                    )?
+                ))
+            }
             "camp.attachments.location" => {
                 let locator: LocalAttachmentOwnerLocator =
                     serde_json::from_value(request.params.clone())?;
@@ -11823,6 +11981,26 @@ impl Core {
                         params.limit,
                     )?,
                 )?)
+            }
+            "notifications.threadInterruptions" => {
+                let params: NotificationThreadInterruptionsParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut reader = self.notification_interruption_reader.lock().await;
+                Ok(serde_json::to_value(
+                    reader.read(CURRENT_USER_ID, &params.thread_ids)?,
+                )?)
+            }
+            "notifications.acknowledgeCampInterruptions" => {
+                let params: UserCommandParams<AcknowledgeThreadInterruptionsCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = NotificationEpisodeService::default()
+                    .acknowledge_thread_interruptions(
+                        &mut database,
+                        &user_command_envelope(params.command_id, params.command),
+                    )?;
+                emit(&self.output, "notification_episode.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
             }
             "notifications.changesSince" => {
                 let params: NotificationChangesSinceParams =
@@ -11995,14 +12173,25 @@ impl Core {
                 self.handle_runtime_startup(method, request.params.clone())
                     .await
             }
+            "runtime.environment.get" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Params {
+                    runtime_kind: AdapterKind,
+                }
+                let params: Params = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                rovai_core::member_environment::common::get(
+                    database.connection(),
+                    params.runtime_kind,
+                )
+            }
             "member.runtimeEnvironment.get" => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase", deny_unknown_fields)]
                 struct Params {
                     member_id: String,
                     adapter_kind: AdapterKind,
-                    #[serde(default)]
-                    reveal: bool,
                 }
                 let params: Params = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
@@ -12010,7 +12199,6 @@ impl Core {
                     database.connection(),
                     &params.member_id,
                     params.adapter_kind,
-                    params.reveal,
                 )
             }
             "runtime.environmentLegacy.list" => {
@@ -12022,8 +12210,6 @@ impl Core {
                 #[serde(rename_all = "camelCase", deny_unknown_fields)]
                 struct Params {
                     runtime_kind: AdapterKind,
-                    #[serde(default)]
-                    reveal: bool,
                     identity: Option<String>,
                 }
                 let params: Params = serde_json::from_value(request.params.clone())?;
@@ -12032,7 +12218,6 @@ impl Core {
                     rovai_core::member_environment::legacy_get(
                         database.connection(),
                         params.runtime_kind,
-                        params.reveal,
                     )
                 } else {
                     rovai_core::member_environment::legacy_acknowledge(
@@ -12155,6 +12340,11 @@ impl Core {
             }));
         }
         let execution = {
+            let _attachments = if envelope.payload.source_attachments.is_empty() {
+                None
+            } else {
+                Some(self.pasted_text_operations.lock().await)
+            };
             let mut database = self.database.lock().await;
             CollaborationService::default().send_user_camp_message(&mut database, &envelope)?
         };
@@ -12347,6 +12537,7 @@ impl Core {
         known_snapshot: Option<&AdapterCapabilitySnapshot>,
         catalog_requested: bool,
     ) -> Result<RuntimeDeepProbeResult> {
+        rovai_core::runtime_discovery::ensure_runtime_environment_available(adapter_kind)?;
         eprintln!(
             "[model-catalog] probe runtime={} mode=full full_probe_count=1",
             adapter_kind.as_str()
@@ -19628,7 +19819,11 @@ async fn run_core(
         delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
         agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
         non_batch_retry_at: Mutex::new(None),
+        notification_interruption_reader: Mutex::new(NotificationInterruptionReader::for_database(
+            &database,
+        )),
         database: Arc::new(Mutex::new(database)),
+        pasted_text_operations: Mutex::new(()),
         subsystems: CoreSubsystems::new(),
         subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
         removed_skill_project_roots,
@@ -28051,7 +28246,11 @@ mod tests {
             delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
             agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
             non_batch_retry_at: Mutex::new(None),
+            notification_interruption_reader: Mutex::new(
+                NotificationInterruptionReader::for_database(&database),
+            ),
             database: Arc::new(Mutex::new(database)),
+            pasted_text_operations: Mutex::new(()),
             automation_scheduler_control: RwLock::new(None),
             subsystems: CoreSubsystems::ready_for_test(),
             subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
@@ -28428,6 +28627,7 @@ mod tests {
                             &user_command_envelope(
                                 uuid::Uuid::new_v4().to_string(),
                                 CreateThreadCommand {
+                                    team: None,
                                     name: Some("Version-only launch preparation".into()),
                                     project_binding_kind: ProjectBindingKind::Directory,
                                     project_path: root
@@ -29185,6 +29385,7 @@ done
                 AdapterKind::CodexCli,
                 rovai_core::runtime_startup::RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
+                    common_environment_unavailable: false,
                     program_path: Some(executable.to_string_lossy().into_owned()),
                     environment: vec![rovai_core::runtime_startup::RuntimeEnvironmentVariable {
                         name: "ROVAI_CATALOG_FIXTURE".into(),
@@ -29501,6 +29702,7 @@ done
                         AdapterKind::CodexCli,
                         rovai_core::runtime_startup::RuntimeStartupConfiguration {
                             custom_api_snapshot: None,
+                        common_environment_unavailable: false,
                             program_path: Some(executable.to_string_lossy().into_owned()),
                             environment: Vec::new(),
                         },
@@ -30128,6 +30330,7 @@ done
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: CreateThreadCommand {
+                            team: None,
                             name: Some("Feishu DM".to_string()),
                             project_binding_kind: ProjectBindingKind::QuickChat,
                             project_path: workspace.display().to_string(),
@@ -30186,8 +30389,6 @@ done
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
         let core = runtime_resolution_test_core(&root).unwrap();
-        let source = root.join("published.txt");
-        fs::write(&source, b"referenced source").unwrap();
 
         let camp_id = {
             let mut database = core.database.lock().await;
@@ -30210,13 +30411,14 @@ done
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: CreateThreadCommand {
+                            team: None,
                             name: None,
                             project_binding_kind: ProjectBindingKind::Directory,
                             project_path: workspace.display().to_string(),
                             member_agent_ids: vec![agent_id.clone()],
                             default_lead_agent_id: agent_id,
                             collaboration_mode: ThreadCollaborationMode::Peer,
-                            activation_state: ThreadActivationState::Active,
+                            activation_state: ThreadActivationState::Pending,
                         },
                     },
                 )
@@ -30230,8 +30432,25 @@ done
                 .unwrap();
             camp_id
         };
-        let source_attachment =
-            observe_source_attachment(&source, "published.txt", Some("text/plain")).unwrap();
+        let source = {
+            let database = core.database.lock().await;
+            ThreadOutputDirectory::prepare(&database, &camp_id)
+                .unwrap()
+                .output_root
+                .join(format!("{}.txt", uuid::Uuid::new_v4()))
+        };
+        let pasted_text = format!(" \t\r\n{}\n  ", "😀中".repeat(10_001));
+        fs::write(&source, pasted_text.as_bytes()).unwrap();
+        // Desktop preparation and local-draft restore submit the original label.
+        let source_attachment = rovai_core::local_attachment_source::LocalAttachmentSourceRef {
+            id: uuid::Uuid::new_v4().to_string(),
+            source_path: source.to_str().unwrap().to_string(),
+            display_name: "published_14:17:26.txt".to_string(),
+            kind: rovai_core::local_attachment_source::LocalAttachmentKind::File,
+            media_type: Some("text/plain".to_string()),
+            observed_byte_size: Some(pasted_text.len() as u64),
+            pasted_text_preview: Some("😀中".repeat(80)),
+        };
         let attachment_id = source_attachment.id.clone();
         let sent = core
             .send_test_camp_message_request(SendThreadMessageParams {
@@ -30239,7 +30458,7 @@ done
                 steer_targets: None,
                 command_id: uuid::Uuid::new_v4().to_string(),
                 camp_id: ThreadId::parse(&camp_id).unwrap(),
-                content: text_composer_document("Use the published attachment"),
+                content: text_composer_document(""),
                 source_attachments: vec![source_attachment],
                 quotes: Vec::new(),
                 reply_to_camp_message_id: None,
@@ -30287,6 +30506,24 @@ done
                 .unwrap()
         };
         assert_eq!(Path::new(&source_ref.source_path), source);
+        assert_eq!(source_ref.display_name, "published_14:17:26.txt");
+        assert_eq!(source_ref.pasted_text_preview, Some("😀中".repeat(80)));
+        let run_paths = resolve_source_attachments_for_run(&[source_ref.clone()]).unwrap();
+        assert_eq!(run_paths, vec![source.to_string_lossy().to_string()]);
+        assert_eq!(fs::read_to_string(&run_paths[0]).unwrap(), pasted_text);
+        assert_eq!(
+            core.database
+                .lock()
+                .await
+                .connection()
+                .query_row(
+                    "SELECT activation_state FROM camp WHERE id = ?1",
+                    [&camp_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "active"
+        );
         assert_eq!(
             desktop_target_for_source_attachment(&source_ref)
                 .unwrap()
@@ -30362,6 +30599,7 @@ done
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: CreateThreadCommand {
+                            team: None,
                             name: None,
                             project_binding_kind: ProjectBindingKind::Directory,
                             project_path: workspace.display().to_string(),
@@ -31885,6 +32123,12 @@ done
         assert!(request_uses_independent_read_queue("navigation.camps"));
         assert!(request_uses_independent_read_queue("navigation.groupCamps"));
         assert!(request_uses_independent_read_queue("navigation.findCamp"));
+        assert!(request_uses_independent_read_queue(
+            "notifications.threadInterruptions"
+        ));
+        assert!(!request_uses_independent_read_queue(
+            "notifications.acknowledgeCampInterruptions"
+        ));
         assert!(!request_uses_independent_read_queue(
             "navigation.campViewed"
         ));
@@ -31951,7 +32195,7 @@ done
         fs::create_dir_all(&data_dir).unwrap();
         let runtime_camp_files_root =
             rovai_core::storage_layout::server_runtime_root(&data_dir).unwrap();
-        let (camp_ids, repair_camp_id) = {
+        let (camp_ids, repair_camp_id, web_client, pasted_source) = {
             let attachment_views =
                 ThreadAttachmentViewStore::admit(&runtime_camp_files_root, &data_dir, &[]).unwrap();
             let mut database = Database::open_with_runtime_camp_files_root(
@@ -31994,7 +32238,23 @@ done
                     [],
                 )
                 .unwrap();
-            (camp_ids, repair_camp_id)
+            let editor = rovai_core::draft_client::resolve_editor(&database, None).unwrap();
+            let web_client =
+                rovai_core::draft_client::DraftClient::verified_web(&editor.client_id).unwrap();
+            let path = rovai_core::storage_layout::camp_attachment_output_root(
+                &runtime_camp_files_root,
+                &camp_ids[0],
+            )
+            .unwrap()
+            .join(format!("{token}.txt"));
+            fs::write(&path, "pasted text").unwrap();
+            database.connection().execute(
+                "INSERT INTO web_pasted_text_attachment(attachment_id,camp_id,client_id,source_path,entered_send_flow) VALUES(?1,?2,?3,?4,0)",
+                rusqlite::params![token, camp_ids[0], editor.client_id, path.to_str().unwrap()],
+            ).unwrap();
+            let source = json!({"id": token, "sourcePath": path, "displayName": "paste.txt",
+                "kind": "file", "mediaType": "text/plain", "observedByteSize": 11});
+            (camp_ids, repair_camp_id, web_client, source)
         };
         let (service, runner) = embedded(
             CoreConfig {
@@ -32016,9 +32276,13 @@ done
             .unwrap();
 
         let blocked_service = service.clone();
+        let blocked_token = token.clone();
         let blocked_request = tokio::spawn(async move {
             blocked_service
-                .request("test.requestDispatchBarrier", json!({ "token": token }))
+                .request(
+                    "test.requestDispatchBarrier",
+                    json!({ "token": blocked_token }),
+                )
                 .await
         });
         tokio::time::timeout(Duration::from_secs(5), barrier.entered.notified())
@@ -32092,6 +32356,16 @@ done
                 )
                 .await
         });
+        let interruption_service = service.clone();
+        let interruption_camp_ids = camp_ids.clone();
+        let mut interruption_request = tokio::spawn(async move {
+            interruption_service
+                .request(
+                    "notifications.threadInterruptions",
+                    json!({ "threadIds": interruption_camp_ids }),
+                )
+                .await
+        });
         let repair_service = service.clone();
         let repair_target = repair_camp_id.clone();
         let mut repair_request = tokio::spawn(async move {
@@ -32126,6 +32400,9 @@ done
             tokio::time::timeout_at(barrier_release_at, &mut open_request).await;
         let navigation_before_release =
             tokio::time::timeout_at(barrier_release_at, &mut navigation_request).await;
+        let interruption_before_release =
+            tokio::time::timeout_at(barrier_release_at, &mut interruption_request).await;
+        let interruption_finished_while_blocked = interruption_before_release.is_ok();
         let repair_before_release =
             tokio::time::timeout_at(barrier_release_at, &mut repair_request).await;
         let repair_waited_for_ordered_queue = repair_before_release.is_err();
@@ -32169,6 +32446,10 @@ done
             Ok(completed) => completed.unwrap().unwrap(),
             Err(_) => navigation_request.await.unwrap().unwrap(),
         };
+        let interruption_reply = match interruption_before_release {
+            Ok(completed) => completed.unwrap().unwrap(),
+            Err(_) => interruption_request.await.unwrap().unwrap(),
+        };
         let repair_reply = match repair_before_release {
             Ok(completed) => completed.unwrap().unwrap(),
             Err(_) => repair_request.await.unwrap().unwrap(),
@@ -32200,6 +32481,73 @@ done
             )
             .await
             .unwrap();
+        // Reuse the same isolated Core and barrier at the actual unlink boundary.
+        // Unlike the earlier ordered wait, removal must release both the database
+        // and ordinary FIFO while retaining exclusion against attachment sends.
+        let removal_service = service.clone();
+        let removal_thread = camp_ids[0].clone();
+        let removal_id = token.clone();
+        let removal = tokio::spawn(async move {
+            removal_service
+                .request_for_editor(
+                    "host.upload.removePastedText",
+                    json!({"threadId": removal_thread, "attachmentRefIds": [removal_id]}),
+                    web_client,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), barrier.entered.notified())
+            .await
+            .expect("removal should reach its controlled filesystem wait");
+        let source_send_service = service.clone();
+        let send_thread = camp_ids[1].clone();
+        let source_send = tokio::spawn(async move {
+            source_send_service
+                .request(
+                    "camp.messages.send",
+                    json!({
+                        "commandId": uuid::Uuid::new_v4().to_string(), "threadId": send_thread,
+                        "content": {"version": 2, "segments": []},
+                        "sourceAttachments": [pasted_source], "quotes": [], "execution": null,
+                    }),
+                )
+                .await
+        });
+        let unrelated_work = tokio::time::timeout(Duration::from_secs(5), async {
+            for (method, params) in [
+                ("camps.open", json!({"traceId": uuid::Uuid::new_v4().to_string(), "threadId": camp_ids[1]})),
+                ("members.list", json!({})), // the ordinary ordered request queue
+                ("camp.messages.send", json!({
+                    "commandId": uuid::Uuid::new_v4().to_string(), "threadId": camp_ids[1],
+                    "content": {"version": 2, "segments": [{"kind": "text", "text": "Still usable"}]},
+                    "sourceAttachments": [], "quotes": [], "execution": null,
+                })),
+            ] {
+                let reply = service.request(method, params).await.unwrap();
+                assert!(reply.error.is_none(), "{method}: {:?}", reply.error);
+                if method == "camp.messages.send" {
+                    assert_ne!(reply.result.unwrap()["commandResult"]["status"], "rejected");
+                }
+            }
+        }).await;
+        let source_waited_for_removal = !source_send.is_finished();
+        barrier.release.notify_one();
+        let removed = removal.await.unwrap().unwrap();
+        let sent_source = source_send.await.unwrap().unwrap();
+        assert!(
+            unrelated_work.is_ok(),
+            "unlink blocked unrelated database/FIFO/text-send work"
+        );
+        assert!(
+            source_waited_for_removal,
+            "attachment send bypassed the removal guard"
+        );
+        assert_eq!(removed.result, Some(json!("deleted")));
+        assert!(
+            sent_source.error.is_some()
+                || sent_source.result.unwrap()["commandResult"]["status"] == "rejected",
+            "publication must revalidate a source deleted before the send guard was acquired"
+        );
         drop(service);
         if tokio::time::timeout(Duration::from_secs(10), &mut runner_task)
             .await
@@ -32279,6 +32627,22 @@ done
         assert!(
             navigation_finished_while_blocked,
             "navigation snapshot waited for unrelated FIFO work"
+        );
+        assert!(
+            interruption_finished_while_blocked,
+            "interruption projection waited for unrelated FIFO work"
+        );
+        assert!(
+            interruption_reply.error.is_none(),
+            "{:?}",
+            interruption_reply.error
+        );
+        assert_eq!(
+            interruption_reply.result.unwrap()["threads"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
         );
         assert!(
             navigation_reply.error.is_none(),
@@ -33432,6 +33796,7 @@ done
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: CreateThreadCommand {
+                            team: None,
                             name: Some("Runtime cleanup dispatch".to_string()),
                             project_binding_kind: ProjectBindingKind::Directory,
                             project_path: workspace.display().to_string(),

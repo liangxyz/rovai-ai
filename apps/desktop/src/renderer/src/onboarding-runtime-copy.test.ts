@@ -24,8 +24,16 @@ afterEach(async () => {
 })
 
 describe('first-run Runtime copies with durable Desktop checkpoints', () => {
+  it('retains the frozen identity language across restart and a different current display language', async () => {
+    const h = await harness('en')
+    const ids = h.snapshot().provisioning!
+    await h.restart()
+    await provisionFirstRun(h.api, h.snapshot(), [], () => undefined, 'zh-CN')
+    expect(h.members.map(member => member.displayName)).toEqual(builtinMemberPresetsForLanguage('en').map(preset => preset.displayName))
+    expect(h.requests.find(request => request.method === 'threads.create')?.params.commandId).toBe(ids.campCommandId)
+  })
   it.each(['zh-CN', 'en'] as const)('configures all four %s seeds with one frozen selection and a single-member Thread', async (language) => {
-    const h = await harness()
+    const h = await harness(language)
     const versions = h.members.map((member) => member.version)
     await provisionFirstRun(h.api, h.snapshot(), [], () => undefined, language)
 
@@ -161,10 +169,11 @@ describe('first-run Runtime copies with durable Desktop checkpoints', () => {
     const h = await harness()
     const old = JSON.parse(await readFile(h.file, 'utf8'))
     delete old.provisioning.runtimeCopies
+    delete old.provisioning.interfaceLanguage
     old.schemaVersion = schemaVersion
     await writeFile(h.file, JSON.stringify(old))
     await h.restart()
-    expect(h.snapshot().schemaVersion).toBe(3)
+    expect(h.snapshot().schemaVersion).toBe(4)
     expect(h.snapshot().provisioning!.runtimeCommandId).toBe(old.provisioning.runtimeCommandId)
     expect(h.snapshot().provisioning!.runtimeCopies).toBeNull()
     await provisionFirstRun(h.api, h.snapshot(), [])
@@ -181,7 +190,7 @@ describe('first-run Runtime copies with durable Desktop checkpoints', () => {
     }
     await writeFile(h.file, JSON.stringify(completed))
     const restored = await h.restart()
-    expect(restored).toEqual({ ...completed, schemaVersion: 3 })
+    expect(restored).toEqual({ ...completed, schemaVersion: 4 })
     const store = await OnboardingStore.load(h.file)
     expect(await store.initialize(false)).toEqual(restored)
     await expect(store.prepareRuntimeCopies([])).rejects.toThrow('不可修改')
@@ -226,7 +235,7 @@ describe('first-run Runtime copies with durable Desktop checkpoints', () => {
   })
 })
 
-async function harness() {
+async function harness(language: 'zh-CN' | 'en' = 'zh-CN') {
   const directory = await mkdtemp(join(tmpdir(), 'rovai-onboarding-copies-'))
   directories.push(directory)
   const file = join(directory, 'onboarding.json')
@@ -234,7 +243,7 @@ async function harness() {
   await store.initialize(false)
   await store.completeWelcome()
   await store.completeMemberSelection()
-  await store.beginProvisioning(selection, permissions)
+  await store.beginProvisioning(selection, permissions, language)
   const members: AgentProfile[] = builtinMemberPresetsForLanguage('zh-CN').map((preset) => ({
     agentId: `agent-${preset.role}`, displayName: preset.displayName, teamRole: preset.teamRole,
     professionalResponsibilities: preset.professionalResponsibilities, personalityTraits: preset.personalityTraits,

@@ -243,7 +243,7 @@ pub(crate) fn fresh_schema_database_fast() -> (Database, PathBuf) {
     )
 }
 
-#[cfg(feature = "slow-tests")]
+#[cfg(feature = "extended-tests")]
 pub(crate) fn fresh_schema_database_fast_owned() -> OwnedTestDatabase {
     clone_template_owned(
         FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),

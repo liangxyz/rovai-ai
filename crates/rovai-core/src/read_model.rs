@@ -31,7 +31,9 @@ use crate::{
 
 mod navigation;
 use navigation::*;
+mod replies;
 mod user_anchors;
+pub use replies::{ReplyPage, ReplyPageParams};
 pub use user_anchors::{ThreadUserAnchorIndex, ThreadUserAnchorPreview};
 mod message_model;
 pub use message_model::ThreadMessageRuntimeModelView;
@@ -2531,6 +2533,7 @@ fn hydrate_message_views(
         let attachment = ThreadMessageAttachmentView {
             id,
             display_name,
+            pasted_text_preview: None,
             kind,
             file_count: Some(file_count),
             media_type: Some(media_type),

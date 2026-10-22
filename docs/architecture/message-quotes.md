@@ -2,7 +2,7 @@
 document_type: architecture
 authority: message-quote-ownership-and-projection
 status: accepted
-last_updated: 2026-10-11
+last_updated: 2026-10-22
 ---
 
 # 消息选文引用
@@ -17,8 +17,9 @@ Context 在已有统一投影入口添加 quotes，与当前问题分开，并�
 
 来源回跳先定位当前会话的真实消息，再用随快照冻结的投影摘要与 Unicode scalar 范围映射到 DOM，按涉及的完整视觉行铺底色。布局变化重算，内容变化或重复选文无法唯一确认时不猜测位置。旧快照可按唯一完整选文回跳，来源失效不影响历史选文。定位信息只供 Renderer，不进入模型上下文。
 
-新捕获沿用 locator 的 projectionVersion 机制发布 CJK 兼容投影 v2；Renderer 的 remark 扩展与 Core 的
-Comrak 解析使用同一组对照用例，用户纯文本保持原义。已有 v1 locator 仅在当前摘要、范围和文本均匹配时高亮；
+新捕获沿用 locator 的 projectionVersion 机制发布字面 HTML 投影 v3，继承 v2 的 CJK 兼容解析；
+Renderer 先将 raw 节点转为文本再替换可信 Mention，Core 将 HTML inline/block 纳入同一文字投影。
+两端共读 v3 对照用例，用户纯文本保持原义。已有 v1/v2 locator 仅在当前摘要、范围和文本均匹配时高亮；
 失配只影响高亮，引用仍使用冻结快照展示与发送。无 locator 的唯一完整匹配保留，不引入模糊定位。
 历史消息与引用不迁移，不新增解析服务、修复队列或第二份正文存储。
 

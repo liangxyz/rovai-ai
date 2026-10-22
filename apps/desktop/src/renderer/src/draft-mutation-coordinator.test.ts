@@ -1,4 +1,5 @@
 import type { ThreadComposerDraftView, ThreadMessageView, ComposerDocument } from '@contracts'
+import { PendingThreadDraftPersistence } from './pending-thread-draft'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DraftMutationCoordinator,
@@ -34,6 +35,78 @@ function message(id: string): ThreadMessageView {
 }
 
 describe('DraftMutationCoordinator', () => {
+  it('publishes each locally accepted attachment mutation and its completion only once', async () => {
+    const changed = vi.fn()
+    const accepted = vi.fn()
+    const coordinator = new DraftMutationCoordinator({
+      load: async () => draft('active', 1),
+      mutate: async (current, mutation) => {
+        const next = { ...current, revision: current.revision + 1 }
+        if (mutation.kind === 'add_source_attachment' || mutation.kind === 'remove_source_attachment') {
+          mutation.onAccepted?.(next)
+        }
+        return next
+      },
+      onChange: changed
+    })
+    coordinator.beginEpoch('active', draft('active', 1))
+    changed.mockClear()
+    await coordinator.addSourceAttachment({ name: 'paste.txt' } as File, { pastedText: true, onAccepted: accepted })
+    expect(accepted).toHaveBeenCalledTimes(1)
+    expect(changed).toHaveBeenCalledTimes(1)
+    await coordinator.removeSourceAttachment('attachment', true, accepted)
+    expect(accepted).toHaveBeenCalledTimes(2)
+    expect(changed).toHaveBeenCalledTimes(2)
+    expect(coordinator.getCurrentDraft()?.revision).toBe(3)
+  })
+
+  it('retains an accepted attachment when Pending presence fails, including later edits', async () => {
+    let saved = draft('pending', 1)
+    const persistence = new PendingThreadDraftPersistence({
+      request: vi.fn().mockRejectedValue(new Error('presence offline'))
+    }, next => { saved = next })
+    const attachment = {
+      id: '11111111-1111-4111-8111-111111111111', displayName: '粘贴内容-1.txt',
+      kind: 'file' as const, mediaType: 'text/plain', byteSize: 10_001,
+      fileCount: 1, previewKind: 'none' as const, availability: 'available' as const
+    }
+    const coordinator = new DraftMutationCoordinator({
+      load: async () => { await persistence.persist(saved); return saved },
+      mutate: async (current, mutation) => {
+        const next = {
+          ...current, revision: current.revision + 1,
+          attachments: mutation.kind === 'add_source_attachment' ? [...current.attachments, attachment] : current.attachments,
+          content: mutation.kind === 'save_content' ? mutation.content : current.content
+        }
+        await persistence.persist(next, mutation.kind === 'add_source_attachment' ? () => mutation.onAccepted?.(next) : undefined)
+        return next
+      }
+    })
+    coordinator.beginEpoch('pending', saved)
+    const accepted = vi.fn()
+    await expect(coordinator.addSourceAttachment({ name: attachment.displayName } as File, { pastedText: true, onAccepted: accepted })).rejects.toThrow('presence offline')
+    expect(accepted).toHaveBeenCalledOnce()
+    expect(coordinator.getCurrentDraft()?.attachments).toEqual([attachment])
+    await expect(coordinator.saveContent(document('typed later'))).rejects.toThrow('presence offline')
+    expect(saved.attachments).toEqual([attachment])
+    expect(saved.content).toEqual(document('typed later'))
+  })
+
+  it('does not mark an attachment accepted when local Pending storage rejects it', async () => {
+    const persistence = new PendingThreadDraftPersistence({ request: vi.fn() }, () => { throw new Error('storage full') })
+    const coordinator = new DraftMutationCoordinator({
+      load: async () => draft('pending', 1),
+      mutate: async (current, mutation) => {
+        await persistence.persist(current, mutation.kind === 'add_source_attachment' ? () => mutation.onAccepted?.(current) : undefined)
+        return current
+      }
+    })
+    coordinator.beginEpoch('pending', draft('pending', 1))
+    const accepted = vi.fn()
+    await expect(coordinator.addSourceAttachment({ name: 'paste.txt' } as File, { pastedText: true, onAccepted: accepted })).rejects.toThrow('storage full')
+    expect(accepted).not.toHaveBeenCalled()
+  })
+
   it('keeps ordinary content-save acknowledgements out of Workspace projection renders', () => {
     expect(draftCoordinatorChangeRefreshesProjection('save_content')).toBe(false)
     expect(draftCoordinatorChangeRefreshesProjection('add_source_attachment')).toBe(true)

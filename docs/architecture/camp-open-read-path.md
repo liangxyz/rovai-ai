@@ -13,6 +13,12 @@ last_updated: 2026-10-15
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
 
+## 回复链独立读取
+
+回复详情由 [Thread Replies v1](../contracts/thread-replies-v1.md) 拥有独立的按需读取与有界正文缓存。
+它不扩大 CampOpen 的消息或 Evidence 窗口，不以 Run inputs 合并话题；索引遍历仅涉及单链身份，
+分页不等于固定遍历成本。失效复用现有通知，执行过程继续使用既有 Run 窗口。
+
 ## Component authority
 
 | Component | Responsibility |

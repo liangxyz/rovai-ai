@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunExecutionEvidenceView, AgentRunView, GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
@@ -33,11 +34,7 @@ const renderGroup = (items: ToolProgressItem[], expanded = false, liveTail = fal
 )
 
 describe('localized execution summaries', () => {
-  const preferences = {
-    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
-      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
-    })
-  } as GeneralPreferencesApi
+  const preferences = languageTestApi
 
   afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
 

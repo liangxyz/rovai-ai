@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -44,11 +45,7 @@ const skills: ComposerSkillOption[] = [{
 }]
 
 describe('StructuredMentionComposer V2', () => {
-  const preferences = {
-    setInterfaceLanguage: async (interfaceLanguage: InterfaceLanguage) => ({
-      ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage
-    })
-  } as GeneralPreferencesApi
+  const preferences = languageTestApi
 
   afterEach(async () => { await changeInterfaceLanguage(preferences, 'zh-CN') })
 

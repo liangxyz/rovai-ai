@@ -686,6 +686,18 @@ impl ClaudeCodeCliRuntimeAdapter {
         }
 
         rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
+        // Native settings can override inherited env. Apply managed policy only
+        // after the member overlay and all other settings have been merged.
+        let env = inline_settings["env"]
+            .as_object_mut()
+            .context("Claude inline environment is invalid")?;
+        if cfg!(windows) {
+            env.retain(|key, _| !key.eq_ignore_ascii_case("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"));
+        }
+        env.insert(
+            "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS".into(),
+            serde_json::json!("1"),
+        );
         let effort = claude_model_effort(&request.runtime.model.options)?;
         let mut command = Command::new(executable);
         rovai_core::runtime_discovery::configure_runtime_command(
@@ -693,6 +705,18 @@ impl ClaudeCodeCliRuntimeAdapter {
             &mut command,
         );
         if let Some(environment) = &request.runtime.environment {
+            environment.validate_model_selection(
+                rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+                &if request.runtime.model.source == "runtime_default" {
+                    rovai_core::agent_profile::ModelSelection::RuntimeDefault
+                } else {
+                    rovai_core::agent_profile::ModelSelection::Explicit {
+                        model_id: request.runtime.model.model_id.clone(),
+                        options: request.runtime.model.options.clone(),
+                        dsh_source: None,
+                    }
+                },
+            )?;
             environment.validate_claude_routing(request.runtime.reported_version.as_deref())?;
             environment.apply(&mut command)?;
         }
@@ -771,6 +795,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         command.current_dir(execution_root);
         // Apply the fixed managed policy after all Runtime/Built-in env merges.
         command.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+        command.env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1");
         if !matches!(
             interrupted.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
@@ -2900,7 +2925,15 @@ mod tests {
             },
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
             runtime: FrozenAgentRuntimeConfig {
-                environment: None,
+                environment: cfg!(windows).then(|| {
+                    rovai_core::member_environment::LaunchEnvironment {
+                        values: None,
+                        overlay: Some(BTreeMap::from([(
+                            "claude_code_disable_background_tasks".into(),
+                            "0".into(),
+                        )])),
+                    }
+                }),
                 custom_api: None,
                 camp_fast: None,
                 adapter_kind: AdapterKind::ClaudeCodeCli,
@@ -2964,7 +2997,7 @@ mod tests {
         #[cfg(windows)]
         let body = {
             let script = root.join(format!("{name}.ps1"));
-            let settings = "$settingsIndex = [Array]::IndexOf($args, '--settings')\nif ($settingsIndex -lt 0) { exit 8 }\n$settings = Get-Content -Raw -LiteralPath $args[$settingsIndex + 1] | ConvertFrom-Json\nif ($settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY -ne '1' -or $env:CLAUDE_CODE_DISABLE_AUTO_MEMORY -ne '1') { exit 9 }\n";
+            let settings = "$settingsIndex = [Array]::IndexOf($args, '--settings')\nif ($settingsIndex -lt 0) { exit 8 }\n$settings = Get-Content -Raw -LiteralPath $args[$settingsIndex + 1] | ConvertFrom-Json\nif ($settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY -ne '1' -or $env:CLAUDE_CODE_DISABLE_AUTO_MEMORY -ne '1' -or $settings.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS -ne '1' -or $env:CLAUDE_CODE_DISABLE_BACKGROUND_TASKS -ne '1') { exit 9 }\n";
             let handshake = "$init = [Console]::ReadLine() | ConvertFrom-Json\n[Console]::WriteLine((@{type='control_response';response=@{subtype='success';request_id=$init.request_id;response=@{}}} | ConvertTo-Json -Compress -Depth 5))\n";
             let normal = format!(
                 "$prompt = [Console]::ReadLine()\n[Console]::WriteLine('{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"{session_id}\",\"result\":\"ok\"}}')\n[Console]::WriteLine('{{\"type\":\"system\",\"subtype\":\"session_state_changed\",\"state\":\"idle\",\"session_id\":\"{session_id}\"}}')\n$null = [Console]::In.ReadToEnd()\n"
@@ -3789,6 +3822,7 @@ mod tests {
         };
         use std::os::unix::fs::PermissionsExt;
 
+        let parent_background_env = std::env::var_os("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS");
         let parent_memory_env = std::env::var_os("CLAUDE_CODE_DISABLE_AUTO_MEMORY");
         let search = RuntimeSearchEnvironment::for_test_paths(
             1,
@@ -3797,10 +3831,16 @@ mod tests {
         .with_startup_configuration(
             AdapterKind::ClaudeCodeCli,
             RuntimeStartupConfiguration {
-                environment: vec![RuntimeEnvironmentVariable {
-                    name: "CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(),
-                    value: "0".into(),
-                }],
+                environment: vec![
+                    RuntimeEnvironmentVariable {
+                        name: "CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(),
+                        value: "0".into(),
+                    },
+                    RuntimeEnvironmentVariable {
+                        name: "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS".into(),
+                        value: "0".into(),
+                    },
+                ],
                 ..Default::default()
             },
         );
@@ -3843,6 +3883,7 @@ mod tests {
     printf 'start\n' >> "$0.starts"
     printf '%s\n' "$@" > "$0.argv"
     printf '%s' "$CLAUDE_CODE_DISABLE_AUTO_MEMORY" > "$0.memory-env"
+    printf '%s' "$CLAUDE_CODE_DISABLE_BACKGROUND_TASKS" > "$0.background-env"
     printf '%s\n%s' "$ANTHROPIC_BASE_URL" "$ANTHROPIC_API_KEY" > "$0.member-env"
     case "$1" in --version|auth) sleep 30; exit 1;; esac
     previous=''
@@ -3895,6 +3936,7 @@ mod tests {
                         "https://fixture-member.example".into(),
                     ),
                     ("ANTHROPIC_API_KEY".into(), "private-key".into()),
+                    ("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS".into(), "0".into()),
                 ]);
                 let mut values = overlay.clone();
                 values.insert("PATH".into(), "/usr/bin:/bin".into());
@@ -3993,7 +4035,7 @@ mod tests {
             let settings: Value =
                 serde_json::from_slice(&std::fs::read(root.join("fake-claude.settings")).unwrap())
                     .unwrap();
-            let mut expected = json!({"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}});
+            let mut expected = json!({"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}});
             if member_overlay {
                 expected["env"]["ANTHROPIC_BASE_URL"] = json!("https://fixture-member.example");
                 expected["env"]["ANTHROPIC_API_KEY"] = json!("private-key");
@@ -4019,6 +4061,14 @@ mod tests {
             assert_eq!(
                 std::env::var_os("CLAUDE_CODE_DISABLE_AUTO_MEMORY"),
                 parent_memory_env
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join("fake-claude.background-env")).unwrap(),
+                "1"
+            );
+            assert_eq!(
+                std::env::var_os("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"),
+                parent_background_env
             );
             assert!(claude_launch_files(&root).is_empty());
             std::fs::remove_dir_all(&root).expect("temporary root should be removed");

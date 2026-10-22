@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { describe, expect, it } from 'vitest'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { changeInterfaceLanguage } from './interface-language'
@@ -13,10 +14,7 @@ describe('execution engine product copy', () => {
   })
 
   it('does not inject Chinese terms into English error text', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (interfaceLanguage: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       expect(localizeExecutionEngineTerms('Runtime Adapter diagnostic')).toBe('Runtime Adapter diagnostic')

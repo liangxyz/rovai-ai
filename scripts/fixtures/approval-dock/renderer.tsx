@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { ActionApprovalView, GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
@@ -109,9 +110,7 @@ Object.assign(window, { approvalTest: {
   manyOptions: () => manyOptions(),
   setOptionsSource: (source: OptionsSource) => setOptionsSource(source),
   longRememberRule: () => longRememberRule(),
-  setLanguage: (language: InterfaceLanguage) => changeInterfaceLanguage({
-    setInterfaceLanguage: async interfaceLanguage => ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-  } as GeneralPreferencesApi, language),
+  setLanguage: (language: InterfaceLanguage) => changeInterfaceLanguage(languageTestApi as GeneralPreferencesApi, language),
   setWidth: (width: number) => { document.getElementById('approval-layout')!.style.width = `${width}px` },
   settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 20)))) ,
   snapshot: () => {

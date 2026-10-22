@@ -28,6 +28,25 @@ app.whenReady().then(async () => {
   window.webContents.on('console-message', event => console.error(event.message))
   const run = code => window.webContents.executeJavaScript(code, true)
   const state = () => run('window.executionNotificationTest.state()')
+  const clickVisible = async selector => {
+    for (let attempt = 0; attempt < 160; attempt++) {
+      const point = await run(`(() => {
+        const node = Array.from(document.querySelectorAll(${JSON.stringify(selector)}))
+          .find(candidate => candidate.checkVisibility() && !candidate.disabled)
+        if (!node) return null
+        const rect = node.getBoundingClientRect()
+        return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) }
+      })()`)
+      if (point) {
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+        return
+      }
+      await pause()
+    }
+    throw new Error(`No visible control: ${selector}`)
+  }
   const waitFor = async (predicate, description) => {
     for (let attempt = 0; attempt < 160; attempt++) {
       const current = await state()
@@ -54,7 +73,7 @@ app.whenReady().then(async () => {
       value => value.paneVisible
         && value.activeTabKind === 'execution'
         && value.targetVisible
-        && value.visibleRunIds.includes('run-agent-1'),
+        && !value.visibleRunIds.includes('run-agent-1'),
       'The visible right-side Run was not reported'
     )
     assert.equal(current.compact, true, 'The regression must exercise compact file-preview layout')
@@ -73,7 +92,7 @@ app.whenReady().then(async () => {
       'Notification navigation did not reopen and focus the right-side Run'
     )
     assert.equal(current.previewHidden, false, 'Compact notification navigation must retain the execution pane')
-    assert.deepEqual(current.visibleRunIds, ['run-agent-1'])
+    assert.deepEqual(current.visibleRunIds, [], 'A still-running node cannot confirm a later terminal result')
 
     assert.equal(current.historyExpanded, false, 'The historical Run must start in a collapsed group')
     await run("window.executionNotificationTest.focusRun(104, 'run-agent-1-history')")
@@ -95,19 +114,48 @@ app.whenReady().then(async () => {
       'Opening another member must start with its completed Run visible'
     )
 
+    for (const [index, placement] of ['inspector', 'bottom', 'right'].entries()) {
+      await clickVisible('.execution-placement-button')
+      await clickVisible(`.execution-placement-option[data-placement="${placement}"]`)
+      for (let attempt = 0; attempt < 160; attempt++) {
+        if (await run(`document.querySelector('.execution-drawer')?.dataset.placement === '${placement}'`)) break
+        if (attempt === 159) throw new Error(`Execution placement did not become ${placement}`)
+        await pause()
+      }
+      await run(`window.executionNotificationTest.focusRun(${110 + index}, 'run-agent-1-history')`)
+      await waitFor(
+        value => value.terminalTargetVisible
+          && value.visibleRunIds.includes('run-agent-1-history')
+          && !value.visibleRunIds.includes('run-agent-1')
+          && value.presentedRequests.includes(110 + index),
+        `${placement} must report the precise terminal result without confirming a running node`
+      )
+    }
+
     await run("window.executionNotificationTest.focusSubject('task', 102)")
     await waitFor(value => value.focusedTask === 'task-rail' && value.presentedRequests.includes(102), 'Task notification did not open and focus its exact detail')
     await run("window.executionNotificationTest.focusSubject('mission', 103)")
     await waitFor(value => value.focusedMission === 'mission-rail' && value.presentedRequests.includes(103), 'Mission notification did not focus its exact introduction')
 
+    await run('window.executionNotificationTest.configureFailure()')
+    current = await waitFor(value => value.failureBubbleVisible && value.visibleRunIds.includes('silent-failure'),
+      'A visible ordinary failure bubble reports its Run even with no output and a closed drawer')
+    assert.equal(current.executionVisible, false, 'The failure source must come from the conversation, not an execution node')
+    assert.deepEqual(current.visibleRunIds, ['silent-failure'])
+    await run("Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false }); window.dispatchEvent(new Event('blur'))")
+    await waitFor(value => !value.visibleRunIds.length, 'Background failure bubbles cannot acknowledge notifications')
+    await run("Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true }); window.dispatchEvent(new Event('focus'))")
+    await waitFor(value => value.visibleRunIds.includes('silent-failure'), 'Returning to the visible failure bubble restores its precise source')
+
     console.log(JSON.stringify({
       ok: true,
       cases: [
-        'right-side Portal Run contributes visible source identity',
+        'all three execution placements report exact terminal source identity',
         'closed right execution pane reopens for exact notification navigation',
         'compact layout retains and focuses the notification target',
         'completed Run notifications expand execution history before focusing',
-        'Task and Mission notifications focus their exact subject'
+        'Task and Mission notifications focus their exact subject',
+        'silent ordinary failures report their visible bubble with the execution drawer closed'
       ]
     }))
     window.destroy()

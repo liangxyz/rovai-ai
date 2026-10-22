@@ -18,7 +18,8 @@ use std::{
     path::PathBuf,
 };
 
-pub const SAVED: &str = "<saved>";
+pub mod common;
+
 type Environment = BTreeMap<String, String>;
 
 #[derive(Deserialize)]
@@ -26,17 +27,22 @@ type Environment = BTreeMap<String, String>;
 pub struct EnvironmentEdit {
     pub expected_revision: i64,
     pub json: String,
+    #[serde(default)]
+    pub inherit_common: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentUpdateReceipt {
     pub expected_revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherit_common: Option<bool>,
 }
 
 pub struct PreparedEnvironment {
     pub receipt: EnvironmentUpdateReceipt,
     ciphertext: Vec<u8>,
+    inherit_common: bool,
     member_id: String,
     kind: AdapterKind,
 }
@@ -110,7 +116,7 @@ fn launch_with_host(
     kind: AdapterKind,
     capture: impl FnOnce() -> Environment,
 ) -> Result<LaunchEnvironment> {
-    let overlay = read_version(connection, member, kind, latest(connection, member, kind)?)?;
+    let overlay = effective_overlay(connection, member, kind)?;
     let mut values = capture();
     for (name, value) in &overlay {
         if cfg!(windows) {
@@ -146,8 +152,17 @@ fn key(connection: &Connection) -> Result<Vec<u8>> {
             [],
             |r| r.get(0),
         )?;
+        let has_common = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_common_environment')",
+            [],
+            |r| r.get::<_, bool>(0),
+        )? && connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runtime_common_environment)",
+            [],
+            |r| r.get::<_, bool>(0),
+        )?;
         ensure!(
-            !has_values,
+            !has_values && !has_common,
             "Private environment key is missing; restore the original Host key"
         );
         let mut bytes = [0u8; 32];
@@ -207,16 +222,9 @@ fn decrypt<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(data).context("Private environment storage is damaged")
 }
 
-pub fn sensitive(name: &str) -> bool {
-    let name = name.to_ascii_uppercase();
-    ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
-        .iter()
-        .any(|word| name.contains(word))
-}
-
-// Mask the editor conservatively, but only credential-bearing names contribute
-// values to output scrubbing. AUTH_ENABLED, TOKEN_LIMIT and KEY_PATH are settings,
-// not secrets; their values must not become global replacement patterns.
+// Only credential-bearing names contribute values to output scrubbing.
+// AUTH_ENABLED, TOKEN_LIMIT and KEY_PATH are settings, not secrets; their
+// values must not become global replacement patterns.
 fn credential_variable(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     [
@@ -263,31 +271,52 @@ fn require_member(connection: &Connection, member: &str) -> Result<()> {
     );
     Ok(())
 }
-fn public_values(values: &Environment, reveal: bool) -> Environment {
-    values
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.clone(),
-                if !reveal && sensitive(name) && !value.is_empty() {
-                    SAVED.into()
-                } else {
-                    value.clone()
-                },
-            )
-        })
-        .collect()
-}
-pub fn get(
-    connection: &Connection,
-    member: &str,
-    kind: AdapterKind,
-    reveal: bool,
-) -> Result<Value> {
+pub fn get(connection: &Connection, member: &str, kind: AdapterKind) -> Result<Value> {
     require_member(connection, member)?;
     let revision = latest(connection, member, kind)?;
     let values = read_version(connection, member, kind, revision)?;
-    Ok(json!({"revision":revision,"environment":public_values(&values,reveal)}))
+    let inherit_common = inheritance(connection, member, kind, revision, &values)?;
+    Ok(
+        json!({"revision":revision,"environment":values,"inheritCommon":inherit_common,
+        "common":common::get(connection,kind)?}),
+    )
+}
+
+fn inheritance(
+    c: &Connection,
+    member: &str,
+    kind: AdapterKind,
+    revision: i64,
+    values: &Environment,
+) -> Result<bool> {
+    let saved: Option<bool> = c.query_row("SELECT inherit_common FROM member_environment_inheritance WHERE member_id=?1 AND runtime_kind=?2 AND revision=?3",
+        params![member,kind.as_str(),revision], |r| r.get(0)).optional()?;
+    Ok(saved.unwrap_or(values.is_empty()))
+}
+fn merge_common(
+    c: &Connection,
+    kind: AdapterKind,
+    inherit: bool,
+    local: &Environment,
+) -> Result<Environment> {
+    let mut values = if inherit {
+        common::current(c, kind)?
+    } else {
+        Environment::new()
+    };
+    // Both saved layers are normalized to uppercase on Windows before persistence.
+    values.extend(local.clone());
+    parse(&serde_json::to_string(&values)?, cfg!(windows))
+}
+fn effective_overlay(c: &Connection, member: &str, kind: AdapterKind) -> Result<Environment> {
+    let revision = latest(c, member, kind)?;
+    let local = read_version(c, member, kind, revision)?;
+    merge_common(
+        c,
+        kind,
+        inheritance(c, member, kind, revision, &local)?,
+        &local,
+    )
 }
 
 /// Deserialize directly from text so duplicate JSON names cannot disappear in a map parser.
@@ -366,31 +395,38 @@ pub fn prepare(
         "Invalid member environment revision"
     );
     let previous = read_version(connection, member, kind, edit.expected_revision)?;
-    let mut values = parse(&edit.json, cfg!(windows))?;
-    for (name, value) in &mut values {
-        if value == SAVED {
-            ensure!(
-                sensitive(name),
-                "The saved marker is only valid for an existing credential"
-            );
-            *value = previous
-                .get(name)
-                .context("The saved credential is unavailable")?
-                .clone();
-        }
-    }
+    let inherit_common = edit.inherit_common.unwrap_or(inheritance(
+        connection,
+        member,
+        kind,
+        edit.expected_revision,
+        &previous,
+    )?);
+    let values = parse(&edit.json, cfg!(windows))?;
     // Preserve command replay/conflict detection without hashing environment values.
     // A committed revision is immutable, so an old command must carry the same private values.
     if latest(connection, member, kind)? > edit.expected_revision {
         ensure!(
-            read_version(connection, member, kind, edit.expected_revision + 1)? == values,
+            read_version(connection, member, kind, edit.expected_revision + 1)? == values
+                && inheritance(
+                    connection,
+                    member,
+                    kind,
+                    edit.expected_revision + 1,
+                    &values
+                )? == inherit_common,
             "Member environment changed; reload the saved configuration"
         );
     }
-    validate_model(kind, model, &values)?;
+    validate_model(
+        kind,
+        model,
+        &merge_common(connection, kind, inherit_common, &values)?,
+    )?;
     parse(&serde_json::to_string(&values)?, cfg!(windows))?;
     let receipt = EnvironmentUpdateReceipt {
         expected_revision: edit.expected_revision,
+        inherit_common: edit.inherit_common,
     };
     Ok(PreparedEnvironment {
         ciphertext: encrypt(
@@ -399,6 +435,7 @@ pub fn prepare(
             &values,
         )?,
         receipt,
+        inherit_common,
         member_id: member.into(),
         kind,
     })
@@ -411,6 +448,8 @@ impl PreparedEnvironment {
         );
         connection.execute("INSERT INTO member_runtime_environment(member_id,runtime_kind,revision,ciphertext) VALUES(?1,?2,?3,?4)",
             params![self.member_id,self.kind.as_str(),self.receipt.expected_revision+1,self.ciphertext])?;
+        connection.execute("INSERT INTO member_environment_inheritance(member_id,runtime_kind,revision,inherit_common) VALUES(?1,?2,?3,?4)",
+            params![self.member_id,self.kind.as_str(),self.receipt.expected_revision+1,self.inherit_common])?;
         Ok(())
     }
 }
@@ -436,11 +475,7 @@ pub fn validate_saved_model(
     model: &ModelSelection,
 ) -> Result<()> {
     if kind == AdapterKind::ClaudeCodeCli && matches!(model, ModelSelection::Explicit { .. }) {
-        validate_model(
-            kind,
-            model,
-            &read_version(connection, member, kind, latest(connection, member, kind)?)?,
-        )?;
+        validate_model(kind, model, &effective_overlay(connection, member, kind)?)?;
     }
     Ok(())
 }
@@ -465,7 +500,7 @@ pub(crate) fn configure_values(command: &mut tokio::process::Command, values: &E
     command.envs(values);
 }
 
-fn claude_routing_override(overlay: &Environment) -> bool {
+pub(crate) fn claude_routing_override(overlay: &Environment) -> bool {
     overlay.keys().any(|name| {
         matches!(
             name.as_str(),
@@ -482,6 +517,17 @@ impl LaunchEnvironment {
         self.overlay
             .as_ref()
             .is_some_and(|values| !values.is_empty())
+    }
+
+    pub fn validate_model_selection(
+        &self,
+        kind: AdapterKind,
+        model: &ModelSelection,
+    ) -> Result<()> {
+        if let Some(overlay) = &self.overlay {
+            validate_model(kind, model, overlay)?;
+        }
+        Ok(())
     }
 
     pub fn validate_claude_routing(&self, version: Option<&str>) -> Result<()> {
@@ -578,14 +624,14 @@ pub fn legacy_list(connection: &Connection) -> Result<Value> {
     let rows=query.query_map([],|r|Ok(json!({"runtimeKind":r.get::<_,String>(0)?,"identity":r.get::<_,String>(1)?,"count":r.get::<_,i64>(2)?,"handled":r.get::<_,bool>(3)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(json!(rows))
 }
-pub fn legacy_get(connection: &Connection, kind: AdapterKind, reveal: bool) -> Result<Value> {
+pub fn legacy_get(connection: &Connection, kind: AdapterKind) -> Result<Value> {
     let bytes: Vec<u8> = connection.query_row(
         "SELECT ciphertext FROM runtime_environment_legacy WHERE runtime_kind=?1",
         [kind.as_str()],
         |r| r.get(0),
     )?;
     let values: Environment = decrypt(connection, &format!("legacy:{}", kind.as_str()), &bytes)?;
-    Ok(json!(public_values(&values, reveal)))
+    Ok(json!(values))
 }
 pub fn legacy_acknowledge(
     connection: &Connection,

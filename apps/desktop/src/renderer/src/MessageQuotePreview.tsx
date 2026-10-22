@@ -1,4 +1,5 @@
 import type { JSX } from 'react'
+import { uiAttribute } from './interface-language'
 
 export function MessageQuotePreview({
   authorLabel,
@@ -13,7 +14,7 @@ export function MessageQuotePreview({
   const label = `${authorLabel} · ${excerpt}`
   const preview = (
     <>
-      <ReplyMark />
+      <span className="reply-quote-prefix">{uiAttribute('回复')}</span>
       <strong>{authorLabel}</strong>
       <span>{excerpt}</span>
     </>

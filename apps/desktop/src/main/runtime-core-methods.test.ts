@@ -12,6 +12,7 @@ describe('Runtime Renderer Core method allowlist', () => {
       'runtime.product.ensure',
       'runtime.product.check',
       'runtime.startup.get',
+      'runtime.environment.get',
       'member.runtimeEnvironment.get',
       'runtime.environmentLegacy.list',
       'runtime.environmentLegacy.get',

@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, expectTypeOf, it } from 'vitest'
@@ -366,10 +367,7 @@ describe('Channel settings', () => {
   })
 
   it('keeps Lark provider copy and actions in English mode', async () => {
-    const languageApi = {
-      setInterfaceLanguage: async (language: 'zh-CN' | 'en') =>
-        ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage: language })
-    } as GeneralPreferencesApi
+    const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
       const markup = renderToStaticMarkup(createElement(ChannelSettingsView, {

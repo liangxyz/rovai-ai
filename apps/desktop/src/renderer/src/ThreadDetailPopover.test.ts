@@ -14,7 +14,7 @@ describe('Thread detail popover dismissal', () => {
   })
 
   it('keeps Escape and the explicit close control available', () => {
-    expect(source).toContain("addEventListener('keydown', dismissOnEscape)")
+    expect(source).toContain('useThreadPanelDismiss({ visible, panelRef, onClose })')
 
     const markup = renderToStaticMarkup(createElement(ThreadDetailPopover, {
       activeTab: 'tasks',

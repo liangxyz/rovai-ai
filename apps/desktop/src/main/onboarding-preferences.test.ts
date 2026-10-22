@@ -52,7 +52,7 @@ describe('onboarding preferences', () => {
     const store = await OnboardingStore.load(filePath)
     const completed = await store.initialize(true)
     expect(completed).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'completed',
       origin: 'existing_installation',
       selectedMemberRole: null,
@@ -197,7 +197,7 @@ describe('onboarding preferences', () => {
 
     const completed = await store.deferRuntimeSetup()
     expect(completed).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'completed',
       origin: 'runtime_deferred',
       selectedMemberRole: null,
@@ -270,7 +270,7 @@ describe('onboarding preferences', () => {
       provisioning: null
     })).toBeNull()
     expect(parseOnboardingSnapshot({
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'completed',
       origin: 'onboarding',
       completedAt: 'not-a-date',
@@ -279,7 +279,7 @@ describe('onboarding preferences', () => {
       quickChatThreadId: 'camp-1'
     })).toBeNull()
     expect(parseOnboardingSnapshot({
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'completed',
       origin: 'runtime_deferred',
       completedAt: '2026-08-23T00:00:00.000Z',
@@ -289,7 +289,7 @@ describe('onboarding preferences', () => {
     })).toBeNull()
   })
 
-  it('normalizes valid schema v1 snapshots to schema v3', () => {
+  it('normalizes valid schema v1 snapshots to schema v4', () => {
     expect(parseOnboardingSnapshot({
       schemaVersion: 1,
       status: 'completed',
@@ -299,7 +299,7 @@ describe('onboarding preferences', () => {
       memberAgentId: null,
       quickChatThreadId: null
     })).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'completed',
       origin: 'existing_installation',
       completedAt: '2026-08-23T00:00:00.000Z',

@@ -231,6 +231,7 @@ app.whenReady().then(async () => {
     assert.equal(await run("document.activeElement === document.querySelector('.camp-detail-popover')"), true)
     assert.equal((await entryCount(0)).text, '执行12', 'Ending the last run restores the executed-member count')
     await click('.camp-detail-heading button[aria-label="收起会话详情"]')
+    await run("document.querySelector('.camp-execution-entry').focus({ preventScroll: true })")
     await key('Enter')
     assert.equal((await entryState()).expanded, 'true', 'Idle execution entry still opens history')
     await entryCount(5)
@@ -293,6 +294,19 @@ app.whenReady().then(async () => {
     assertLayout(value)
     await assertExecutionWidth()
 
+    // Keep the close target stationary until mouseup, including its top edge.
+    const closeSelector = '.camp-detail-heading button[aria-label="收起会话详情"]'
+    const closeBefore = await run(`(() => { const r = document.querySelector('${closeSelector}').getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, height:r.height } })()`)
+    const closePoint = { x: Math.round(closeBefore.x + closeBefore.width / 2), y: Math.round(closeBefore.y + closeBefore.height / 2) }
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...closePoint })
+    window.webContents.sendInputEvent({ type: 'mouseDown', ...closePoint, button: 'left', clickCount: 1 })
+    await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    const closePressed = await run(`(() => { const r = document.querySelector('${closeSelector}').getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, height:r.height } })()`)
+    window.webContents.sendInputEvent({ type: 'mouseUp', ...closePoint, button: 'left', clickCount: 1 })
+    await settle()
+    assert.deepEqual(closePressed, closeBefore, 'Pressing collapse must not move its clickable rectangle')
+    await openDetail('execution')
+
     value = await click('.conversation-controls .composer-box')
     assert.ok(value.panel.height > 0, 'Outside pointer interaction keeps the execution popover open')
     await run("document.querySelector('.conversation-controls .structured-mention-editor').focus({ preventScroll: true })")
@@ -307,19 +321,19 @@ app.whenReady().then(async () => {
     await settle()
     value = await key('Escape')
     assert.equal(value.panel.height, 0, 'Escape closes a manually opened execution popover')
-    assert.equal(await run("document.activeElement === document.querySelector('.camp-detail-entry[data-detail=\"execution\"]')"), true,
-      'Escape returns focus to the execution entry after a manual open')
+    assert.equal(await run("document.activeElement === document.querySelector('.conversation-controls .structured-mention-editor')"), true,
+      'Escape preserves the public composer focus after a manual open')
     value = await click('.camp-detail-entry[data-detail="execution"]')
     value = await click('.camp-detail-heading button[aria-label="收起会话详情"]')
     assert.equal(value.panel.height, 0, 'The explicit close button closes the execution popover')
-    assert.equal(await run("document.activeElement === document.querySelector('.camp-detail-entry[data-detail=\"execution\"]')"), true,
-      'The explicit close button returns focus to the execution entry')
+    assert.equal(await run("document.activeElement === document.querySelector('.camp-detail-entry[data-detail=\"execution\"]')"), false,
+      'Pointer collapse does not force focus to the header entry')
     value = await click('.camp-detail-entry[data-detail="execution"]')
     assert.ok(value.panel.height > 0, 'The execution popover reopens after explicit dismissal')
     if (process.argv.includes('--dismissal-only')) {
       console.log(JSON.stringify({ ok: true, cases: [
         'persistent outside pointer/focus',
-        'explicit close and Escape focus return'
+        'stationary collapse target and preserved input focus'
       ] }))
       window.destroy()
       app.quit()
@@ -987,7 +1001,7 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({ ok: true, cases: ['0/1/2/3/5 running entry members and duplicate runs', 'two equal brand orbits',
       'idle history with executed member count', 'no hover/focus tooltip with accessible member names', 'collapsed running state',
       '12/20-member overflow', '176px steps and overlap', 'mouse wheel/trackpad', 'keyboard and long-name tooltip',
-      'persistent outside pointer/focus', 'explicit close and Escape focus return',
+      'persistent outside pointer/focus', 'stationary collapse target and preserved input focus',
       'selection and node retention', 'status refresh/reopen', 'Task navigation/repeated target', '8-member no overflow',
       'long prose containment', 'single-line command and full expanded output',
       'waiting Delivery queue cards', 'independent multi-input popovers', 'Run card geometry and square overview avatars',

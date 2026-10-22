@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -17,9 +18,7 @@ const transport = new ConsoleClient(location.origin, fetch, sessionStorage)
 const login = transport.restore().then(restored => restored || transport.login('fixture-only'))
 const observations = { mounts: 0, shortcuts: 0, results: [] as unknown[] }
 Object.assign(window, { connectionFixture: { transport, observations,
-  language: (language: 'en' | 'zh-CN') => changeInterfaceLanguage({
-    setInterfaceLanguage: async interfaceLanguage => ({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguage })
-  } as GeneralPreferencesApi, language)
+  language: (language: 'en' | 'zh-CN') => changeInterfaceLanguage(languageTestApi as GeneralPreferencesApi, language)
 } })
 
 function Form() {

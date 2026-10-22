@@ -111,7 +111,7 @@ app.whenReady().then(async () => {
   await run('document.querySelector(".timeline-pane").style.removeProperty("width")'); await settle()
   stage = 'existing away settings'
   await click('.member-joined-configure')
-  await wait('!!document.querySelector(".member-editor-page:not([hidden]) .member-header-runtime")')
+  await wait('!!document.querySelector(".member-editor-page:not([hidden]) .member-runtime-form")')
   assert.ok((await run('document.querySelector(".member-editor-page:not([hidden])").innerText')).includes('Nova renamed'))
   stage = 'manual fallback and split action'
   await run('window.memberCreationQA.unavailable(true)')

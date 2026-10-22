@@ -122,7 +122,7 @@ function Fixture(): React.JSX.Element {
       onNewConversation={idle} onMembers={idle} onAutomations={() => setKey(value => value + 1)} onMemory={idle} pendingMemoryCount={0} onSettings={idle}
       onOpenProject={idle} onThread={idle} onRemoveProject={async () => undefined} onRename={async () => undefined} onDelete={async () => undefined} onError={error => setNotice(String(error))} />
     <main className="content automation-content"><AutomationWorkspace key={key} agents={agents} projects={projects} defaultMemberId={agents[0]?.agentId ?? ''}
-      onNotify={setNotice} onOpenThread={threadId => setNotice(`打开执行对话：${threadId}`)} /></main>
+      onOpenThread={threadId => setNotice(`打开执行对话：${threadId}`)} /></main>
     {notice && <output role="status" style={{ position: 'fixed', bottom: 20, left: 290, padding: '10px 14px', color: 'var(--ink)', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 7 }}>{notice}</output>}
     <details style={{ position: 'fixed', left: 10, bottom: 42, maxWidth: 245, fontSize: 10, color: 'var(--muted)' }}><summary>验收记录</summary><pre style={{ maxHeight: 220, overflow: 'auto' }}>{JSON.stringify(calls, null, 2)}</pre></details>
   </div>

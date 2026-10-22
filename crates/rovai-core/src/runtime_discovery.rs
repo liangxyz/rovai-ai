@@ -470,6 +470,7 @@ impl RuntimeSearchEnvironment {
     pub fn configure_tokio_command(&self, kind: AdapterKind, command: &mut TokioCommand) {
         command.env("PATH", &self.path_value);
         if let Some(configuration) = self.startup_configurations.get(&kind) {
+            apply_common_routing(kind, configuration, command);
             command.envs(
                 configuration
                     .environment
@@ -748,7 +749,8 @@ pub fn configure_active_runtime_command(command: &mut TokioCommand) {
     }
 
     configure_runtime_path(command);
-    let _ = SCOPED_RUNTIME_ENVIRONMENT.try_with(|(_, configuration)| {
+    let _ = SCOPED_RUNTIME_ENVIRONMENT.try_with(|(kind, configuration)| {
+        apply_common_routing(*kind, configuration, command);
         command.envs(
             configuration
                 .environment
@@ -774,10 +776,30 @@ fn effective_startup_configuration(
         })
 }
 
+pub fn ensure_runtime_environment_available(kind: AdapterKind) -> Result<()> {
+    // A member's captured launch map has already resolved its inheritance. An
+    // independent member must not depend on the shared credential record.
+    if LAUNCH_ENVIRONMENT
+        .try_with(|snapshot| {
+            snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.values.is_some())
+        })
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    if let Some(configuration) = effective_startup_configuration(kind) {
+        configuration.ensure_environment_available()?;
+    }
+    Ok(())
+}
+
 /// Only native checks use the current scoped configuration. Executions use their frozen snapshot.
 pub fn custom_api_snapshot(
     kind: AdapterKind,
 ) -> anyhow::Result<Option<crate::runtime_custom_api::CustomApiSnapshot>> {
+    ensure_runtime_environment_available(kind)?;
     let Some(configuration) = effective_startup_configuration(kind) else {
         return Ok(None);
     };
@@ -878,6 +900,24 @@ pub fn capture_host_runtime_environment() -> BTreeMap<String, String> {
     values
 }
 
+fn apply_common_routing(
+    kind: AdapterKind,
+    configuration: &crate::runtime_startup::RuntimeStartupConfiguration,
+    command: &mut TokioCommand,
+) {
+    if kind == AdapterKind::ClaudeCodeCli
+        && crate::member_environment::claude_routing_override(
+            &configuration
+                .environment
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.value.clone()))
+                .collect(),
+        )
+    {
+        command.env("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1");
+    }
+}
+
 pub fn configure_runtime_command(kind: AdapterKind, command: &mut TokioCommand) {
     if LAUNCH_ENVIRONMENT
         .try_with(|snapshot| {
@@ -898,6 +938,7 @@ pub fn configure_runtime_command(kind: AdapterKind, command: &mut TokioCommand) 
 
     configure_runtime_path(command);
     if let Some(configuration) = effective_startup_configuration(kind) {
+        apply_common_routing(kind, &configuration, command);
         command.envs(
             configuration
                 .environment
@@ -1040,6 +1081,15 @@ pub async fn discover_runtime_version(
     observation: &mut RuntimeDiscoveryObservation,
     search: &RuntimeSearchEnvironment,
 ) {
+    if search
+        .startup_configuration(observation.runtime_kind)
+        .ensure_environment_available()
+        .is_err()
+    {
+        observation.version_probe_succeeded = Some(false);
+        observation.diagnostic_code = Some("runtime_common_environment_unavailable".into());
+        return;
+    }
     with_runtime_configuration(
         observation.runtime_kind,
         search,
@@ -2095,6 +2145,7 @@ mod tests {
             AdapterKind::CodexCli,
             crate::runtime_startup::RuntimeStartupConfiguration {
                 custom_api_snapshot: None,
+                common_environment_unavailable: false,
                 program_path: Some(
                     directory
                         .join("manual/codex")

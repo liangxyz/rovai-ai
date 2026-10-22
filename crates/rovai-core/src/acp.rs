@@ -1302,8 +1302,11 @@ impl AcpRpcError {
             .unwrap_or("ACP request failed")
             .to_string();
         let provider_detail = value
-            .pointer("/data/error")
-            .and_then(Value::as_str)
+            .get("data")
+            .and_then(|data| {
+                data.as_str()
+                    .or_else(|| data.get("error").and_then(Value::as_str))
+            })
             .and_then(|detail| sanitize_public_runtime_error(detail, &[]))
             .filter(|detail| detail != &message);
         Self {
@@ -6858,6 +6861,9 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
         compatibility["nativeQuestionnairePolicy"] = json!("no-ask-user-v1");
     }
+    if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
+        compatibility["nativeBackgroundPolicy"] = json!("disabled-v1");
+    }
     if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
         compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
     }
@@ -7229,6 +7235,12 @@ fn configure_runtime_command(
                     });
                 }
                 AdapterKind::CodebuddyCli => {
+                    // Apply launch defaults after env overlays; native settings
+                    // and any explicit overrides remain owned by CodeBuddy.
+                    command
+                        .env("CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS", "1")
+                        .env("CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED", "1")
+                        .env("CODEBUDDY_BASH_ASSISTANT_BUDGET_MS", "0");
                     // CodeBuddy resolves the launch model while creating an ACP
                     // Session. A custom provider cannot be selected later with
                     // session/set_model when session/new already rejected the
@@ -9320,6 +9332,12 @@ mod route_policy_tests {
         assert!(!abandoned.exists());
 
         assert!(
+            prepare_private_host_config(&root, AdapterKind::CodebuddyCli)
+                .unwrap()
+                .is_none()
+        );
+
+        assert!(
             prepare_private_host_config(&root, AdapterKind::CursorAgent)
                 .unwrap()
                 .is_none()
@@ -9782,25 +9800,54 @@ mod tests {
             "ACP error -32603: Internal error: failed to call agent: Model usage has reached personal quota limit. Please check usage or contact administrator."
         );
 
-        let redacted_detail = AcpRpcError::from_response(&json!({
+        let string_detail = AcpRpcError::from_response(&json!({
             "code": -32603,
             "message": "Internal error",
-            "data": { "error": "provider failed with api_key=must-not-leak" }
+            "data": "Model usage has reached personal quota limit. Please check usage or contact administrator."
         }));
         assert_eq!(
-            redacted_detail.diagnostic(),
-            "ACP error -32603: Internal error: provider failed with api_key=[redacted]"
+            string_detail.diagnostic(),
+            "ACP error -32603: Internal error: Model usage has reached personal quota limit. Please check usage or contact administrator."
         );
 
-        let unlisted_detail = AcpRpcError::from_response(&json!({
-            "code": -32603,
-            "message": "Internal error",
-            "data": { "detail": "must remain private" }
-        }));
-        assert_eq!(
-            unlisted_detail.diagnostic(),
-            "ACP error -32603: Internal error"
-        );
+        for data in [
+            json!("provider failed with api_key=must-not-leak"),
+            json!({ "error": "provider failed with api_key=must-not-leak" }),
+        ] {
+            let redacted_detail = AcpRpcError::from_response(&json!({
+                "code": -32603,
+                "message": "Internal error",
+                "data": data
+            }));
+            assert_eq!(
+                redacted_detail.diagnostic(),
+                "ACP error -32603: Internal error: provider failed with api_key=[redacted]"
+            );
+        }
+
+        for data in [
+            json!({ "detail": "must remain private" }),
+            json!({ "error": { "message": "must remain private" } }),
+            json!({ "error": ["must remain private"] }),
+            json!(["must remain private"]),
+            json!(42),
+            json!(false),
+            Value::Null,
+            json!(" \n "),
+            json!("Internal error"),
+            json!({ "error": "Internal error" }),
+            json!("prompt: must remain private"),
+        ] {
+            let unlisted_detail = AcpRpcError::from_response(&json!({
+                "code": -32603,
+                "message": "Internal error",
+                "data": data
+            }));
+            assert_eq!(
+                unlisted_detail.diagnostic(),
+                "ACP error -32603: Internal error"
+            );
+        }
 
         for (message, expected) in [
             (
@@ -11603,8 +11650,26 @@ done
         );
         session["models"]["currentModelId"] = Value::Null;
         assert!(codebuddy_context_model(&session).is_none());
-        let root = std::env::temp_dir();
+        let root =
+            std::env::temp_dir().join(format!("rovai-codebuddy-policy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".codebuddy")).unwrap();
+        // Native settings, including parse errors, belong to the CLI. Launch
+        // preparation must not read or copy any of these files.
+        let native_paths = [
+            root.join("settings.json"),
+            root.join(".codebuddy/settings.json"),
+            root.join(".codebuddy/settings.local.json"),
+        ];
+        let native_text = "{native-settings-are-cli-owned";
+        for path in &native_paths {
+            std::fs::write(path, native_text).unwrap();
+        }
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let policy = [
+            ("CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS", "1"),
+            ("CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED", "1"),
+            ("CODEBUDDY_BASH_ASSISTANT_BUDGET_MS", "0"),
+        ];
         for (source, model_id, expected) in [
             ("runtime_default", "codebuddy-cli://runtime-default", None),
             (
@@ -11613,33 +11678,75 @@ done
                 Some("custom-local:MiniMax-M3"),
             ),
         ] {
-            let mut runtime = frozen_kiro_runtime();
-            runtime.adapter_kind = AdapterKind::CodebuddyCli;
-            runtime.permissions.adapter_kind = AdapterKind::CodebuddyCli;
-            runtime.permissions.values = json!({"permission_mode":"bypassPermissions"});
-            runtime.model.source = source.to_string();
-            runtime.model.model_id = model_id.to_string();
-            let mut command = Command::new("/usr/bin/true");
-            configure_runtime_command(
-                &mut command,
-                &workspace,
-                PermissionSemantics::RuntimeManagedV2,
-                &runtime,
-                false,
-                &BTreeMap::new(),
-                &root,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-            let arguments = command.as_std().get_args().collect::<Vec<_>>();
-            let selected = arguments
-                .windows(2)
-                .find(|pair| pair[0] == "--model")
-                .map(|pair| pair[1].to_str().unwrap());
-            assert_eq!(selected, expected);
+            for with_mcp in [false, true] {
+                let mut runtime = frozen_kiro_runtime();
+                runtime.adapter_kind = AdapterKind::CodebuddyCli;
+                runtime.permissions.adapter_kind = AdapterKind::CodebuddyCli;
+                runtime.permissions.values = json!({"permission_mode":"bypassPermissions"});
+                runtime.model.source = source.to_string();
+                runtime.model.model_id = model_id.to_string();
+                let mut command = Command::new("/usr/bin/true");
+                command.env("CODEBUDDY_CONFIG_DIR", &root);
+                command.env("PROCESS_ONLY", "preserved");
+                for (key, _) in policy {
+                    command.env(key, "9");
+                }
+                let servers = if with_mcp {
+                    BTreeMap::from([(
+                        "fixture".into(),
+                        McpServerDefinition::StreamableHttp {
+                            url: "https://mcp.invalid/example".into(),
+                            headers: BTreeMap::new(),
+                        },
+                    )])
+                } else {
+                    BTreeMap::new()
+                };
+                let mcp = configure_runtime_command(
+                    &mut command,
+                    &workspace,
+                    PermissionSemantics::RuntimeManagedV2,
+                    &runtime,
+                    false,
+                    &servers,
+                    &root,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(
+                    mcp.is_some(),
+                    with_mcp,
+                    "policy precedes the MCP early return"
+                );
+                let arguments = command.as_std().get_args().collect::<Vec<_>>();
+                let selected = arguments
+                    .windows(2)
+                    .find(|pair| pair[0] == "--model")
+                    .map(|pair| pair[1].to_str().unwrap());
+                assert_eq!(selected, expected);
+                assert!(!arguments.iter().any(|arg| *arg == "--settings"));
+                assert!(!root.join("acp-host").exists());
+                for (key, value) in policy.into_iter().chain([("PROCESS_ONLY", "preserved")]) {
+                    assert_eq!(
+                        command
+                            .as_std()
+                            .get_envs()
+                            .find(|(name, _)| *name == key)
+                            .unwrap()
+                            .1
+                            .unwrap(),
+                        value
+                    );
+                }
+                for path in &native_paths {
+                    assert_eq!(std::fs::read_to_string(path).unwrap(), native_text);
+                }
+                drop(mcp);
+            }
         }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -11937,6 +12044,7 @@ while IFS= read -r ignored; do :; done
                         value: root.join("home").to_string_lossy().into_owned(),
                     }],
                     custom_api_snapshot: None,
+                    common_environment_unavailable: false,
                 },
             );
         crate::runtime_discovery::with_runtime_configuration(
@@ -13047,15 +13155,34 @@ while IFS= read -r ignored; do :; done
 
     #[tokio::test]
     async fn prompt_error_after_activity_keeps_input_accepted_while_early_rejection_does_not() {
-        for (case_name, prompt_activity, error_code, expected_accepted) in [
+        for (case_name, prompt_activity, error_code, expected_accepted, string_data) in [
             (
                 "activity-before-error",
                 r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-error","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}'"#,
                 -32603,
                 true,
+                false,
             ),
-            ("error-before-activity", ":", -32602, false),
+            ("error-before-activity", ":", -32602, false, false),
+            (
+                "activity-before-string-error",
+                r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-error","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}'"#,
+                -32603,
+                true,
+                true,
+            ),
+            ("string-error-before-activity", ":", -32603, false, true),
         ] {
+            let provider_detail = if string_data {
+                "Model usage has reached personal quota limit. Please check usage or contact administrator."
+            } else {
+                "failed to call agent: Model usage has reached personal quota limit. Please check usage or contact administrator."
+            };
+            let error_data = if string_data {
+                json!(provider_detail)
+            } else {
+                json!({ "error": provider_detail })
+            };
             let root = std::env::temp_dir().join(format!(
                 "rovai-acp-prompt-error-{case_name}-{}",
                 uuid::Uuid::new_v4()
@@ -13072,7 +13199,7 @@ IFS= read -r session || exit 1
 printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}},"sessionId":"session-error","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}}}}}}'
 IFS= read -r prompt || exit 1
 {prompt_activity}
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"error":{{"code":{error_code},"message":"Internal error","data":{{"error":"failed to call agent: Model usage has reached personal quota limit. Please check usage or contact administrator."}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"error":{{"code":{error_code},"message":"Internal error","data":{error_data}}}}}'
 while IFS= read -r ignored; do :; done
 "#,
                 ),
@@ -13127,6 +13254,8 @@ while IFS= read -r ignored; do :; done
                 .start_prompt(&format!("delivery-{case_name}"), "continue")
                 .await
                 .unwrap();
+            let expected_error =
+                format!("ACP error {error_code}: Internal error: {provider_detail}");
 
             if expected_accepted {
                 assert!(matches!(
@@ -13145,14 +13274,14 @@ while IFS= read -r ignored; do :; done
                     receiver.recv().await,
                     Some(AcpIncoming::InputNotAccepted {
                         native_prompt_id,
-                        native_error_code: Some(-32602),
+                        native_error_code: Some(native_error_code),
+                        error,
                         ..
                     }) if native_prompt_id == prompt_id
+                        && native_error_code == error_code
+                        && error == expected_error
                 ));
             }
-            let expected_error = format!(
-                "ACP error {error_code}: Internal error: failed to call agent: Model usage has reached personal quota limit. Please check usage or contact administrator."
-            );
             assert!(matches!(
                 receiver.recv().await,
                 Some(AcpIncoming::Message { message, .. })
@@ -15528,6 +15657,32 @@ while IFS= read -r ignored; do :; done
             &attachment_authorization,
         )
         .unwrap();
+        let mut old_inputs = json!({
+            "schemaVersion":4, "adapterKind":codebuddy.adapter_kind,
+            "hostConfigDigest":codebuddy.host_config_digest, "codebuddyLaunchModel":null,
+            "executionRoot":root.canonicalize().unwrap(), "workspace":workspace,
+            "permissionSemantics":PermissionSemantics::RuntimeManagedV2,
+            "builtinToolContractVersion":BUILTIN_TOOL_CONTRACT_VERSION,
+            "externalMcpServers":{}, "attachmentOutputRoot":attachment_authorization.output_root,
+        });
+        assert_ne!(
+            codebuddy_default,
+            canonical_json_digest(&old_inputs).unwrap()
+        );
+        old_inputs["nativeBackgroundPolicy"] = json!("disabled-v1");
+        assert_eq!(
+            codebuddy_default,
+            canonical_json_digest(&old_inputs).unwrap()
+        );
+        let unchanged = freeze_native_session_compatibility(codebuddy.clone(), &workspace).unwrap();
+        assert_eq!(
+            unchanged.binding_compatibility_digest,
+            codebuddy.binding_compatibility_digest
+        );
+        assert_eq!(
+            unchanged.native_session_compatibility_key,
+            codebuddy.native_session_compatibility_key
+        );
         codebuddy.model.source = "explicit".to_string();
         codebuddy.model.model_id = "provider:explicit-model".to_string();
         let codebuddy_explicit = runtime_compatibility_digest(

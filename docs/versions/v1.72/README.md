@@ -6,10 +6,120 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-20
+last_updated: 2026-10-22
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Team 管理（2026-10-18）
+
+User 在 Team 设计 Thread sequence 29 确认开启 worktree 实施。当前范围为具名团队、General 的
+Team/Custom 创建默认配置、简洁新对话选择和可选 Bootstrap 指引；旧配置不自动创建团队。
+上下文边界与确认见 [R1](model-context-change-team-guidance.md)，分支、范围和结果见
+[实施记录](team-management-implementation.md)。功能已在独立分支实现，单元测试、构建与五项真实模型
+定向验证通过；通用 Gate 为 `degraded`（共有交付失败、一项耗时退化及语义证据不足），不标记为 Gate 通过。
+2026-10-22 User 在 sequence 62 明确按 V10 收口并要求 PR 合入 main、本机安装；本次整合主线
+schema 162，Team 顺延到 Migration 213 / schema 163，本地展示偏好 schema 7 保留跟随系统语言。
+验证与交付记录见同一[实施记录](team-management-implementation.md#v10-收口与-main-整合2026-10-22)。
+
+## 消息字面 HTML 与引用投影（2026-10-22）
+
+聊天正文保留尖括号占位符和原始 HTML 文字，并在可信 Mention 替换前完成文本化。
+更新日志、Markdown 文件与 Skill 阅读面显式保留隐藏策略；执行过程可见性判断和引用投影 v3 同步。
+当前规则见[会话 UI](../../ui/components/conversation-workspace.md#原始-html-与字面文本)与
+[引用合同](../../contracts/message-quotes-v1.md)，验证见[实施记录](implementation-plan.md#消息字面-html-与引用投影2026-10-22)。
+同步引用 Architecture、Contract、更新日志 Contract 与 UI；无 schema/发布版本、模型上下文格式、
+历史快照、Runtime Activity 或平台资格变化。沿已有投影版本处理兼容，无需新 Version Decision。
+
+后续补齐[文件链接间距](../../ui/components/file-preview.md#会话内的文件链接)对 HTML 字面文字的识别，
+并将 raw→text 改为原位替换、`drop` 复用 `skipHtml`；详见[跟进验收](implementation-plan.md#字面-html-间距与遍历收尾2026-10-22)。
+
+## TRAE ACP 错误详情（2026-10-22）
+
+TRAE CLI 0.209.1 使用字符串 `error.data`，原共享 Host 仅提取对象中的 `error.data.error`，
+导致 Provider 配额详情丢失，只留下 `Internal error`。本次兼容两种字符串格式，保持统一清洗、
+失败分类与输入防重放规则。合同见 [Runtime Launch v71](../../contracts/runtime-launch-and-verification-v71.md)，
+证据与验证见[实施记录](implementation-plan.md#trae-acp-错误详情2026-10-22)。
+同步 Contract、Architecture 与路由；不改变模型输入、数据库 schema、UI 或 Runtime 平台资格，不回填旧 Run。
+属于既有白名单规则的局部兼容修复，无需新增 Version Decision。
+
+## 原生后台执行限制（2026-10-21）
+
+按 User 已确认的 33 词规则，为 Claude Code 复用已有私有 settings 与最终环境注入；
+CodeBuddy 按 2026-10-22 的收敛要求只注入三个最终子进程变量，原生同名 settings 仍按 CLI 自身规则生效。
+CodeBuddy 只更新 Host 策略摘要。普通／Single Chat 均覆盖，原生会话不迁移。
+完整前后文本、确认记录、验证与 worktree 交接见[独立说明](model-context-change-native-background-policy.md)，
+当前合同见 [Runtime Launch v70](../../contracts/runtime-launch-and-verification-v70.md)。按 User 最新指令只创建 PR，不合并。
+
+本项更新当前 Contract、Architecture、Context revision 与文档路由；不改变数据库 schema、发布版本、UI、
+Runtime Activity 或平台资格。属于局部启动策略，无需新增 Version Decision；正式模型质量 Gate 状态另记在独立说明。
+
+## 智能体通用环境配置（2026-10-21）
+
+按 User 确认的第三版交互稿接入 Runtime 通用变量、队员继承与原地只读预览，
+保持已有进程与队员草稿。字段、加密、检查失效及 schema 161 升级由
+[Runtime Launch v69](../../contracts/runtime-launch-and-verification-v69.md)拥有；
+实施与验收见[通用环境配置记录](shared-environment-implementation.md)。不改变模型上下文或发布版本。
+
+## 跟随系统界面语言（2026-10-21）
+
+已确认的设置、训练营与 Web 登录入口增加“跟随系统”。General Preferences schema 6 分离偏好与显示结果；旧 schema 1–5 保留原语言，缺失配置才采用 system。桌面本地启动读取、浏览器作用域、响应顺序和异常恢复由 [Interface Language v2](../../contracts/interface-language-v2.md)拥有；创建资料语言由 [First-run Onboarding v7](../../contracts/first-run-onboarding-v7.md)固定。实现与验收见[实施记录](implementation-plan.md#跟随系统界面语言2026-10-21)。不改变 Core 数据库 schema 或发布版本。
+
+## 操作提示精简（2026-10-21）
+
+按 User 确认移除复制会话 ID／项目路径／附件路径、项目改名与移除、撤回、结束单聊、成员邀请／移出、
+定时任务操作及 Web 附件下载交接的全局 Toast。包括手动任务跳过／未启动及成员收尾提示，不新增替代提示；
+既有错误反馈、业务通知与数据更新继续保留。范围与验证见[实施记录](implementation-plan.md#操作提示精简2026-10-21)。
+不改变模型上下文、数据库 schema 或发布版本。
+
+User 于 2026-10-21 确认输入历史简化：首次 ↑ 从现有消息提取本轮固定内容，退出后释放；
+移除专用查询、分页和跨会话缓存，保留草稿与键盘交互。范围与测试证据见
+[输入历史实施记录](input-history-implementation.md)，当前协议见
+[Input History v1](../../contracts/input-history-v1.md)。历史范围跟随现有消息数据，
+不改变模型上下文、数据库 schema 或发布版本。
+
+## 回复链只读详情（2026-10-21）
+
+按 User 确认的 B 方案实现回复块入口、只读平铺详情、悬浮操作、活动执行条和窄窗口替换。
+正式链读取沿单一 reply anchor，不把合批的其他输入合并入链；完整历史通过分页查询与当前 Thread 缓存提供。
+合同见 [Thread Replies v1](../../contracts/thread-replies-v1.md)，实现与验证见
+[回复详情实施记录](reply-details-implementation.md)。不改变模型上下文、数据库 schema 或发布版本。
+
+## 紧凑文件卡片与粘贴内容前缀（2026-10-21）
+
+用户文件卡片最大宽度调整为 224px，短文件名按内容收窄，图片缩略图尺寸不变。
+按 User 后续要求，Agent 文件列表恢复 620px 上限，各行填满列表并随窄容器收缩。
+新生成的长粘贴附件显示原文开头与“粘贴内容 / Pasted text”，草稿恢复和发送后保持。
+仅存有界展示前缀，全文、原文件名、预览与移除规则保持；旧记录不扫描回填。
+合同见 [Camp Attachment v12](../../contracts/camp-attachment-v12.md)，验证见
+[实施记录](implementation-plan.md#紧凑文件卡片与粘贴内容前缀2026-10-21)。
+
+## 原路径附件显示名（2026-10-21）
+
+按 User 确认收窄 Source Ref 的历史文件名约束：包含时间冒号等字符的显示名原样保留，
+仍检查非空、120 码点上限及控制字符，实际文件继续按原路径授权和读取。
+渠道下载与历史受管附件的安全落盘名称处理保持原边界。当前合同见
+[Camp Attachment v12](../../contracts/camp-attachment-v12.md)，验证见
+[实施记录](implementation-plan.md#原路径附件显示名2026-10-21)。
+
+## Web 长粘贴附件（2026-10-22）
+
+补齐浏览器远程连接公屏的长粘贴、恢复与移除。Host 直接写入 Thread 输出目录，Core schema 162
+保存生成归属及单向发送保护，草稿内容仍在浏览器。普通上传不变，不增加后台清理。
+合同见 [Composer Draft v19](../../contracts/camp-composer-draft-v19.md) 和 [Host Web v9](../../contracts/host-web-v9.md)。
+验证与测试归属见[实施记录](web-pasted-text-implementation.md)。
+
+## 单次长文本粘贴转附件（2026-10-20）
+
+Desktop 公屏单次普通文本粘贴超过 10,000 个码点时，生成完整 UTF-8 `.txt`。文件按 Thread 管理，
+不进入系统临时目录；已有正文保留，失败先回填最新编辑器内容。普通弹窗零消息 Active 与一键 Pending
+沿用各自生命周期。采用单向发送保护，移除先保存草稿再异步清理，发送成功先保存新草稿再释放登记。
+必要恢复登记不受普通缓存裁剪，Pending 启动清理补齐输出目录；不增加预算预判、发送对账或垃圾回收器。
+2026-10-21 修正内部纯正文复制：只有恢复后仍含实际 Mention／Skill Atom 才保留结构化粘贴优先级，
+内部纯正文同样按单次 10,000 码点阈值处理。
+当前规则见 [Composer Draft v19](../../contracts/camp-composer-draft-v19.md) 与
+[Clipboard](../../ui/components/structured-mentions.md#clipboard)，取舍见 [V1.72-D53](decisions.md#v1-72-d53)，
+实施及验证见[实施记录](implementation-plan.md#单次长文本粘贴转附件2026-10-20)。
 
 ## 会话执行条（2026-10-20）
 
@@ -81,7 +191,7 @@ Claude Code、Copilot、Qwen 正式启动禁用提问工具；Kimi 与 Qwen 的�
 按 User 确认的三项优化，Desktop 只复用句柄内最近一次行号定位；Web 候选完整分析一次，后续分页和定位按需读取；
 自动刷新确认同版本后跳过正文和 HTML 准备。Web 接受同候选等大小、等修改时间改写可能无法识别的取舍，
 其他读取的摘要校验保持。规范为 [File Preview v23](../../contracts/file-preview-v23.md) 与
-[Host Web v8](../../contracts/host-web-v8.md)，计数与验收见[实施记录](implementation-plan.md#文件预览读取复用2026-10-18)。
+[Host Web v9](../../contracts/host-web-v9.md)，计数与验收见[实施记录](implementation-plan.md#文件预览读取复用2026-10-18)。
 更新现有 Contracts、Architecture、UI 和测试约定；局部可逆实现无需新增 Version Decision，其他领域和模型输入不变。
 
 ## 浏览器文件传输（2026-10-17）
@@ -89,7 +199,7 @@ Claude Code、Copilot、Qwen 正式启动禁用提问工具；Kimi 与 Qwen 的�
 按 User 确认方案实施单文件 30 MiB 上传、进度/取消与原结果核对，及独立授权的原生流式下载。
 预览预算与下载分离，下载保留申请来源授权、准入 Session 校验和资源约束，不增加附件资产或保存期限。
 2026-10-18 按 User seq27 收敛为准入后直接流式发送，取消持续重验及下载所见版本/尾块检查；不新增严格模式。
-当前规范为 [Host Web v8](../../contracts/host-web-v8.md)，取舍见 [D52](decisions.md#v1-72-d52)。
+当前规范为 [Host Web v9](../../contracts/host-web-v9.md)，取舍见 [D52](decisions.md#v1-72-d52)。
 实施及验收状态见[下载链路收尾记录](implementation-plan.md#文件下载准入后直接传输2026-10-18)。
 
 本项保持 v1.72 生命周期；Contracts、Architecture、UI、Decisions、用户/部署文档及导航已更新。
@@ -387,6 +497,8 @@ Memory 入口改用完整 CLI 和按需读取教学。Charter revision 22 保持
 同日修正：新执行初始位置使用已冻结的启动公开消息边界；任何执行行都不拆开回复与附属产物组。
 2026-10-18 增补：执行行使用 Run 输入 ID 显示原消息引用与批量来源，支持按需定位较早输入和返回执行位置。
 复用现有引用及 Footer／动作样式，保持草稿、精确 Run 控制和迟到读取隔离；不新增 Core 数据或后台读取。
+2026-10-21 调整：来源定位移除消息正文的粗描边和独立“返回执行位置”入口，统一使用会话已有的
+“回到最新”向下按钮；保留定位后的 DOM 焦点及控件的键盘焦点反馈。
 当前边界见 [Run Process Detail Surface v55](../../contracts/run-process-detail-surface-v55.md)，验证与交付见
 [实施记录](implementation-plan.md#会话内队员占位)、[启动状态修正](implementation-plan.md#执行行误回到启动状态2026-10-13)
 及[原消息引用](implementation-plan.md#执行行原消息引用2026-10-18)。
@@ -1005,3 +1117,17 @@ Preview 的平台、CLI 子集、Skills/MCP 和并发资格边界不变。
 模型上下文变更。当前规范为 [Transport v43](../../contracts/builtin-tool-transport-v43.md)与
 [File Change v9](../../contracts/runtime-file-change-observation-v9.md)，验证见[实施计划](implementation-plan.md#send-输入文件退出文件变化卡片2026-10-19)。
 本项为可逆的局部投影规则，不新增 Version Decision；同步当前合同、架构、UI 与导航，Runtime 原生映射和根 README 无需变化。
+
+## App 退出中断提醒（2026-10-21）
+
+当前实现 [Notification Episode v12](../../contracts/notification-episode-v12.md) 与
+[Current User Attention v10](../../contracts/current-user-attention-v10.md)。Migration 210 / schema 160
+在原 Migration 209 基础上关闭手动停止来源，保留历史事实和唯一 Disposition。
+Cmd+Q 沿既有退出事务记录，强杀沿既有启动恢复确认；前台正式 Thread 展示后按观察边界确认。
+User 进一步确认保留 App 运行期间的 Run 异常退出提醒，统一称“执行中断”，沿用已有 `execution_lost`。
+删除 600ms 短亮、停止意图、精确准入描述及为中断添加的可见 Run 观察，普通执行进度不再触发通知读取。
+多批结果独立接收，挂起批次不阻挡后续刷新。旧手动停止退出侧栏候选，不伪造已读。
+复核修复排队确认遇到 reset、使命内容未挂载即确认、拉取中信号丢失与普通失败气泡可见来源误删；
+不恢复短亮或逐 command 读取。具体场景与验证见下述实施记录。
+
+取舍见 [V1.72-D55](decisions.md#v1-72-d55)，实施验证见[退出提醒验收](interruption-attention-validation.md)。

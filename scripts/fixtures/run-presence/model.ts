@@ -265,6 +265,44 @@ export const model = {
   },
   get: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) },
   note: (note: string) => update({ note }),
+  showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false) {
+    this.setScenario('stream'); halt()
+    const messages = [
+      makeMessage('reply-a', 1, '回复详情保持只读，沿用当前会话里的回复锚点。'),
+      makeMessage('reply-b', 2, '我先核对消息的来源，再把详情接到回复块上。', 0),
+      makeMessage('reply-c', 3, '详情用头像、作者和正文排列，复制与回到原文悬浮出现。', 1),
+      makeMessage('reply-d', 4, '执行中的消息也要能查看过程。'),
+      makeMessage('reply-e', 5, '这里是另一个话题。'),
+      makeMessage('reply-f', 6, '已经确认，执行条可以复用原有浮层。', 2),
+      makeMessage('reply-g', 7, '合批收到两条输入时，仍然沿着最后一条输入的回复锚点展示。', 0, 'run-alice'),
+      makeMessage('reply-h', 8, '这个回复属于第二个话题。', 3),
+      makeMessage('reply-i', 9, '另一批输入不会把两个回复链合并。', 0, 'run-other')
+    ]
+    const parents: Record<string,string> = { 'reply-b':'reply-a','reply-c':'reply-a','reply-d':'reply-b',
+      'reply-f':'reply-d','reply-g':'reply-d','reply-h':'reply-e','reply-i':'reply-h' }
+    for (const message of messages) message.replyToThreadMessageId = parents[message.id] ?? null
+    if (long) for (let i = 10; i <= 120; i++) {
+      // Cross the public-message grouping height when the detail pane closes.
+      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(16) : ''}`
+      messages.push({ ...makeMessage(`long-${i}`,i,body,0,grouped ? 'run-alice' : null), replyToThreadMessageId:'reply-g' })
+    }
+    const run = { ...makeRun('run-alice',0,'running',['reply-c','reply-d']),anchorMessageId:'reply-d',publicTailSequenceAtStart:4 }
+    const other = { ...makeRun('run-other',0,'running',['reply-f','reply-h']),anchorMessageId:'reply-h',publicTailSequenceAtStart:8 }
+    controls.hiddenMessages = long && !allLoaded ? messages.slice(0,-12) : []
+    update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread,title:'回复详情' }, messages:long && !allLoaded ? messages.slice(-12) : messages,
+      agentRuns:[run,other],executionEvidence:[...evidence(run),...evidence(other)],messageDeliveries:[] } })
+    model.resync()
+  },
+  finishReplyRuns() {
+    halt()
+    update({ snapshot: { ...state.snapshot, agentRuns:state.snapshot.agentRuns.map((run:any)=>({ ...run,status:'succeeded',endedAt:new Date().toISOString() })) } })
+    model.resync()
+  },
+  withdrawReply() {
+    update({ snapshot: { ...state.snapshot, messages:state.snapshot.messages.map((m:any)=>m.id==='reply-c'
+      ? { ...m,body:'',content:[],withdrawn:true,version:m.version+1 } : m) } })
+    model.resync()
+  },
   showSourceCase(kind: 'batch' | 'batch-history' | 'history' | 'missing' | 'withdrawn' | 'legacy' | 'attachment') {
     this.setScenario('stream'); halt()
     const source = makeMessage('source-first', 1, '第一条原始输入：核对执行行的来源。')
@@ -475,7 +513,7 @@ export const model = {
   client: { ...backing.client,
     onInvalidated: (listener: () => void) => { invalidationListeners.add(listener); return () => invalidationListeners.delete(listener) },
     request: async (method: string, input: any = {}): Promise<any> => {
-      if (['agentRunExecution.page', 'agentRunExecution.changes', 'agentRunEvidence.getContent', 'thread.messages.around'].includes(method))
+      if (['agentRunExecution.page', 'agentRunExecution.changes', 'agentRunEvidence.getContent', 'thread.messages.around', 'thread.messages.replies'].includes(method))
         controls.executionReads.push({ method, ...input })
       if (method === 'members.list') return profiles
       if (method === 'agentRunExecution.page' || method === 'agentRunExecution.changes') {
@@ -514,6 +552,20 @@ export const model = {
         controls.receipts.set(input.commandId, result)
         if (controls.continuationMode === 'response-lost') throw new Error('Simulated lost receipt')
         return result
+      }
+      if (method === 'thread.messages.replies') {
+        const all = [...controls.hiddenMessages,...state.snapshot.messages]
+        const byId = new Map(all.map((m:any)=>[m.id,m]))
+        const root = (id:string): string => { const seen=new Set<string>(); let m:any=byId.get(id); while(m?.replyToThreadMessageId && !seen.has(m.id) && byId.has(m.replyToThreadMessageId)) { seen.add(m.id); m=byId.get(m.replyToThreadMessageId) } return m?.id ?? id }
+        const rootId = root(input.messageId)
+        const chain = all.filter((m:any)=>root(m.id)===rootId).sort((a:any,b:any)=>a.sequence-b.sequence)
+        const candidates = chain.filter((m:any)=>input.before ? m.sequence<input.sequence : m.sequence>(input.sequence??0))
+        const page = input.before ? candidates.slice(-(input.limit??50)) : candidates.slice(0,input.limit??50)
+        return { schemaVersion:1,threadId:state.snapshot.thread.id,messageId:input.messageId,rootMessageId:rootId,
+          throughGlobalSequence:state.version,sourceAvailable:byId.has(input.messageId),replyCount:Math.max(0,chain.length-1),
+          hasEarlier:!!page.length && chain[0].sequence<page[0].sequence,
+          hasLater:!!page.length && chain.at(-1).sequence>page.at(-1).sequence,messages:structuredClone(page),
+          runAnchorMessageIds:(input.runAnchorMessageIds??[]).filter((id:string)=>root(id)===rootId) }
       }
       if (method === 'thread.messages.anchors') {
         const items = state.snapshot.messages.filter((m: any) => m.authorType === 'user').map((m: any) => ({

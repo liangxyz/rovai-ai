@@ -23,7 +23,7 @@ app.whenReady().then(async () => {
   window.webContents.on('console-message', (event) => console.error(event.message))
   const webOpens = []
   window.webContents.setWindowOpenHandler(({ url }) => { webOpens.push(url); return { action: 'deny' } })
-  await window.loadFile(renderer)
+  await window.loadFile(renderer, mode === '--input-history' ? { query: { inputHistory: '1' } } : undefined)
   const run = (code) => window.webContents.executeJavaScript(code, true)
   const settle = async (milliseconds = 40) => {
     await wait(milliseconds)
@@ -99,6 +99,95 @@ app.whenReady().then(async () => {
 
   try {
     await waitFor("Boolean(document.querySelector('.single-chat-final'))")
+    if (mode === '--input-history') {
+      const input = '.single-chat-composer textarea'
+      const webState = () => run('window.singleChatTest.webState()')
+      const boundary = async end => {
+        await run(`(() => {const node=document.querySelector('${input}'); node.focus();
+          node.setSelectionRange(${end ? 'node.value.length' : '0'},${end ? 'node.value.length' : '0'})})()`)
+        await settle()
+      }
+      const historyKey = async (key, extra = {}) => {
+        const consumed = await run(`(() => {
+          const event=new KeyboardEvent('keydown',{key:${JSON.stringify(key)},bubbles:true,cancelable:true,...${JSON.stringify(extra)}});
+          document.querySelector('${input}').dispatchEvent(event); return event.defaultPrevented;
+        })()`)
+        await settle()
+        return consumed
+      }
+      await fillComposer('原单聊草稿')
+      await boundary(false)
+      const writes = (await webState()).recoveryWrites
+      assert.equal(await historyKey('ArrowUp', { isComposing: true }), false)
+      assert.equal(await historyKey('ArrowUp', { shiftKey: true }), false)
+      assert.equal(await historyKey('ArrowUp'), true)
+      assert.equal((await webState()).value, 'private newest')
+      assert.equal((await webState()).recoveryWrites, writes)
+      await run('window.singleChatTest.publishHistoryPending()')
+      await waitFor('window.singleChatTest.inputHistoryState().queue.length === 0')
+      await settle()
+      assert.equal((await webState()).value, 'private newest', 'publishing pending preserves this browsing round')
+      await historyKey('ArrowUp')
+      assert.equal((await webState()).value, 'private older')
+      await boundary(true)
+      await historyKey('ArrowDown')
+      assert.equal((await webState()).value, 'private newest')
+      assert.equal(await historyKey('Escape'), true)
+      assert.equal((await webState()).value, '原单聊草稿')
+      assert.equal((await webState()).recoveryWrites, writes, 'Esc restores the unchanged draft without saving it again')
+      assert.ok(await run("Boolean(document.querySelector('.single-chat-popover:not([hidden])'))"), 'Esc restores without closing the panel')
+      await boundary(false)
+      await historyKey('ArrowUp')
+      await boundary(true)
+      assert.equal(await historyKey('ArrowDown'), true)
+      assert.equal((await webState()).value, '原单聊草稿')
+      assert.equal((await webState()).recoveryWrites, writes, 'Down past the latest input does not save the unchanged draft again')
+      await boundary(false)
+      await historyKey('ArrowUp')
+      assert.equal((await webState()).value, 'private published', 'next round uses formal messages after publication')
+      await run('window.singleChatTest.replaceHistoryPending("原单聊草稿")')
+      await waitFor("Boolean(document.querySelector('.single-chat-pending-queue .pending-input-edit'))")
+      await run("document.querySelector('.single-chat-pending-queue .pending-input-edit').click()")
+      await waitFor('window.singleChatTest.webState().value === "原单聊草稿"')
+      assert.equal((await webState()).value, '原单聊草稿', 'equal-text explicit replacement clears the old preview')
+      await boundary(false)
+      await historyKey('ArrowUp')
+      await run('window.singleChatTest.restoreDraft()')
+      await settle()
+      assert.equal((await webState()).value, '原单聊草稿', 'remount recovers the real draft')
+      assert.equal(await run('window.singleChatTest.inputHistoryState().reads'), 0)
+      await run('window.singleChatTest.setMode("running", true)')
+      await fillComposer('')
+      await waitFor("document.querySelector('.single-chat-composer .composer-primary-action')?.getAttribute('aria-label') === '停止当前执行'")
+      await boundary(false)
+      await historyKey('ArrowUp')
+      assert.equal(await run("document.querySelector('.single-chat-composer .composer-primary-action').getAttribute('type')"), 'submit')
+      await dispatchComposerEnter(false)
+      await waitFor('window.singleChatTest.webState().sends.length === 1')
+      assert.equal((await webState()).sends[0].command.body, 'private newest')
+      await waitFor('window.singleChatTest.webState().value === ""')
+      assert.equal(await run('window.singleChatTest.inputHistoryState().reads'), 0)
+      await boundary(false)
+      await historyKey('ArrowUp')
+      assert.equal((await webState()).value, 'private newest')
+      await run('window.singleChatTest.showHistoryQuote()')
+      await waitFor("Boolean(document.querySelector('.single-chat-composer .message-quotes-trigger'))")
+      assert.equal((await webState()).value, 'private newest', 'ordinary draft metadata refresh preserves the preview')
+      await run("document.querySelector('.single-chat-composer .message-quotes-trigger').click()")
+      await waitFor("Boolean(document.querySelector('.message-quote-remove'))")
+      await run("document.querySelector('.message-quote-remove').click()")
+      await waitFor("!document.querySelector('.single-chat-composer .message-quotes-trigger')")
+      await run('window.singleChatTest.restoreDraft()')
+      await settle()
+      assert.equal((await webState()).value, 'private newest', 'explicit quote changes adopt the preview into the real draft')
+      await fillComposer('edited private history')
+      assert.equal(await historyKey('Escape'), true, 'after editing, Escape resumes the ordinary panel-close behavior')
+      assert.ok(await run("Boolean(document.querySelector('.single-chat-popover[hidden]'))"))
+      assert.equal((await webState()).value, 'edited private history')
+      console.log(JSON.stringify({ ok: true, verified: { inputHistory: true, previewSend: true, draftRecovery: true } }))
+      window.destroy(); app.quit()
+      return
+    }
     if (mode === '--web-links') {
       window.webContents.debugger.attach('1.3')
       await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -334,6 +423,31 @@ app.whenReady().then(async () => {
       app.quit()
       return
     }
+    const collapseStyle = await run(`(() => {
+      const b = document.querySelector('.single-chat-heading .camp-detail-collapse'), k = document.querySelector('.single-chat-footer kbd');
+      const r = b.getBoundingClientRect(), s = getComputedStyle(k), p = b.closest('aside').getBoundingClientRect();
+      return { text:b.textContent.trim(), width:r.width, height:r.height, top:r.top-p.top, right:p.right-r.right,
+        keyBorder:s.borderWidth, keyPadding:s.padding, keyBackground:s.backgroundColor };
+    })()`)
+    assert.deepEqual(collapseStyle, { text:'收起', width:62, height:28, top:9, right:13,
+      keyBorder:'0px', keyPadding:'0px', keyBackground:'rgba(0, 0, 0, 0)' })
+    await fillComposer('收起后继续编辑的单聊草稿')
+    await click('.single-chat-target-trigger')
+    await key('Escape')
+    assert.equal(await run('document.querySelector(".single-chat-popover").hidden'), false, 'Menu Escape keeps Single Chat open')
+    await fillComposer('收起后继续编辑的单聊草稿')
+    await run(`document.querySelector('.single-chat-composer textarea').dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', isComposing:true, bubbles:true, cancelable:true }))`)
+    assert.equal(await run('document.querySelector(".single-chat-popover").hidden'), false, 'IME Escape cannot collapse the panel')
+    await key('Escape')
+    assert.equal(await run('document.querySelector(".single-chat-popover").hidden'), true)
+    assert.equal(await run('document.querySelector(".single-chat-popover").contains(document.activeElement)'), false, 'No focus remains inside the hidden panel')
+    await click('.camp-detail-entry[data-detail="single-chat"]')
+    assert.equal(await run('document.querySelector(".single-chat-composer textarea").value'), '收起后继续编辑的单聊草稿')
+    await fillComposer('')
+    await click('.single-chat-heading .camp-detail-collapse')
+    assert.equal(await run('document.querySelector(".single-chat-popover").hidden'), true)
+    await click('.camp-detail-entry[data-detail="single-chat"]')
+    state = await settle()
     assert.ok(state.panel && state.panel.width <= 441 && state.panel.height <= 701)
     assert.equal(state.pageOverflow, false)
     assert.equal(state.triggerAvatars, 1)

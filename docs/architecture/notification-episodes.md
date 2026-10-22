@@ -2,7 +2,7 @@
 document_type: architecture
 authority: notification-episode-architecture
 status: accepted
-last_updated: 2026-10-17
+last_updated: 2026-10-21
 ---
 
 # Notification Episode 架构
@@ -22,6 +22,8 @@ Core Notification module
   ├─ changesSince() ─────── journal identities + current Episode + exact signal hydration
   ├─ acknowledge() ──────── one observed occurrence
   ├─ acknowledgeVisibleSources() ─ exact visible sources through observed journal boundary
+  ├─ threadInterruptions() ─ bounded per-Thread interruption projection
+  ├─ acknowledgeThreadInterruptions() ─ observed Thread interruption candidates only
   ├─ clear() ────────────── through attention revision
   └─ markAllRead() ──────── through global change sequence
 
@@ -38,7 +40,7 @@ Electron Main 和 Renderer 不保存副本或聚合状态。`event_log` 可以�
 
 ## 深模块 seam
 
-外部 interface 只暴露六个通知行为和 preference。聚合、原因优先级、逐 Mention 选择、approval generation、
+外部 interface 暴露通知读取、处置与 preference；中断候选和范围确认由同一通知模块拥有。聚合、原因优先级、逐 Mention 选择、approval generation、
 版本/注意力 revision、clear reappearance、Journal floor 和 hydration 全部隐藏在 Core module 内；同一
 interface 也是测试面。SQLite triggers 是该 implementation 的 source adapters，不成为 Renderer interface。
 
@@ -90,7 +92,7 @@ Episode 推荐动作从不参与该来源集合。执行台由稳定 Portal 在�
   运行中只消费之后的 Journal。
 - Task 开关采用设置事务内固定、持久化的通知边界。变化时递增已有通知时钟，空序号不产生通知事实或未读。
   changesSince 同一事务返回增量和有效 Task 快照；Renderer 与设置共用按序号更新的能力投影，隔离迟到响应。
-  不等待设置读取、不另读水位，不回退或直接重置全局消费游标。见 [Notification Episode v10](../contracts/notification-episode-v10.md)。
+  不等待设置读取、不另读水位，不回退或直接重置全局消费游标。见 [Notification Episode v12](../contracts/notification-episode-v12.md)。
 - Renderer 分页使用局部 candidate cursor；所有分页、精确可见性处理、Inbox 接收和 heads-up 入队成功后
   才提交共享 cursor，失败保持原边界重试。
 - Renderer 按 Journal 顺序先归约 exact invalidation、再接收同 change 的新 signal；普通 Inbox hydration
@@ -110,8 +112,8 @@ cascade 和 Journal trigger 收口。
 ## References
 
 - [通知事实与投影](foundational-invariants.md#core-notifications)
-- [Notification Episode v9](../contracts/notification-episode-v9.md)
-- [Current User Attention v8](../contracts/current-user-attention-v8.md)
+- [Notification Episode v12](../contracts/notification-episode-v12.md)
+- [Current User Attention v10](../contracts/current-user-attention-v10.md)
 
 
 ## 公屏与单聊注意力
@@ -139,3 +141,30 @@ Mission/Task command 的真实状态变化同事务调用通知 source adapter�
 偏好与状态筛选只控制瞬时呈现；按相同 sourceMessageId、完成状态 actor Run 与已完成图成员关系合并重复卡片。
 当前 Mission/Task 标题在读取时水合，原状态与来源仍是不可变事实。新回复小点另由非撤回 Agent 消息首次发布水位
 决定，与终态成功或精确通知确认独立。
+
+<a id="中断蓝点与实时反馈"></a>
+<a id="app-退出中断提醒"></a>
+## 执行中断提醒
+
+[Notification Episode v12](../contracts/notification-episode-v12.md) 沿用退出和启动恢复的真实终态事务，
+仅将 `app_shutdown` / `execution_lost` 作为侧栏执行中断提醒；App 运行期间确认 Host/worker 丢失同样属于后者。
+既有恢复仍可继续的执行不造中断；
+手动停止不再准入停止通知。旧 `user_stop` 历史事实退出侧栏候选，保留原 Disposition 审计。
+Migration 210 / schema 160 原子替换 producer，不回填、不新增运行记录或恢复扫描。
+
+Thread 批量投影从请求 ID 和中断部分索引读取，使用绑定已准入 Database 的独立只读 WAL 事务，
+不水合 Inbox 正文。确认仍走原写连接和 Gateway，同一 Disposition 是唯一已读真源。
+已结束私有 Conversation 退出候选，不让后继单聊代读。每批立即接收；失败/挂起不拖住其他批
+或后续刷新，代次、已知序号和确认回执隔离迟到响应。
+
+正常增量只由通知事件驱动，空批次不读投影。初始化、导航范围变化、reset、重新聚焦及既有
+30 秒恢复轮询用于收敛。普通执行进度、消息快照更新不能重启通知轮询；稳定 dispatcher 读取当前来源。
+读取中收到信号只保留一次待刷新及其恢复意图，完成后补读；失败保持退避，停用/卸载取消补读。
+没有短亮准入描述、停止意图、展示计时和状态槽检测。
+
+前台正式 Thread 内容成功展示后，按已加载的当前代次投影冻结边界，以范围命令确认执行中断提醒。
+这一提醒表示会话执行被打断，因此不再要求定位具体 Run 或输出；工作区挂载条件与确认条件共用，
+使命记录未就绪及缓存/失败内容不确认。排队回调执行时再次核对代次，不能用旧快照抢先记为已查看。
+其他通知仍使用精确可见来源，包含无输出普通失败的可见气泡；`acknowledgeVisibleSources` 排除中断分类。
+显式标记已读先保存本机状态，再确认冻结范围；Core 重试不重做本机操作。
+取舍见 [V1.72-D55](../versions/v1.72/decisions.md#v1-72-d55)。

@@ -54,6 +54,8 @@ use crate::camp_content::{composer_document_from_content, serialize_composer_doc
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateThreadCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<crate::teams::TeamSelection>,
     pub name: Option<String>,
     pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
@@ -76,6 +78,7 @@ impl CreateThreadCommand {
         default_lead: &str,
     ) -> Self {
         Self {
+            team: None,
             name: None,
             project_binding_kind: ProjectBindingKind::Directory,
             project_path,
@@ -615,6 +618,7 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendUserThreadMessageCommand>,
     ) -> Result<CommandExecution> {
+        crate::web_upload::protect_for_send(database, &envelope.payload.source_attachments)?;
         let command = SendUserThreadDraftCommand {
             draft_client: DraftClient::default(),
             camp_id: envelope.payload.camp_id.clone(),
@@ -1005,6 +1009,7 @@ impl CollaborationService {
                 expected_versions: envelope.expected_versions.clone(),
                 execution_epoch: envelope.execution_epoch,
                 payload: CreateThreadCommand {
+                    team: None,
                     name: None,
                     project_binding_kind: envelope.payload.project_binding_kind,
                     project_path: envelope.payload.project_path.clone(),
@@ -3557,6 +3562,33 @@ pub(crate) fn create_camp_in_tx(
             "This collaboration mode is not available",
         ));
     }
+    let resolved;
+    let mut guidance = None;
+    let command = if let Some(selection) = &command.team {
+        let Some(team) = crate::teams::get_on_connection(transaction, &selection.team_id)? else {
+            return Ok(rejected(
+                "team.unavailable",
+                "The selected Team is unavailable",
+            ));
+        };
+        if team.version != selection.expected_version {
+            return Ok(rejected(
+                "team.conflict",
+                "The selected Team has changed. Review it before creating a Thread",
+            ));
+        }
+        resolved = CreateThreadCommand {
+            member_agent_ids: team.roster.member_agent_ids,
+            default_lead_agent_id: team.roster.default_lead_agent_id,
+            ..command.clone()
+        };
+        if !team.guidance.is_empty() {
+            guidance = Some(team.guidance);
+        }
+        &resolved
+    } else {
+        command
+    };
     if command.member_agent_ids.is_empty() {
         return Ok(rejected(
             "camp.no_present_members",
@@ -3624,6 +3656,12 @@ pub(crate) fn create_camp_in_tx(
             now,
         ],
     )?;
+    if let Some(guidance) = guidance {
+        transaction.execute(
+            "INSERT INTO thread_team_bootstrap(camp_id,guidance) VALUES(?1,?2)",
+            params![camp_id, guidance],
+        )?;
+    }
     for member_id in &command.member_agent_ids {
         transaction.execute(
             r#"
@@ -7314,6 +7352,7 @@ mod slow_tests {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let command = CreateThreadCommand {
+            team: None,
             name: Some("  重构\n\tMCP   设置页  ".to_string()),
             project_path: directory.join("workspace").to_string_lossy().to_string(),
             project_binding_kind: ProjectBindingKind::Directory,
@@ -7390,6 +7429,7 @@ mod slow_tests {
                 None,
                 CreateThreadCommand {
                     name,
+                    team: None,
                     project_path: directory.join("workspace").to_string_lossy().to_string(),
                     project_binding_kind: ProjectBindingKind::Directory,
                     member_agent_ids: members.into_iter().map(str::to_string).collect(),

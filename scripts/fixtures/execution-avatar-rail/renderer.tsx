@@ -131,6 +131,7 @@ Object.assign(window, { rovai: {
 } })
 
 let configureNotificationFixture: (() => void) | null = null
+let configureFailureFixture: (() => void) | null = null
 let focusNotificationRun: ((requestId: number, runId: string) => void) | null = null
 let focusNotificationSubject: ((kind: 'task' | 'mission', requestId: number) => void) | null = null
 let notificationFixtureEnabled = false
@@ -157,6 +158,7 @@ function NotificationFixtureBridge(): null {
 
 Object.assign(window, { executionNotificationTest: {
   configureRight: () => configureNotificationFixture?.(),
+  configureFailure: () => configureFailureFixture?.(),
   openExecution: () => previewHarness?.openExecution(),
   hideExecution: () => previewHarness?.hidePane(),
   focusRun: (requestId: number, runId = 'run-agent-1') => focusNotificationRun?.(requestId, runId),
@@ -193,6 +195,8 @@ Object.assign(window, { executionNotificationTest: {
       viewportRect: rect(viewport),
       viewportHidden: viewport?.hidden ?? null,
       visibleRunIds: latestVisibleNotificationSources?.agentRunIds ?? [],
+      failureBubbleVisible: !!document.querySelector<HTMLElement>('[data-presence-run="silent-failure"]')?.checkVisibility(),
+      executionVisible: !!document.querySelector<HTMLElement>('.execution-drawer')?.checkVisibility(),
       visibleSourceReports: visibleNotificationSourceReports.map((sources) => sources.agentRunIds),
       presentedRequests: [...presentedNotificationRequests]
     }
@@ -222,6 +226,7 @@ function Fixture(): React.JSX.Element {
   const [longTitleScenario, setLongTitleScenario] = useState(false)
   const [stoppedRuns, setStoppedRuns] = useState<string[]>([])
   const [interruptionScenario, setInterruptionScenario] = useState(false)
+  const [failureScenario, setFailureScenario] = useState(false)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   configureNotificationFixture = () => {
     notificationFixtureEnabled = true
@@ -231,6 +236,16 @@ function Fixture(): React.JSX.Element {
     latestVisibleNotificationSources = null
     visibleNotificationSourceReports.length = 0
     presentedNotificationRequests.length = 0
+  }
+  configureFailureFixture = () => {
+    notificationFixtureEnabled = true
+    setFailureScenario(true)
+    setCount(1)
+    setOpen(false)
+    setPlacement('right')
+    setNotificationFocus(null)
+    previewHarness?.hidePane()
+    latestVisibleNotificationSources = null
   }
   focusNotificationRun = (requestId, runId) => setNotificationFocus({
     requestId,
@@ -317,6 +332,15 @@ function Fixture(): React.JSX.Element {
       files: [{ evidenceFileId: 'interrupted-file', path: 'docs/proposals/thread-runs.md', changeKind: 'add',
         presentationKind: 'operation_history', operationCount: 1 }],
       fileCount: 1, operationCount: 1, completedAt: now }]
+  }
+  if (failureScenario) {
+    snapshot.agentRuns = [{ ...snapshot.agentRuns[0], id: 'silent-failure', status: 'failed',
+      invocationKind: 'batch', threadTurnId: null, conversationId: null, endedAt: now,
+      inputMessageIds: ['message-1'], anchorMessageId: 'message-1', executionEvidenceCount: 0 }]
+    snapshot.messages = snapshot.messages.slice(0, 1)
+    snapshot.executionEvidence = []
+    snapshot.tasks = []
+    snapshot.agentRunFileChanges = []
   }
   return <FilePreviewProvider threadId={threadId} resolvedTheme={theme === 'night' ? 'night' : 'day'}>
     <NotificationFixtureBridge />

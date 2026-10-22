@@ -1,6 +1,7 @@
+import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import { shortcutDefaults } from '../../../apps/desktop/src/shared/shortcuts'
 import { EMPTY_SNAPSHOT, sanitizeSnapshot, registerNavigationProjects } from '../../../apps/desktop/src/shared/navigation-preferences-model'
-import type { NavigationSnapshot, NavigationPreferencesSnapshot } from '@contracts'
+import type { GeneralPreferencesSnapshot, NavigationSnapshot, NavigationPreferencesSnapshot, MissionRecord } from '@contracts'
 import type { ThreadCreationPreflight, CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -20,6 +21,8 @@ const calls: string[] = []
 const listeners = new Set<(snapshot: SupervisorSnapshot) => void>()
 const coreListeners = new Set<(event: CoreEvent) => void>()
 const navigationPreferenceListeners = new Set<(snapshot: NavigationPreferencesSnapshot) => void>()
+const languageListeners = new Set<(snapshot: GeneralPreferencesSnapshot) => void>()
+let localLanguage: GeneralPreferencesSnapshot = { ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguagePreference: 'zh-CN', interfaceLanguage: 'zh-CN' }
 const responses = new Map<string, unknown>()
 const requestHandlers = new Map<string, (params: any) => unknown>()
 let now = 0
@@ -111,13 +114,23 @@ function api(path = ''): unknown {
         calls.push(path)
         return Promise.resolve(next)
       }
+      if (path === 'generalPreferences.onInterfaceLanguageChanged') {
+        languageListeners.add(args[0])
+        return () => languageListeners.delete(args[0])
+      }
+      if (path === 'generalPreferences.setInterfaceLanguagePreference') {
+        localLanguage = { ...localLanguage, interfaceLanguagePreference: args[0],
+          interfaceLanguage: args[0] === 'system' ? localLanguage.systemLanguage : args[0], languageRevision: localLanguage.languageRevision + 1 }
+        languageListeners.forEach(listener => listener(localLanguage))
+        return Promise.resolve(localLanguage)
+      }
       if (path.split('.').at(-1)?.startsWith('on')) return () => undefined
       if (path === 'supervisor.getSnapshot') return initialSupervisor.promise
       if (path === 'desktopSession.getStartupSnapshot') { calls.push(path); return localSession.promise }
-      if (path === 'desktopSession.getInterfaceLanguage') { calls.push(path); return Promise.resolve('zh-CN') }
+      if (path === 'generalPreferences.getInterfaceLanguage') { calls.push(path); return Promise.resolve(localLanguage) }
       if (path === 'currentUserProfile.get') return Promise.resolve({ displayName: '', avatarDataUrl: null })
       if (path === 'appearance.get') return Promise.resolve({ ...DEFAULT_APPEARANCE, resolvedTheme: appearanceTheme })
-      if (path === 'generalPreferences.get') return Promise.resolve({ schemaVersion: 4,
+      if (path === 'generalPreferences.get') return Promise.resolve({ ...localLanguage,
         startupLocationMode: 'last_location', lastSettingsSection: 'general', executionConsolePlacement: 'bottom',
         newConversationDefaults: null, newConversationDefaultsRequireConfirmation: false,
         oneClickNewConversationEnabled: false, worldMapEnabled: true, ...(responses.get(path) ?? {}) })
@@ -156,6 +169,8 @@ async function reset(target: RestorableLocation | null = { kind: 'camp', threadI
   listeners.clear()
   coreListeners.clear()
   navigationPreferenceListeners.clear()
+  languageListeners.clear()
+  localLanguage = { ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguagePreference: 'zh-CN', interfaceLanguage: 'zh-CN' }
   responses.clear()
   requestHandlers.clear()
   calls.length = 0
@@ -170,8 +185,8 @@ async function reset(target: RestorableLocation | null = { kind: 'camp', threadI
   if (resolveSupervisor) initialSupervisor.resolve(supervisor)
   root = createRoot(document.getElementById('root')!)
   flushSync(() => root!.render(<App />))
-  check(document.querySelector('.startup-loading-canvas'),
-    'The first committed frame must show loading before any timer or IPC response')
+  check(document.querySelector('.language-bootstrap') && !document.querySelector('.startup-loading-canvas'),
+    'The first committed frame must wait for the local language before rendering localized startup content')
   await flush()
 }
 
@@ -227,7 +242,7 @@ function recoveryFrame(kind: string) {
 function noAuthority() {
   // Session state, interface language and preview retention are Main-owned
   // local reads; none enter Core authority before admission.
-  check(calls.every(call => ['desktopSession.getStartupSnapshot', 'desktopSession.getInterfaceLanguage', 'filePreview.updateRetention'].includes(call)), `Pre-ready authority calls: ${calls.join(', ')}`)
+  check(calls.every(call => ['desktopSession.getStartupSnapshot', 'generalPreferences.getInterfaceLanguage', 'filePreview.updateRetention'].includes(call)), `Pre-ready authority calls: ${calls.join(', ')}`)
 }
 
 Object.assign(window, { startupTest: {
@@ -318,7 +333,7 @@ Object.assign(window, { startupTest: {
     await reset(null, false)
     pageFrame('location', true)
     noAuthority()
-    cases.push('null initial snapshots show the brand canvas from the first frame')
+    cases.push('the local language resolves before null initial snapshots show the brand canvas')
 
     for (const target of [{ kind: 'camp', threadId }, { kind: 'members', agentId: null, tab: 'identity' },
       { kind: 'memory' }, { kind: 'quick_chat' }] as RestorableLocation[]) {
@@ -396,6 +411,19 @@ Object.assign(window, { startupTest: {
     check(!document.querySelector('.startup-loading-canvas, .bootstrap-shell'), 'Ready onboarding replaces the initial loading canvas')
     check(!calls.includes('threads.enter'), 'A fresh first-run flow must not enter an existing Camp')
     cases.push('first-run authority gate stays intact and ready onboarding replaces loading immediately')
+    const welcome = document.querySelector('.onboarding-welcome')
+    const languages = document.querySelectorAll<HTMLInputElement>('input[name="onboarding-language"]')
+    check(languages.length === 3, 'Onboarding exposes system, Simplified Chinese and English in the existing position')
+    document.querySelector<HTMLInputElement>('input[name="onboarding-language"][value="en"]')!.click()
+    await flush()
+    check(document.documentElement.lang === 'en' && document.querySelector('#onboarding-welcome-title')?.textContent === 'Welcome to Rovai',
+      'Manual English updates app-owned content and the page language')
+    document.querySelector<HTMLInputElement>('input[name="onboarding-language"][value="system"]')!.click()
+    await flush()
+    check(localLanguage.interfaceLanguagePreference === 'system' && document.querySelector<HTMLInputElement>('input[name="onboarding-language"][value="system"]')!.checked,
+      'Switching to system retains the preference even when the effective language stays English')
+    check(document.querySelector('.onboarding-welcome') === welcome, 'Changing language preserves the current component tree')
+    cases.push('Onboarding language choices update in place and distinguish system from its resolved language')
 
     await reset()
     await advance(350)
@@ -826,6 +854,65 @@ Object.assign(window, { startupTest: {
       check(!dot, 'The stopped Thread must not acquire an unread dot in ' + theme)
       await flush()
     }
+
+    // Use the real startup restore and workspace gates: the Thread is ready
+    // before missions.list, so selection/snapshot readiness alone cannot ACK.
+    const originalHasFocus = document.hasFocus.bind(document)
+    Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true })
+    for (const outcome of ['loaded', 'failed'] as const) {
+      await reset({ kind: 'camp', threadId: 'A' })
+      for (const [method, response] of navigationResponses) responses.set(method, response)
+      for (const [method, handler] of navigationHandlers) requestHandlers.set(method, handler)
+      const mission: MissionRecord = { missionId: 'mission-attention', threadId: 'A', number: 1,
+        title: '恢复的使命', description: '', status: 'not_started', sourceMessageId: null,
+        projectPath: '/fixture/quick-chat', projectBindingKind: 'quick_chat', detailsVersion: 1,
+        tags: [], attachments: [], createdAt: stamp, updatedAt: stamp, memberAgentIds: [],
+        defaultLeadAgentId: null, runningAgentIds: [], startAvailable: false, hasUnread: false,
+        workspaceEverCreated: false, workspaceResourcesPresent: false, cleanupAvailable: false }
+      const projection = campProjection('A')
+      campRequest = id => id === 'A'
+        ? { ...projection, thread: { ...projection.thread, missionId: mission.missionId } }
+        : campProjection(id)
+      const missions = deferred<MissionRecord[]>()
+      requestHandlers.set('missions.list', () => missions.promise)
+      const task = { enabled: false, headsUpAfterSequence: 0, observedThroughChangeSequence: 10 }
+      responses.set('preferences.tasks.get', task)
+      responses.set('notifications.inbox', { schemaVersion: 11, throughChangeSequence: 10, unreadCount: 1, items: [], nextCursor: null })
+      responses.set('notifications.changesSince', { schemaVersion: 11, nextChangeSequence: 10,
+        resetRequired: false, hasMore: false, taskCapability: task, changes: [] })
+      let unread = true
+      const acknowledgements: unknown[] = []
+      requestHandlers.set('notifications.threadInterruptions', ({ threadIds }) => ({ throughChangeSequence: 10,
+        threads: threadIds.map(threadId => ({ threadId, hasUnreadInterruption: threadId === 'A' && unread })) }))
+      requestHandlers.set('notifications.acknowledgeThreadInterruptions', request => {
+        acknowledgements.push(request)
+        unread = false
+        return { commandId: request.commandId, status: 'applied', code: 'ok', payload: { resultingChangeSequence: 10 } }
+      })
+      onboarding.resolve({ schemaVersion: 2, status: 'completed', origin: 'existing_installation', completedAt: stamp,
+        selectedMemberRole: null, memberAgentId: null, quickChatThreadId: null })
+      publish({ runtimeMode: 'full_core', fullCoreState: 'ready', startupPhase: null, authorityState: { kind: 'current', origin: 'existing' },
+        capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
+      await flush(); await advance(0); await flush(); await advance(STARTUP_LOADING_EXIT_MS)
+      const placeholder = () => document.querySelector<HTMLElement>('.camp-content > .mission-section-empty')
+      check(placeholder()?.textContent?.includes('正在读取使命'), 'Mission restore must wait for the separate mission list')
+      check(!document.querySelector('.workspace-shell') && unread && acknowledgements.length === 0,
+        'Loading mission content cannot acknowledge its interruption')
+      if (outcome === 'failed') {
+        missions.reject(new Error('Mission list unavailable'))
+        await flush(); await flush()
+        check(placeholder()?.getAttribute('role') === 'alert' && !document.querySelector('.workspace-shell'),
+          'Mission failure must keep the workspace unmounted')
+        check(unread && acknowledgements.length === 0, 'Mission load failure must preserve the interruption')
+        requestHandlers.set('missions.list', () => [mission])
+        await clickNavigation('重试', '.camp-content > .mission-section-empty button')
+      } else missions.resolve([mission])
+      await flush(); await flush()
+      check(document.querySelector('.workspace-shell') && !unread && acknowledgements.length === 1,
+        'Only successfully displayed mission content acknowledges the observed interruption')
+    }
+    Object.defineProperty(document, 'hasFocus', { configurable: true, value: originalHasFocus })
+    cases.push('mission restore waits for actual content before interruption ACK, including load failure and retry')
 
     // Exercise the shared App with Web-style invalidation, including a refresh
     // already in flight when deletion is accepted and removal in another client.

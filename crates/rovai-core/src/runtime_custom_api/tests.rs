@@ -205,5 +205,88 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
         let unchanged = runtime_startup::load(&db, kind).unwrap();
         assert_eq!(unchanged.revision, second.revision);
         assert!(unchanged.configuration.environment.is_empty());
+        use crate::member_environment::common;
+        let prepare_common = |db: &crate::db::Database| {
+            common::prepare(
+                db.connection(),
+                kind,
+                common::Edit {
+                    expected_revision: 0,
+                    json: r#"{"CHECK_REFRESH_VALUE":"shared","API_KEY":"fixture-common-private"}"#
+                        .into(),
+                },
+            )
+            .unwrap()
+        };
+        let shared = prepare_common(&db);
+        let prepared = runtime_startup::prepare_save(
+            &db,
+            kind,
+            vec![edit(
+                json!(unchanged.configuration.program_path),
+                Value::Null,
+            )],
+        )
+        .unwrap();
+        db.connection().execute_batch("CREATE TEMP TRIGGER fail_common BEFORE INSERT ON runtime_common_environment BEGIN SELECT RAISE(ABORT,'common write failure'); END;").unwrap();
+        assert!(
+            runtime_startup::commit_save_with_common(&mut db, kind, prepared, 3, Some(&shared))
+                .is_err()
+        );
+        assert_eq!(
+            runtime_startup::load(&db, kind).unwrap().revision,
+            unchanged.revision
+        );
+        assert!(common::current(db.connection(), kind).unwrap().is_empty());
+        db.connection()
+            .execute_batch("DROP TRIGGER fail_common")
+            .unwrap();
+        let prepared = runtime_startup::prepare_save(&db, kind, vec![]).unwrap();
+        let saved =
+            runtime_startup::commit_save_with_common(&mut db, kind, prepared, 3, Some(&shared))
+                .unwrap();
+        assert!(saved.reconnect_required);
+        assert_eq!(
+            saved.configuration.program_path,
+            unchanged.configuration.program_path
+        );
+        assert!(saved.configuration.environment.is_empty());
+        assert!(
+            !serde_json::to_string(&runtime_startup::public(saved))
+                .unwrap()
+                .contains("fixture-common-private")
+        );
+        assert_eq!(std::fs::read(context.path()).unwrap(), contents.as_bytes());
     }
+    // A first common-only save must preserve legacy manual paths for runtimes
+    // without a native custom-API reader too.
+    let kind = AdapterKind::Pi;
+    let legacy_path = db
+        .path()
+        .parent()
+        .unwrap()
+        .join("legacy-pi")
+        .to_string_lossy()
+        .into_owned();
+    db.connection().execute("INSERT INTO adapter_installation(id,adapter_kind,executable_path,command_name,installation_class,source,auth_scope,created_at,updated_at) VALUES('legacy-shared-pi','pi',?1,'pi','managed_default','manual','default',datetime('now'),datetime('now'))", [&legacy_path]).unwrap();
+    let prepared = runtime_startup::prepare_save(&db, kind, vec![]).unwrap();
+    assert_eq!(
+        prepared.configuration.program_path.as_ref(),
+        Some(&legacy_path)
+    );
+    let shared = crate::member_environment::common::prepare(
+        db.connection(),
+        kind,
+        crate::member_environment::common::Edit {
+            expected_revision: 0,
+            json: r#"{"SHARED":"value"}"#.into(),
+        },
+    )
+    .unwrap();
+    let saved = runtime_startup::commit_save_with_common(&mut db, kind, prepared, 4, Some(&shared))
+        .unwrap();
+    assert_eq!(
+        saved.configuration.program_path.as_ref(),
+        Some(&legacy_path)
+    );
 }

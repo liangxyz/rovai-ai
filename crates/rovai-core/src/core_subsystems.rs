@@ -324,12 +324,24 @@ impl super::Core {
                             &mut database,
                             &self.startup_pending_camp_ids,
                         )?;
+                    for camp in &camps {
+                        emit_navigation_invalidated(
+                            &self.output,
+                            "camps.discardPending",
+                            Some(camp),
+                        );
+                    }
                     initialization.retired_camp_directories.extend(camps);
                     Ok(())
                 })()
             );
             initialization.retired_camp_directories.retain(|camp| {
-                if let Err(error) = attachments.remove_camp(camp) {
+                let legacy = attachments.remove_camp(camp);
+                let output = rovai_core::storage_layout::remove_camp_attachment_output(
+                    database.runtime_camp_files_root(),
+                    camp,
+                );
+                if let Err(error) = legacy.and(output) {
                     errors.push(format!("pending_camp_directory: {error:#}"));
                     true
                 } else {

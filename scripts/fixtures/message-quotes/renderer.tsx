@@ -7,7 +7,7 @@ import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdow
 import { projectQuoteBody, quoteDomOffset, readMessageQuoteSelection } from '../../../apps/desktop/src/renderer/src/message-quote-selection'
 import { AgentMessageMarkdownBody, StructuredMessageBody, TruncatedStructuredMessageBody } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
-import cases from '../../../packages/contracts/fixtures/message-quote-projection-v2.json'
+import cases from '../../../packages/contracts/fixtures/message-quote-projection-v3.json'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const lineSourceIndex = cases.length
@@ -93,7 +93,7 @@ function Fixture() {
   latest = quotes
   const add = async (selection: MessageQuoteSelection) => {
     if (fail) throw { kind: 'infrastructure_failure', code: 'CORE_REQUEST_FAILED', message: 'quote.limit_exceeded', retryable: false, generation: 1, details: {} }
-    const locator = { projectionVersion: 2 as const, startScalar: selection.startScalar, endScalar: selection.endScalar, projectionDigest: await quoteProjectionDigest(projectQuoteBody(root(Number(selection.messageId.split('-')[1]))).text) }
+    const locator = { projectionVersion: 3 as const, startScalar: selection.startScalar, endScalar: selection.endScalar, projectionDigest: await quoteProjectionDigest(projectQuoteBody(root(Number(selection.messageId.split('-')[1]))).text) }
     setQuotes(current => [...current, { locator, version: 1, quoteId: crypto.randomUUID(),
       source: { scope: 'camp', threadId: 'fixture', messageId: selection.messageId }, authorAtCapture: { type: 'agent', agentId: 'agent_1', displayName: '叮叮' },
       text: selection.text, format: 'plain_text', capturedAt: '2026-09-09T00:00:00Z', sourceContentDigest: 'fixture', snapshotDigest: 'fixture' }])
@@ -170,6 +170,29 @@ Object.assign(window, { quoteTest: {
     const excluded = document.getElementById('excluded-test')!
     range.selectNodeContents(excluded)
     check(!readMessageQuoteSelection(window.getSelection(), 'thread:fixture', id => messages.find(message => message.id === id)), 'card between endpoints')
+    const placeholderIndex = cases.findIndex(entry => entry.name === 'standalone placeholder')
+    root(placeholderIndex).scrollIntoView(); select(placeholderIndex); await frames()
+    check(window.getSelection()!.toString() === '<UUID>', 'native selection preserves literal angle brackets')
+    click('.message-quote-selection-toolbar button', 'capture literal placeholder'); await pause(30); await frames()
+    const placeholderSaved: MessageQuoteSnapshot = JSON.parse(JSON.stringify(latest[0]))
+    check(placeholderSaved.text === '<UUID>' && placeholderSaved.locator?.projectionVersion === 3, 'literal placeholder capture uses v3')
+    await revealMessageQuote(placeholderSaved, root(placeholderIndex)); await frames()
+    check(root(placeholderIndex).dataset.quoteLocated === 'true', 'literal placeholder reveals its precise source')
+    const pathIndex = cases.findIndex(entry => entry.name === 'literal attachment placeholders')
+    const oldPathText = '路径 ~/.rovai-server/instances//attachments//.txt'
+    const oldHtml = { ...placeholderSaved,
+      source: { ...placeholderSaved.source, messageId: messages[pathIndex].id }, text: oldPathText, locator: {
+      projectionVersion: 2 as const, startScalar: 0, endScalar: Array.from(oldPathText).length,
+      projectionDigest: await quoteProjectionDigest(oldPathText)
+    } }
+    const frozenOldHtml = JSON.stringify(oldHtml)
+    await revealMessageQuote(oldHtml, root(pathIndex)).then(
+      () => { throw new Error('changed v2 HTML projection must not highlight') },
+      error => check(String(error).includes('selection_unavailable'), 'old HTML projection loses only its highlight'))
+    check(JSON.stringify(oldHtml) === frozenOldHtml, 'old HTML quote remains immutable')
+    setFixtureQuotes([]); window.getSelection()!.removeAllRanges(); await frames()
+    check(!document.querySelector('[data-message-quote-body] script, [data-message-quote-body] img[onerror]'), 'literal HTML never creates executable elements')
+
     // CJK capture, serialized reuse, and old immutable snapshots share the same
     // production selection/reveal surfaces as ordinary messages.
     const cjkIndex = cases.findIndex(entry => entry.name === 'CJK original conflict reply')
@@ -177,7 +200,7 @@ Object.assign(window, { quoteTest: {
     check(window.getSelection()!.toString() === '有冲突。我', 'native CJK selection copies visible text without markers')
     click('.message-quote-selection-toolbar button', 'capture CJK excerpt'); await pause(30); await frames()
     const cjkSaved: MessageQuoteSnapshot = JSON.parse(JSON.stringify(latest[0]))
-    check(cjkSaved.text === '有冲突。我' && cjkSaved.locator?.projectionVersion === 2, 'CJK snapshot uses the current projection')
+    check(cjkSaved.text === '有冲突。我' && cjkSaved.locator?.projectionVersion === 3, 'CJK snapshot uses the current projection')
     await revealMessageQuote(cjkSaved, root(cjkIndex)); await frames()
     check(root(cjkIndex).dataset.quoteLocated === 'true', 'CJK persisted quote returns to its exact source')
     const oldCjk: MessageQuoteSnapshot = {
@@ -256,7 +279,9 @@ Object.assign(window, { quoteTest: {
     root(lineSourceIndex).scrollIntoView(); select(lineSourceIndex, start, end); await frames()
     click('.message-quote-selection-toolbar button', 'capture code-line excerpt'); await pause(30); await frames()
     const saved: MessageQuoteSnapshot = JSON.parse(JSON.stringify(latest.at(-1)))
-    await revealMessageQuote({ ...saved, locator: { ...saved.locator!, projectionVersion: 1 } }, root(lineSourceIndex))
+    for (const projectionVersion of [1, 2] as const) {
+      await revealMessageQuote({ ...saved, locator: { ...saved.locator!, projectionVersion } }, root(lineSourceIndex))
+    }
     check(root(lineSourceIndex).dataset.quoteLocated === 'true', 'unchanged v1 projection still locates exactly')
     await revealMessageQuote(saved, root(lineSourceIndex)); await frames()
     const band = root(lineSourceIndex).querySelector<HTMLElement>('.message-quote-line-band')!
@@ -322,7 +347,7 @@ Object.assign(window, { quoteTest: {
     click('.message-quote-selection-toolbar button', 'add excerpt after clearing'); await pause(30); await frames()
     check(latest.length === 1 && !document.querySelector('.message-quotes-popover'), 'new selection after clearing starts with a collapsed label')
     check(!errors.length, errors.join('\n'))
-    return { ok: true, projectionCases: cases.length, verified: ['long user collapsed and expanded selection', 'shared CJK projection and strong markup', 'CJK native selection and persisted v2 quote', 'immutable v1 quote display and reuse after highlight failure', 'unchanged v1 exact anchors', 'Unicode and code', 'cross message and cards', 'multiple compact quotes', 'failure retention', 'stale copy selection', 'hover and keyboard disclosure', 'full row navigation and direct removal', 'last removal closes and returns focus', 'persisted code-line anchors', 'duplicate and stale source', 'reflow and multi-block highlights'] }
+    return { ok: true, projectionCases: cases.length, verified: ['long user collapsed and expanded selection', 'shared CJK projection and strong markup', 'CJK and literal HTML selection with persisted v3 quotes', 'immutable v1/v2 quotes after highlight failure', 'unchanged v1/v2 exact anchors', 'Unicode and code', 'cross message and cards', 'multiple compact quotes', 'failure retention', 'stale copy selection', 'hover and keyboard disclosure', 'full row navigation and direct removal', 'last removal closes and returns focus', 'persisted code-line anchors', 'duplicate and stale source', 'reflow and multi-block highlights'] }
   },
   async linePreview() {
     await revealMessageQuote(latest.at(-1)!, root(lineSourceIndex)); await frames()
@@ -330,6 +355,11 @@ Object.assign(window, { quoteTest: {
   async cjkPreview() {
     window.getSelection()?.removeAllRanges()
     root(cases.findIndex(entry => entry.name === 'CJK original conflict reply')).scrollIntoView({ block: 'start', behavior: 'instant' })
+    await frames()
+  },
+  async literalPreview() {
+    window.getSelection()?.removeAllRanges()
+    root(cases.findIndex(entry => entry.name === 'literal attachment placeholders')).scrollIntoView({ block: 'start', behavior: 'instant' })
     await frames()
   },
   hoverTarget() {

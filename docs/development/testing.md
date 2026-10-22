@@ -118,6 +118,19 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 
 ## Rust 测试准入与退役门槛
 
+Web 长粘贴扩展既有 Host HTTP 与浏览器适配/恢复 owners；schema 161→162 的 DDL 失败回滚
+无法由 HTTP 测试证明，新增一个复用 schema-only fixture 的迁移 owner。准入与最小命令见
+[Web 长粘贴实施记录](../versions/v1.72/web-pasted-text-implementation.md#验证归属)。
+
+通用环境配置扩展既有环境合并、启动设置事务、检测环境和 Renderer owner；仅 schema 160→161 的
+新增表事务增加独立 owner，覆盖无 key 升级、失败回滚和旧凭据保留。准入理由、fixture 边界及最小命令见
+[通用配置实施记录](../versions/v1.72/shared-environment-implementation.md#验证归属)。
+
+退出提醒沿用通知事务/Thread 确认及批量查询规模 owner；本次在原 owner 内覆盖 schema 160、
+手动停止退出候选及按 Thread 展示确认，删除随短亮接口退役的描述断言，不增加 Rust 测试函数。
+修复前失败输入、fixture 成本及最小命令见[中断注意力验收](../versions/v1.72/interruption-attention-validation.md#验证边界与-owner)。
+已存在的单聊终态、retention 和 Portal owner 原地扩展，不新增等价覆盖。
+
 Send 文件输入改动先运行 `cargo test -p rovai-core --bin rovai send_file_`，再运行
 `pnpm test:send-input-file`。后者构建当前 CLI，以隔离临时目录和本地 IPC 夹具验证请求传递、
 业务拒绝不降级、输入失败零 IPC、继承 stdin 不阻塞和 Unix FIFO/设备/权限拒绝；不启动 Core 或模型。
@@ -1025,6 +1038,14 @@ Electron 夹具验证 Camp-local 草稿在业务投影刷新和重挂载后保�
 `camp-composer-local-store.test.ts` 验证续发目标只来自已接受的唯一非 Lead 路由，以及按 Camp 隔离、成功发送后
 替换和无效快照拒绝。历史 `test:composer-continuation` 夹具依赖已退出的 Core Draft/Pending 接口，不能作为
 当前发布门禁。
+
+公共/单聊输入历史复用上述 CampOpen 与 `single-chat-panel` Electron 夹具的 `--input-history` 模式：
+验证固定浏览列表、零历史请求、结构化预览、原草稿/Undo 保留、有效输入驱动发送及 pending 变化。
+最小命令为
+`node --test --test-concurrency=1 --test-name-pattern='input history' scripts/lib/camp-open-projection.test.mjs scripts/lib/single-chat-panel.test.mjs`。
+`input-history.test.ts` 覆盖独立内容提取、筛选、固定数组、导航边界和退出恢复。
+历史专用 Core 查询及两个 SQLite 测试随生产路径一起退役；消息读取与草稿保存继续由原 owner 覆盖。
+退役依据和验证命令见[实施记录](../versions/v1.72/input-history-implementation.md#验证归属)。
 
 ### Core 可选功能启动回归
 

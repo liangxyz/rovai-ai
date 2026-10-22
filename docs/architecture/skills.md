@@ -3,12 +3,12 @@ document_type: architecture
 architecture: skills
 authority: current-skills-source-configuration-and-delivery-boundaries
 status: accepted
-last_updated: 2026-09-27
+last_updated: 2026-10-19
 ---
 
 # Skills 来源、配置与模型投递
 
-Skills 是模型可按需读取的文件指南，不改变工具、权限、消息路由或协作资格。当前版本的字段和版本轴见 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md) 与 [ContextManifest v30](../contracts/context-manifest-evidence-v30.md)；旧 Library 和项目投递的恢复边界见 [历史 Skill Projection](skill-projection-reconciliation.md)。
+Skills 是模型可按需读取的文件指南，不改变工具、权限、消息路由或协作资格。当前字段见 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md)，输入版本轴见 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md) 与 [ContextManifest v40/v42](../contracts/context-manifest-evidence-v42.md)；旧 Library 和项目投递的恢复边界见 [历史 Skill Projection](skill-projection-reconciliation.md)。
 
 ## 四种来源
 
@@ -36,8 +36,8 @@ Renderer / 结构化 SkillMention(skillId, nameAtSend)
 
 `rovai:<name>` 只指向工具箱闭合集；`native:<canonical-path-hash>` 只指向已由 Core 发现登记的原生入口；旧 UUID 按历史来源处理。同名不同文件保持不同身份，同一真实文件的多入口按目标归并。失效引用仍随消息发送，解析为 unavailable 并省略消息局部文件链接；不能改绑同名技能。模型可见的 `skills[{name,path}]` 仅在该条消息实际选择且来源仍可用时出现。原生 Skill 不进入任一 Rovai 索引。
 
-平台索引随新 Binding 的 Bootstrap v5 冻结；旧 Binding 保留原 v4 Bootstrap。动态工具箱索引在每个新 Run 重新计算，普通 Run v27/Profile 7，公开批次 v30/Profile 10。相同 Run 的重试和恢复复用冻结字节，不重新读取随后变化的配置。原生 Runtime 在已接受的单次 Run 内自行 compaction 时，Core 不发送第二条只含 Skills 的任务消息。Core 控制的 Bootstrap redelivery 仍投递该 Binding 已冻结的完整 Bootstrap。
+平台索引随新 Binding 的 Bootstrap 冻结；当前 v6 将可选 `TEAM_GUIDANCE` 放在身份之后、平台索引之前，Skills section 本身不变。旧 Binding 保留原版本的 Bootstrap。动态工具箱索引在每个新 Run 重新计算，具体版本组合由当前 ContextManifest 合同拥有。相同 Run 的重试和恢复复用冻结字节，不重新读取随后变化的配置。原生 Runtime 在已接受的单次 Run 内自行 compaction 时，Core 不发送第二条只含 Skills 的任务消息。Core 控制的 Bootstrap redelivery 仍投递该 Binding 已冻结的完整 Bootstrap。
 
 ## 旧格式与失败边界
 
-Schema 123 在 v1.68/schema 122 上增加配置与冻结证据，保留旧行、Revision 文件和审计。已持久化的旧 v26/6/5 非 batch、v29/9/7 公开 Manifest 可按完整证据继续派发；历史冻结的旧直接 Delivery 和公开批次可以在精确来源约束下物化旧格式，不补 Skills section。公开 v28 及更早版本仍不派发。新写入使用 v27/v30；缺少受管 frontmatter、原生文件不可读或旧 ID 不可解时记录缺项，不阻塞原消息。真实输入超预算时按 `context_payload_too_large` 处理，不截断固定索引或当前输入。
+引入配置与冻结证据时的 Schema 123 迁移见 [Skills Rebuild v1](../contracts/skills-rebuild-v1.md)。当前新写入与历史恢复准入以 ContextManifest 合同为准；旧证据只按精确来源恢复，不补 Skills section。缺少受管平台 frontmatter 会阻止新 Bootstrap；动态原生文件不可读或旧 ID 不可解时记录缺项，不阻塞原消息。真实输入超预算时按 `context_payload_too_large` 处理，不截断固定索引或当前输入。

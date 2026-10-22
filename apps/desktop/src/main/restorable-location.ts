@@ -12,6 +12,7 @@ export type RestorableLocationReadResult = {
 export function parseRestorableLocation(value: unknown): RestorableLocation | null {
   if (!isRecord(value)) return null
   if (value.kind === 'quick_chat' && hasExactKeys(value, ['kind'])) return { kind: 'quick_chat' }
+  if (value.kind === 'teams' && hasExactKeys(value, ['kind'])) return { kind: 'teams' }
   if (value.kind === 'memory' && hasExactKeys(value, ['kind'])) return { kind: 'memory' }
   if (
     value.kind === 'camp'

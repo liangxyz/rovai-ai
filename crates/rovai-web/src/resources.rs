@@ -517,6 +517,17 @@ async fn file_operation(
     if body.action == "attachmentLocation" {
         return core_value(state, client, "camp.attachments.location", request).await;
     }
+    if matches!(
+        body.action.as_str(),
+        "removePastedText" | "discardPastedText"
+    ) {
+        let method = if body.action == "removePastedText" {
+            "host.upload.removePastedText"
+        } else {
+            "host.upload.discardPastedText"
+        };
+        return core_value(state, client, method, request).await;
+    }
     if body.action == "restoreComposerAttachments" {
         return core_value(state, client, "host.upload.restore", request).await;
     }

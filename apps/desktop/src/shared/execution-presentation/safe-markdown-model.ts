@@ -11,6 +11,8 @@ type MarkdownNode = {
   children?: unknown
 }
 
+export type RawHtmlPolicy = 'text' | 'drop'
+
 const safeMarkdownParser = unified()
   .use(remarkParse)
   .use(remarkGfm, { singleTilde: false })
@@ -19,7 +21,6 @@ const safeMarkdownParser = unified()
 
 const omittedNodeTypes = new Set([
   'definition',
-  'html',
   'image',
   'imageReference'
 ])
@@ -32,10 +33,11 @@ const visibleStructuralNodeTypes = new Set([
   'thematicBreak'
 ])
 
-function markdownNodeHasRenderableContent(value: unknown): boolean {
+function markdownNodeHasRenderableContent(value: unknown, rawHtmlPolicy: RawHtmlPolicy): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const node = value as MarkdownNode
   const type = typeof node.type === 'string' ? node.type : ''
+  if (type === 'html') return rawHtmlPolicy === 'text' && typeof node.value === 'string' && node.value.trim().length > 0
   if (omittedNodeTypes.has(type)) return false
   if (visibleStructuralNodeTypes.has(type)) return true
   if (
@@ -47,10 +49,10 @@ function markdownNodeHasRenderableContent(value: unknown): boolean {
   }
   if (type === 'listItem' && typeof node.checked === 'boolean') return true
   return Array.isArray(node.children)
-    && node.children.some(markdownNodeHasRenderableContent)
+    && node.children.some(child => markdownNodeHasRenderableContent(child, rawHtmlPolicy))
 }
 
-export function safeMarkdownHasRenderableContent(source: string): boolean {
+export function safeMarkdownHasRenderableContent(source: string, rawHtmlPolicy: RawHtmlPolicy = 'text'): boolean {
   if (!source.trim()) return false
-  return markdownNodeHasRenderableContent(safeMarkdownParser.parse(source))
+  return markdownNodeHasRenderableContent(safeMarkdownParser.parse(source), rawHtmlPolicy)
 }

@@ -1475,7 +1475,7 @@
 .runtime-environment-value input { padding-right: 38px; }
 .runtime-environment-value button { position: absolute; right: 2px; top: 2px; }
 .runtime-environment-error { grid-column: 1 / -1; margin: 0; font-size: 12px; }
-.runtime-startup-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 24px; margin-top: 28px; border-top: 1px solid var(--line); }
+.runtime-startup-actions { padding-top: 24px; margin-top: 28px; border-top: 1px solid var(--line); }
 .runtime-startup-actions .member-editor-save { color: var(--ink); background: var(--surface-muted); }
 .runtime-startup-form .inline-error { margin-top: 20px; }
 @media (max-width: 900px) {

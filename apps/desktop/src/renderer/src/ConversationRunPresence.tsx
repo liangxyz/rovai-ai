@@ -211,7 +211,7 @@ function RunPresenceTime({ run, id }: { run: AgentRunView, id: string }): React.
   </time>
 }
 
-function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, events, stopping, onOpen }: {
+export function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, events, stopping, onOpen }: {
   threadId: string
   run: AgentRunView
   name: string

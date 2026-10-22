@@ -1,5 +1,5 @@
-//! Host temporary-file ingress into client-scoped source references. There is
-//! no new asset lifetime: after binding, Core never deletes the source file.
+//! Host upload ingress into client-scoped source references. Ordinary uploads
+//! keep their source lifetime; generated paste files have deletion eligibility.
 use crate::{
     command::*, db::Database, draft_client::DraftClient,
     local_attachment_source::LocalAttachmentSourceRef,
@@ -28,6 +28,7 @@ pub struct UploadIntent {
 pub enum UploadTarget {
     #[default]
     Camp,
+    PastedText,
     SingleChat {
         #[serde(rename = "conversationId")]
         conversation_id: String,
@@ -42,6 +43,12 @@ pub enum UploadTarget {
     },
 }
 impl UploadTarget {
+    pub fn is_pasted_text(&self) -> bool {
+        matches!(self, Self::PastedText)
+    }
+    pub fn is_public(&self) -> bool {
+        matches!(self, Self::Camp | Self::PastedText)
+    }
     fn is_camp(&self) -> bool {
         matches!(self, Self::Camp)
     }
@@ -54,10 +61,14 @@ pub fn snapshot(
     intent: &UploadIntent,
 ) -> Result<serde_json::Value> {
     match &intent.target {
-        UploadTarget::Camp => {
+        UploadTarget::Camp | UploadTarget::PastedText => {
             let recorded = reconcile(database, client, intent.clone())?
                 .ok_or_else(|| anyhow::anyhow!("upload receipt is missing"))?;
-            Ok(recorded.result.payload["source"].clone())
+            let mut source = recorded.result.payload["source"].clone();
+            if intent.target.is_pasted_text() {
+                source["generatedBy"] = json!("long_text_paste");
+            }
+            Ok(source)
         }
         UploadTarget::SingleChat { conversation_id }
         | UploadTarget::SingleChatPending {
@@ -208,13 +219,24 @@ pub fn bind(
             && source.observed_byte_size == Some(envelope.payload.intent.byte_size),
         "upload observation changed"
     );
+    if envelope.payload.intent.target.is_pasted_text() {
+        validate_pasted_path(
+            database,
+            &envelope.payload.intent.camp_id,
+            &source.source_path,
+        )?;
+        ensure!(
+            envelope.payload.intent.byte_size <= 25 * 1024 * 1024,
+            "upload_too_large"
+        );
+    }
     DomainCommandGateway.execute(database, &envelope, |transaction| {
         let intent = &envelope.payload.intent;
         match &intent.target {
-            UploadTarget::Camp => {
+            UploadTarget::Camp | UploadTarget::PastedText => {
                 ensure!(
                     transaction.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
+                        "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1 AND deletion_operation_id IS NULL)",
                         [&intent.camp_id],
                         |row| row.get::<_, bool>(0),
                     )?,
@@ -227,11 +249,142 @@ pub fn bind(
             }
             UploadTarget::SingleChatPending { conversation_id, pending_input_id, edit_token } => crate::single_chat::SingleChatService::for_client(client.clone()).commit_pending_source_attachment_in_transaction(transaction, &intent.camp_id, conversation_id, pending_input_id, intent.expected_revision, edit_token, source.clone())?,
         }
-        let payload = if matches!(intent.target, UploadTarget::Camp) {
+        if intent.target.is_pasted_text() {
+            transaction.execute("INSERT INTO web_pasted_text_attachment(attachment_id,camp_id,client_id,source_path) VALUES(?1,?2,?3,?4)", params![source.id,intent.camp_id,client.id(),source.source_path])?;
+        }
+        let payload = if intent.target.is_public() {
             json!({"attachmentRefId":intent.command_id, "source":source})
         } else {
             json!({"attachmentRefId":intent.command_id, "draftId":client.draft_id(&intent.camp_id), "revision":intent.expected_revision+1})
         };
         Ok(CommandHandlerResult::applied("attachment.upload_bound", payload, None))
     })
+}
+
+/// Destination is resolved by Core, never supplied as a browser path. This read
+/// deliberately does not recreate an output directory after Thread deletion.
+pub fn pasted_text_root(
+    database: &Database,
+    client: &DraftClient,
+    intent: &UploadIntent,
+) -> Result<String> {
+    envelope(client, intent.clone())?;
+    ensure!(
+        intent.target.is_pasted_text() && intent.byte_size <= 25 * 1024 * 1024,
+        "invalid pasted text upload"
+    );
+    ensure!(
+        database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM camp WHERE id=?1 AND deletion_operation_id IS NULL)",
+            [&intent.camp_id],
+            |r| r.get::<_, bool>(0)
+        )?,
+        "Thread no longer exists"
+    );
+    crate::storage_layout::resolve_attachment_output_root(database.connection(), &intent.camp_id)
+}
+
+fn validate_pasted_path(database: &Database, camp_id: &str, path: &str) -> Result<()> {
+    let root =
+        crate::storage_layout::resolve_attachment_output_root(database.connection(), camp_id)?;
+    validate_pasted_path_in_root(&root, path)
+}
+
+fn validate_pasted_path_in_root(root: &str, path: &str) -> Result<()> {
+    let path = std::path::Path::new(path);
+    ensure!(
+        path.parent() == Some(std::path::Path::new(&root))
+            && path.extension().is_some_and(|s| s == "txt")
+            && path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| uuid::Uuid::parse_str(s).is_ok()),
+        "invalid generated source path"
+    );
+    crate::camp_attachment_view::reject_existing_symlink_components(std::path::Path::new(&root))?;
+    Ok(())
+}
+
+pub fn is_pasted_text(
+    database: &Database,
+    client: &DraftClient,
+    camp_id: &str,
+    id: &str,
+) -> Result<bool> {
+    Ok(database.connection().query_row("SELECT EXISTS(SELECT 1 FROM web_pasted_text_attachment WHERE camp_id=?1 AND attachment_id=?2 AND client_id=?3)",params![camp_id,id,client.id()],|r|r.get(0))?)
+}
+
+/// The application holds its pasted-text operation guard before the database
+/// lock, through this durable write and publication. Removal shares that guard,
+/// but releases the database lock during unlink. Failed publication never resets
+/// protection and there is no per-send association.
+pub fn protect_for_send(
+    database: &mut Database,
+    sources: &[LocalAttachmentSourceRef],
+) -> Result<()> {
+    if sources.is_empty() {
+        return Ok(());
+    }
+    let tx = database.connection_mut().transaction()?;
+    for source in sources {
+        tx.execute("UPDATE web_pasted_text_attachment SET entered_send_flow=1 WHERE source_path=?1 AND entered_send_flow=0",[&source.source_path])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Only the originating verified editor can remove its generated draft file.
+/// No row means no deletion authority, even if an old upload receipt remains.
+/// The caller must hold the same pasted-text operation guard used by publication.
+pub async fn remove_pasted_text(
+    database: &tokio::sync::Mutex<Database>,
+    client: &DraftClient,
+    camp_id: &str,
+    id: &str,
+) -> Result<&'static str> {
+    ensure!(!client.is_desktop(), "verified Web editor required");
+    crate::camp_id::ThreadId::parse(camp_id)?;
+    uuid::Uuid::parse_str(id)?;
+    let (entry, root) = {
+        let database = database.lock().await;
+        let entry: Option<(String, bool)> = database.connection().query_row("SELECT source_path,entered_send_flow FROM web_pasted_text_attachment WHERE camp_id=?1 AND attachment_id=?2 AND client_id=?3",params![camp_id,id,client.id()],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let root =
+            crate::storage_layout::resolve_attachment_output_root(database.connection(), camp_id)?;
+        (entry, root)
+    };
+    let Some((path, protected)) = entry else {
+        return Ok("retained");
+    };
+    if !protected {
+        validate_pasted_path_in_root(&root, &path)?;
+        #[cfg(test)]
+        crate::application::wait_for_pasted_text_unlink_test_barrier(id).await;
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    database.lock().await.connection().execute(
+        "DELETE FROM web_pasted_text_attachment WHERE attachment_id=?1 AND client_id=?2",
+        params![id, client.id()],
+    )?;
+    Ok(if protected { "retained" } else { "deleted" })
+}
+
+pub fn discard_pasted_text(
+    database: &Database,
+    client: &DraftClient,
+    camp_id: &str,
+    ids: &[String],
+) -> Result<()> {
+    ensure!(
+        !client.is_desktop() && ids.len() <= 10,
+        "invalid generated registration release"
+    );
+    for id in ids {
+        // A generic discard cannot discard an unprotected file's cleanup authority.
+        database.connection().execute("DELETE FROM web_pasted_text_attachment WHERE camp_id=?1 AND attachment_id=?2 AND client_id=?3 AND entered_send_flow=1",params![camp_id,id,client.id()])?;
+    }
+    Ok(())
 }

@@ -1,3 +1,4 @@
+import { DEFAULT_STORED_GENERAL_PREFERENCES, storedGeneralPreferences, resolveInterfaceLanguage } from '../shared/general-preferences-model'
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -22,6 +23,59 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe('general preferences', () => {
+  it('matches the first supported device language, normalizes tags and falls back to English', () => {
+    for (const [tags, expected] of [
+      [['fr-FR', 'EN_gb', 'zh-CN'], 'en'], [['ZH_hant_TW', 'en'], 'zh-CN'],
+      [['zh-HK'], 'zh-CN'], [['zh'], 'zh-CN'], [['en-AU'], 'en'], [['ja-JP', 'fr'], 'en'], [[], 'en']
+    ] as const) expect(resolveInterfaceLanguage('system', tags)).toBe(expected)
+    expect(resolveInterfaceLanguage('zh-CN', ['en'])).toBe('zh-CN')
+    expect(resolveInterfaceLanguage('en', ['zh'])).toBe('en')
+  })
+
+  it('preserves schema 5–6 languages and keeps only the preference on disk across system changes', async () => {
+    const file = join(await temporaryDirectory(), 'general.json')
+    const { interfaceLanguagePreference: _preference, newConversationTeamId: _team, ...common } = DEFAULT_STORED_GENERAL_PREFERENCES
+    for (const language of ['zh-CN', 'en'] as const) {
+      await writeFile(file, JSON.stringify({ ...common, schemaVersion: 5, interfaceLanguage: language }))
+      const store = await GeneralPreferencesStore.load(file, () => ['zh-Hant'])
+      expect(store.get()).toMatchObject({ interfaceLanguagePreference: language, interfaceLanguage: language })
+    }
+    for (const preference of ['system', 'zh-CN', 'en'] as const) {
+      await writeFile(file, JSON.stringify({ ...common, schemaVersion: 6, interfaceLanguagePreference: preference }))
+      const store = await GeneralPreferencesStore.load(file, () => ['zh-Hant'])
+      expect(store.get()).toMatchObject({ schemaVersion: 7, interfaceLanguagePreference: preference, newConversationTeamId: null, readError: null })
+    }
+    expect(parseGeneralPreferences({ ...DEFAULT_STORED_GENERAL_PREFERENCES, newConversationTeamId: 'team-a', oneClickNewConversationEnabled: true }))
+      .toMatchObject({ newConversationDefaults: null, newConversationTeamId: 'team-a', oneClickNewConversationEnabled: true })
+    expect(parseGeneralPreferences({ ...DEFAULT_STORED_GENERAL_PREFERENCES, newConversationTeamId: 123 })).toBeNull()
+    await rm(file)
+    let tags = ['zh-CN', 'en']
+    const store = await GeneralPreferencesStore.load(file, () => tags)
+    expect(store.get()).toMatchObject({ interfaceLanguagePreference: 'system', interfaceLanguage: 'zh-CN' })
+    await store.setInterfaceLanguagePreference('system')
+    const raw = await readFile(file, 'utf8')
+    tags = ['fr', 'en', 'zh']
+    store.refreshInterfaceLanguage()
+    expect(store.get().interfaceLanguage).toBe('en')
+    expect(await readFile(file, 'utf8')).toBe(raw)
+    expect(JSON.parse(raw)).not.toHaveProperty('interfaceLanguage')
+    expect(parseGeneralPreferences({ ...JSON.parse(raw), interfaceLanguage: 'en' })).toBeNull()
+    await store.setInterfaceLanguagePreference('zh-CN')
+    tags = []
+    expect(store.get().interfaceLanguage).toBe('zh-CN')
+  })
+
+  it('recovers an invalid file only after a successful read, without overwriting it through other setters', async () => {
+    const file = join(await temporaryDirectory(), 'general.json')
+    await writeFile(file, '{broken')
+    const store = await GeneralPreferencesStore.load(file, () => ['zh-HK'])
+    expect(store.get()).toMatchObject({ interfaceLanguagePreference: 'system', interfaceLanguage: 'zh-CN' })
+    await expect(store.setLastSettingsSection('runtime')).rejects.toMatchObject({ code: 'general_preferences_unreadable' })
+    expect(await readFile(file, 'utf8')).toBe('{broken')
+    await writeFile(file, JSON.stringify({ ...DEFAULT_STORED_GENERAL_PREFERENCES, interfaceLanguagePreference: 'en' }))
+    expect(await store.getInterfaceLanguage()).toMatchObject({ interfaceLanguagePreference: 'en', interfaceLanguage: 'en', readError: null })
+    await store.setLastSettingsSection('runtime')
+  })
   it('defaults a new profile to the timeline and preserves a malformed source file for recovery', async () => {
     const directory = await temporaryDirectory()
     const filePath = join(directory, 'general-preferences.json')
@@ -34,19 +88,20 @@ describe('general preferences', () => {
     await writeFile(filePath, malformed)
     expect(await readGeneralPreferences(filePath)).toEqual(DEFAULT_GENERAL_PREFERENCES)
     const store = await GeneralPreferencesStore.load(filePath)
-    expect(store.get()).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    expect(store.get()).toEqual({ ...DEFAULT_GENERAL_PREFERENCES, readError: store.loadDegradation })
+    await expect(store.setInterfaceLanguagePreference('en')).rejects.toMatchObject({ code: 'general_preferences_unreadable' })
     expect(store.loadDegradation?.code).toBe('general_preferences_unreadable')
     expect(await readFile(filePath, 'utf8')).toBe(malformed)
   })
 
   it('accepts only the exact schema and finite enums', () => {
     expect(parseGeneralPreferences({
-      ...DEFAULT_GENERAL_PREFERENCES,
-      interfaceLanguage: 'en'
-    })?.interfaceLanguage).toBe('en')
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'en'
+    })?.interfaceLanguagePreference).toBe('en')
     expect(parseGeneralPreferences({
-      ...DEFAULT_GENERAL_PREFERENCES,
-      interfaceLanguage: 'fr'
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'fr'
     })).toBeNull()
     expect(parseGeneralPreferences({
       schemaVersion: 4,
@@ -58,7 +113,8 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false,
       worldMapEnabled: false
     })).toEqual({
-      ...DEFAULT_GENERAL_PREFERENCES,
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'zh-CN',
       lastSettingsSection: 'about',
       executionConsolePlacement: 'bottom',
       worldMapEnabled: false
@@ -73,7 +129,8 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false,
       worldMapEnabled: true
     })).toEqual({
-      ...DEFAULT_GENERAL_PREFERENCES,
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'zh-CN',
       executionConsolePlacement: 'right',
       worldMapEnabled: true
     })
@@ -82,8 +139,9 @@ describe('general preferences', () => {
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics'
     })).toEqual({
-      schemaVersion: 5,
-      interfaceLanguage: 'zh-CN',
+      schemaVersion: 7,
+      newConversationTeamId: null,
+      interfaceLanguagePreference: 'zh-CN',
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
       executionConsolePlacement: 'inspector',
@@ -101,7 +159,8 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false
     })).toEqual({
-      ...DEFAULT_GENERAL_PREFERENCES,
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'zh-CN',
       lastSettingsSection: 'channels',
       executionConsolePlacement: 'bottom',
       worldMapEnabled: true
@@ -117,8 +176,9 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: true,
       oneClickNewConversationEnabled: true
     })).toEqual({
-      schemaVersion: 5,
-      interfaceLanguage: 'zh-CN',
+      schemaVersion: 7,
+      newConversationTeamId: null,
+      interfaceLanguagePreference: 'zh-CN',
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics',
       executionConsolePlacement: 'inspector',
@@ -139,7 +199,8 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false
     })).toEqual({
-      ...DEFAULT_GENERAL_PREFERENCES,
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'zh-CN',
       executionConsolePlacement: 'inspector',
       worldMapEnabled: true
     })
@@ -157,7 +218,8 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false
     })).toEqual({
-      ...DEFAULT_GENERAL_PREFERENCES,
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'zh-CN',
       worldMapEnabled: true
     })
     expect(parseGeneralPreferences({
@@ -168,7 +230,8 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false
     })).toEqual({
-      ...DEFAULT_GENERAL_PREFERENCES,
+      ...DEFAULT_STORED_GENERAL_PREFERENCES,
+      interfaceLanguagePreference: 'zh-CN',
       worldMapEnabled: true
     })
     expect(parseGeneralPreferences({
@@ -203,13 +266,14 @@ describe('general preferences', () => {
       store.setLastSettingsSection('toolbox'),
       store.setExecutionConsolePlacement('bottom'),
       store.setWorldMapEnabled(false),
-      store.setInterfaceLanguage('en'),
+      store.setInterfaceLanguagePreference('en'),
       store.setStartupLocationMode('last_location')
     ])
 
     expect(store.get()).toEqual({
-      schemaVersion: 5,
-      interfaceLanguage: 'en',
+      schemaVersion: 7,
+      newConversationTeamId: null,
+      interfaceLanguagePreference: 'en', interfaceLanguage: 'en', systemLanguage: 'en', languageRevision: 6, readError: null,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'toolbox',
       executionConsolePlacement: 'bottom',
@@ -218,8 +282,8 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false,
       worldMapEnabled: false
     })
-    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(store.get())
-    expect((await GeneralPreferencesStore.load(filePath)).get()).toEqual(store.get())
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(storedGeneralPreferences(store.get()))
+    expect(storedGeneralPreferences((await GeneralPreferencesStore.load(filePath)).get())).toEqual(storedGeneralPreferences(store.get()))
     if (process.platform !== 'win32') {
       expect((await stat(filePath)).mode & 0o777).toBe(0o600)
     }
@@ -272,11 +336,12 @@ describe('general preferences', () => {
 
     expect(store.get()).toEqual({
       ...DEFAULT_GENERAL_PREFERENCES,
+      languageRevision: 2,
       lastSettingsSection: 'runtime',
       newConversationDefaults: { memberAgentIds: ['agent-a', 'agent-b'], defaultLeadAgentId: 'agent-b' },
       oneClickNewConversationEnabled: true
     })
-    expect((await GeneralPreferencesStore.load(filePath)).get()).toEqual(store.get())
+    expect(storedGeneralPreferences((await GeneralPreferencesStore.load(filePath)).get())).toEqual(storedGeneralPreferences(store.get()))
     await store.setNewConversationDefaults({ memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }, false)
     expect(store.get().oneClickNewConversationEnabled).toBe(true)
   })
@@ -302,8 +367,8 @@ describe('general preferences', () => {
     await rm(filePath)
     await mkdir(filePath)
     const nextTeam = { memberAgentIds: ['agent-b'], defaultLeadAgentId: 'agent-b' }
-    await expect(store.setNewConversationDefaults(nextTeam, true)).rejects.toBeInstanceOf(Error)
-    expect(store.get()).toEqual(previous)
+    await expect(store.setNewConversationDefaults(nextTeam, true)).rejects.toMatchObject({ code: 'general_preferences_unreadable' })
+    expect(storedGeneralPreferences(store.get())).toEqual(storedGeneralPreferences(previous))
     expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
     await rm(filePath, { recursive: true })
     await store.setNewConversationDefaults(nextTeam, true)
@@ -319,8 +384,8 @@ describe('general preferences', () => {
     await mkdir(filePath)
     const store = await GeneralPreferencesStore.load(filePath)
 
-    await expect(store.setExecutionConsolePlacement('bottom')).rejects.toBeInstanceOf(Error)
-    expect(store.get()).toEqual(DEFAULT_GENERAL_PREFERENCES)
+    await expect(store.setExecutionConsolePlacement('bottom')).rejects.toMatchObject({ code: 'general_preferences_unreadable' })
+    expect(store.get()).toEqual({ ...DEFAULT_GENERAL_PREFERENCES, readError: store.loadDegradation })
     expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
 })

@@ -1,8 +1,10 @@
+import { isInterfaceLanguage } from '../shared/general-preferences-model'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { isThreadId } from '@contracts'
 import type {
   AdapterPermissionConfig,
+  InterfaceLanguage,
   AdapterKind,
   BuiltinMemberAvatarRole,
   ModelSelection,
@@ -41,14 +43,14 @@ const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
 const MAX_MODEL_OPTIONS_BYTES = 16_384
 
 export const DEFAULT_ONBOARDING_SNAPSHOT: OnboardingSnapshot = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   status: 'uninitialized'
 }
 
-export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | null {
+export function parseOnboardingSnapshot(value: unknown, legacyLanguage: InterfaceLanguage = 'zh-CN'): OnboardingSnapshot | null {
   if (
     !isRecord(value)
-    || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3)
+    || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4)
     || typeof value.status !== 'string'
   ) return null
   value = normalizeQuickChatId(value)
@@ -79,7 +81,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
     if (value.runtimeSelection !== null && runtimeSelection === null) return null
     const provisioning = value.provisioning === null
       ? null
-      : parseProvisioning(value.provisioning, sourceSchemaVersion as number)
+      : parseProvisioning(value.provisioning, sourceSchemaVersion as number, legacyLanguage)
     if (value.provisioning !== null && provisioning === null) return null
     if (value.step === 'runtime' && selectedMemberRole === null) return null
     if (provisioning && (
@@ -88,7 +90,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       || provisioning.runtimePermissions.adapterKind !== runtimeSelection.adapterKind
     )) return null
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'in_progress',
       step: value.step as OnboardingStep,
       selectedMemberRole,
@@ -127,7 +129,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       || value.quickChatThreadId !== null
     )) return null
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       status: 'completed',
       origin: value.origin,
       completedAt: value.completedAt,
@@ -143,13 +145,13 @@ export async function readOnboardingSnapshot(filePath: string): Promise<Onboardi
   return (await readOnboardingSnapshotResult(filePath)).snapshot
 }
 
-async function readOnboardingSnapshotResult(filePath: string): Promise<{
+async function readOnboardingSnapshotResult(filePath: string, legacyLanguage: InterfaceLanguage = 'zh-CN'): Promise<{
   snapshot: OnboardingSnapshot
   degradation: StructuredError | null
 }> {
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8')) as unknown
-    const snapshot = parseOnboardingSnapshot(parsed)
+    const snapshot = parseOnboardingSnapshot(parsed, legacyLanguage)
     return snapshot
       ? { snapshot, degradation: null }
       : {
@@ -188,8 +190,8 @@ export class OnboardingStore {
     this.loadDegradation = loadDegradation
   }
 
-  static async load(filePath: string): Promise<OnboardingStore> {
-    const result = await readOnboardingSnapshotResult(filePath)
+  static async load(filePath: string, legacyLanguage: InterfaceLanguage = 'zh-CN'): Promise<OnboardingStore> {
+    const result = await readOnboardingSnapshotResult(filePath, legacyLanguage)
     return new OnboardingStore(filePath, result.snapshot, result.degradation)
   }
 
@@ -215,7 +217,7 @@ export class OnboardingStore {
       if (this.#snapshot.status !== 'uninitialized') return this.get()
       const next: OnboardingSnapshot = hasExistingProductData
         ? {
-            schemaVersion: 3,
+            schemaVersion: 4,
             status: 'completed',
             origin: 'existing_installation',
             completedAt: new Date().toISOString(),
@@ -305,7 +307,7 @@ export class OnboardingStore {
         throw new Error('首次引导初始化已经开始，不能跳过运行配置')
       }
       return this.#commit({
-        schemaVersion: 3,
+        schemaVersion: 4,
         status: 'completed',
         origin: 'runtime_deferred',
         completedAt: new Date().toISOString(),
@@ -318,8 +320,10 @@ export class OnboardingStore {
 
   beginProvisioning(
     selection: unknown,
-    runtimePermissions: unknown
+    runtimePermissions: unknown,
+    interfaceLanguage: InterfaceLanguage = 'zh-CN'
   ): Promise<OnboardingSnapshot> {
+    if (!isInterfaceLanguage(interfaceLanguage)) return Promise.reject(new Error('Unsupported onboarding language'))
     const parsed = parseRuntimeSelection(selection)
     if (!parsed?.model) return Promise.reject(new Error('请先完成智能体与模型配置'))
     const parsedPermissions = parseRuntimePermissions(runtimePermissions)
@@ -344,6 +348,7 @@ export class OnboardingStore {
         ...current,
         runtimeSelection: parsed,
         provisioning: {
+          interfaceLanguage,
           memberCommandId: randomUUID(),
           runtimeCommandId: randomUUID(),
           campCommandId: randomUUID(),
@@ -457,7 +462,7 @@ export class OnboardingStore {
         || operation.runtimeCopies.some((target) => target.status === 'pending')
       ) throw new Error('首次引导初始化尚未完成')
       return this.#commit({
-        schemaVersion: 3,
+        schemaVersion: 4,
         status: 'completed',
         origin: 'onboarding',
         completedAt: new Date().toISOString(),
@@ -534,7 +539,7 @@ function isMissingPathError(error: unknown): boolean {
 
 function inProgress(step: OnboardingStep): Extract<OnboardingSnapshot, { status: 'in_progress' }> {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     status: 'in_progress',
     step,
     selectedMemberRole: null,
@@ -575,7 +580,7 @@ function parseModelSelection(value: unknown): ModelSelection | null {
   }
 }
 
-function parseProvisioning(value: unknown, schemaVersion: number): OnboardingProvisioningOperation | null {
+function parseProvisioning(value: unknown, schemaVersion: number, legacyLanguage: InterfaceLanguage): OnboardingProvisioningOperation | null {
   value = normalizeQuickChatId(value)
   if (!hasExactKeys(value, [
     'memberCommandId',
@@ -586,8 +591,10 @@ function parseProvisioning(value: unknown, schemaVersion: number): OnboardingPro
     'memberVersionBeforeRuntime',
     'memberVersionAfterRuntime',
     'quickChatThreadId',
-    ...(schemaVersion === 3 ? ['runtimeCopies'] : [])
+    ...(schemaVersion >= 3 ? ['runtimeCopies'] : []),
+    ...(schemaVersion === 4 ? ['interfaceLanguage'] : [])
   ])) return null
+  if (schemaVersion === 4 && !isInterfaceLanguage(value.interfaceLanguage)) return null
   if (!isUuid(value.memberCommandId) || !isUuid(value.runtimeCommandId) || !isUuid(value.campCommandId)) return null
   const runtimePermissions = parseRuntimePermissions(value.runtimePermissions)
   if (!runtimePermissions) return null
@@ -600,11 +607,12 @@ function parseProvisioning(value: unknown, schemaVersion: number): OnboardingPro
   if (value.quickChatThreadId !== null && value.memberVersionAfterRuntime === null) return null
   const runtimeCopies = schemaVersion < 3 || value.runtimeCopies === null
     ? null : parseRuntimeCopies(value.runtimeCopies)
-  if (schemaVersion === 3 && value.runtimeCopies !== null && runtimeCopies === null) return null
+  if (schemaVersion >= 3 && value.runtimeCopies !== null && runtimeCopies === null) return null
   if (runtimeCopies !== null && (value.memberVersionAfterRuntime === null
     || runtimeCopies.some((target) => target.agentId === value.memberAgentId
       || [value.memberCommandId, value.runtimeCommandId, value.campCommandId].includes(target.commandId)))) return null
   return {
+    interfaceLanguage: schemaVersion === 4 ? value.interfaceLanguage as InterfaceLanguage : legacyLanguage,
     memberCommandId: value.memberCommandId,
     runtimeCommandId: value.runtimeCommandId,
     campCommandId: value.campCommandId,

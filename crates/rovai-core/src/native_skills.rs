@@ -291,6 +291,7 @@ impl NativeSkillDiscoveryRequest<'_> {
         user_only: bool,
         configuration: &RuntimeStartupConfiguration,
     ) -> Result<NativeSkillScan> {
+        configuration.ensure_environment_available()?;
         let home = runtime_variable(
             configuration,
             if cfg!(windows) { "USERPROFILE" } else { "HOME" },
@@ -903,6 +904,7 @@ mod tests {
             ] {
                 let mut configuration = RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
+                    common_environment_unavailable: false,
                     program_path: None,
                     environment: vec![RuntimeEnvironmentVariable {
                         name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
@@ -947,6 +949,7 @@ mod tests {
         .unwrap();
         let configuration = RuntimeStartupConfiguration {
             custom_api_snapshot: None,
+            common_environment_unavailable: false,
             program_path: None,
             environment: vec![RuntimeEnvironmentVariable {
                 name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
@@ -1126,6 +1129,7 @@ mod tests {
         }
         let configuration = RuntimeStartupConfiguration {
             custom_api_snapshot: None,
+            common_environment_unavailable: false,
             program_path: None,
             environment: vec![RuntimeEnvironmentVariable {
                 name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),

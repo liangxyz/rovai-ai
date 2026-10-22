@@ -1,7 +1,9 @@
 //! Durable Channel downloads use the existing inbound queue and Camp-owned output.
 //! No CampMessage/Delivery may be published until every resource has a source ref.
 use super::*;
-use crate::local_attachment_source::{LocalAttachmentSourceRef, observe_agent_source_attachments};
+use crate::local_attachment_source::{
+    LocalAttachmentSourceRef, observe_source_attachment_with_detected_media_type,
+};
 use std::{
     fs,
     io::{Read, Write},
@@ -310,11 +312,9 @@ fn import_files(
             let _ = fs::remove_file(&staging);
             return Err(error.into());
         }
-        let mut observed =
-            observe_agent_source_attachments(&[target.to_string_lossy().into_owned()], &directory)?;
-        let mut source_ref = observed.remove(0);
-        source_ref.display_name = name;
-        sources.push(source_ref);
+        sources.push(observe_source_attachment_with_detected_media_type(
+            &target, &name,
+        )?);
     }
     Ok(sources)
 }

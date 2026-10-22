@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-18
+last_updated: 2026-10-21
 ---
 
 # v1.72 版本决定
@@ -1112,3 +1112,117 @@ Task 与消息协作重复，直接删除会破坏存量责任和恢复。因此
 数字键位按真实入口顺序一次迁移，其他冲突键清空、非冲突偏好保留；迁移失败以内存新映射维持可用，再显式重试落盘。代价是四个旧自定义键位会被覆盖，这是 User 明确选择的升级行为。
 
 当前规范：[Task v6](../../contracts/durable-task-v6.md)、[Transport v42](../../contracts/builtin-tool-transport-v42.md)、[Manifest v40/v41](../../contracts/context-manifest-evidence-v40.md)、[Shortcuts v2](../../contracts/desktop-shortcuts-v2.md)。逐项输入对照与实施状态见 [R4](model-context-change-task-capability.md)。
+
+
+<a id="v1-72-d53"></a>
+## V1.72-D53：长粘贴文件归属 Thread，以单向发送保护限制删除
+
+- 状态：accepted
+- 日期：2026-10-20
+- 当前权威：[Public Composer](../../architecture/camp-composer-draft.md#长粘贴生成文件)、[Composer Draft v19](../../contracts/camp-composer-draft-v19.md)
+
+### 背景与选择
+
+长粘贴自动生成文件需要跨普通退出恢复，系统临时目录不足以拥有这份内容；同项目可以有多个草稿，
+因此使用既有 Thread 输出目录与 Main 登记。首次发送不搬迁文件，也不把正文存入 Core 或再复制进草稿。
+
+选择仅对最终发送快照中的生成附件持久写入、首版不撤销的保护标记，并在同一登记队列内协调删除。
+已移除附件不受后续发送连带保护，本次无附件也不解除更早保护。用户优先要求可用性和架构简洁：
+接受少量实际未发布的文件保留到 Thread 删除，以避免误删已发布文件。移除引用不以物理清理成功为条件；
+草稿保存失败与清理失败分开处理，发送后先保存新草稿再释放恢复登记。
+
+2026-10-21 按 User 的实际复现收窄 Clipboard 豁免：私有 MIME 同时承载纯正文，不能把格式存在当作
+含有结构化身份。只在恢复后仍有 Member、All Members 或 Skill Atom 时优先插入结构化内容；
+内部纯正文沿用同一单次长粘贴入口，保留现有复制格式及附件生命周期。
+
+2026-10-22 补齐 Web：浏览器不能依赖 Electron Main；现有上传回执不可变，不能用更新回执或
+逐次追加发送事件记录删除资格。因此在 Core 原 SQLite 中增加一张仅属于生成文件的资格表，
+复用数据库锁和上传事务；不新建数据库服务，也不重做普通上传。
+
+### 未选择方案与后果
+
+未选择每次发送关联、失败解除保护、结果轮询或后台对账；它们可以精确回收更多文件，但需要新增状态和恢复责任。
+也不建立定时扫描、引用计数或垃圾回收器。必要登记的裁剪豁免和既有 Pending 启动目录清理仍需补齐，否则
+文件在磁盘上存在也不能保证草稿恢复。普通外部文件、消息删除和 Run 取消不在本次变更范围。
+
+<a id="v1-72-d54"></a>
+
+## V1.72-D54：中断复用事件通知，短亮与持久已读分离
+
+- 状态：accepted
+- 日期：2026-10-21
+- 确认：User 的 R2 计划讨论与消息 c2984afb-b95c-4699-8114-387552b6d7c1 授权独立 worktree 实施。
+- 当前权威：[Notification Episode v11](../../contracts/notification-episode-v11.md)、[Current User Attention v9](../../contracts/current-user-attention-v9.md)、[通知架构](../../architecture/notification-episodes.md#中断蓝点与实时反馈)。
+- 后续：[V1.72-D55](#v1-72-d55) 收窄并替代本决定的停止来源、精确确认及短亮机制；以下保留当时理由。
+
+强退时无法依赖前端离开回调。沿用 Core 已有恢复收口事务，将真实中断作为通知来源，保留唯一
+Disposition 已读真源；不采用启动逐会话推断或本机标记未读，因为前者扩大恢复扫描，后者把用户
+手动提醒与结果注意力混在一起，跨窗口确认和重启恢复都难以一致。
+
+立即确认可见结果可能早于侧栏第一次读取，所以另用精确实时准入与本机操作意图短亮。
+等待侧栏绘制才 ACK 会让折叠、裁切或隐藏状态槽阻塞已读，因此不采用该屏障。
+代价是短亮只保证在当时可绘制的槽位出现；已结束的私有来源退出候选而保留未确认审计，
+本轮不引入历史单聊产品。新增分类、Journal 描述和有界确认接口构成持久兼容边界。
+
+规模实测发现，轻量 SQL 若等待启动附件维护持有的主连接锁，仍会延迟首份蓝点结果。
+因此只将该批量读取放入既有独立读队列，以已准入数据库的惰性只读 WAL 连接读取。
+快照事务仍包含同一 Journal 边界与 Disposition；写入、恢复和准入责任保持在原 owner。
+连接失败只让读取失败，不扩大为 Core 启动失败。
+
+<a id="v1-72-d55"></a>
+
+## V1.72-D55：执行中断提醒以 Thread 展示确认，删除手动停止短亮
+
+- 状态：accepted
+- 日期：2026-10-21
+- 确认：User 消息 613cf2d5-70c3-41c9-a5fb-7f7b9ee4c3de 收窄为 App 退出提醒；67fde392-eb82-4f7e-8284-54075161ff78 授权修改并清理多余代码。fb453917-508a-49ce-ba19-8fa4fe1481f2 补充确认保留 Run 异常退出提醒。
+- 当前权威：[Notification Episode v12](../../contracts/notification-episode-v12.md)、[Current User Attention v10](../../contracts/current-user-attention-v10.md)、[执行中断提醒](../../architecture/notification-episodes.md#执行中断提醒)。
+- 替代：[V1.72-D54](#v1-72-d54) 的手动停止来源、精确结果确认及独立短亮；通知事实与唯一 Disposition 继续保留。
+
+原实现把“退出打断过这个会话”扩展为逐 Run 的停止注意力。无输出的停止可能没有可见来源供确认，
+精确短亮又要求本机意图、准入描述、计时和槽位判断。普通快照推进还会通过 callback 身份触发重复读取。
+这些成本与本次所需的退出提醒不相称，继续补终态标记只能修局部症状。
+
+选择保留现有退出/启动恢复事务与通知持久性，包括 App 运行期间已确认的执行丢失，
+把已读依据收窄为正式 Thread 内容成功展示。
+读取仍按通知事件和已有恢复机制，普通执行进度不参与。删除手动停止 producer 与整套短亮链路，
+旧手动停止事实保留审计但不参与侧栏候选，不伪造已读。协议删除准入描述，数据库升级只换 producer。
+
+拒绝给空输出逐个补占位或增加展示状态机，也不改用本机标记未读、独立退出清单或每次启动全会话计算。
+代价是打开会话即可确认执行中断提醒，不证明用户看过每个被中断 Run；这一语义符合本次会话级目标。
+其他精确通知、回复水位、手动提醒与运行显示保持各自责任。
+
+<a id="v1-72-d56"></a>
+
+## V1.72-D56：环境编辑直接显示完整值，标量转换集中在 Renderer
+
+- 状态：accepted
+- 日期：2026-10-21
+- 确认：User 消息 85cf3936-84af-4e82-886f-28aa1c277c83 要求删除全部隐藏逻辑；6aa5baf6-aeb5-4e9f-8a3e-0a98edc7cb6e 确认标量输入及取消非必要校验。
+- 当前权威：[Runtime Launch v69](../../contracts/runtime-launch-and-verification-v69.md)、[队员环境变量](../../ui/components/member-identity.md#队员环境变量)。
+
+凭据占位混入可编辑 JSON，会让用户修改其他字段时遭遇保留标记校验，且额外查看请求带来版本与迟到回包交互。
+选择完整值直接编辑，移除遮蔽状态及标记，Owner 权限、加密持久化和公开输出脱敏继续各自负责。
+不再用眼睛按钮或逐项编辑器补充状态，也不增加变量行入口。
+
+数字和布尔值是常见设置，要求用户逐个补引号没有必要。转换集中在公共 Renderer 解析函数，
+预览和提交共享同一字符串映射；Core 保持字符串合同，避免 JS/Rust 的数值表现差异。
+原始草稿保留到成功保存，保证输入与失败恢复不被自动格式化打断；不支持的结构值与不安全数字明确拒绝。
+独立条数和名称长度上限缺少额外收益，取消后仍由 UTF-8 容量、名称语法、保留名和版本冲突保护实际边界。
+
+<a id="v1-72-d57"></a>
+## V1.72-D57：Team 作为创建预设，Custom 独立保留，指引在创建时固定
+
+- 状态：accepted
+- 日期：2026-10-18
+- 确认：User 在 Team 设计 Thread sequence 29 确认 R1 和实施。
+- 当前权威：[Team Templates v1](../../contracts/team-templates-v1.md)、[Bootstrap v6](../../contracts/native-session-bootstrap-v6.md)、[Team 架构](../../architecture/team-management.md)。
+
+User 要求不创建团队也能配置一键新建，且指引只作启动材料，不因编辑重新投递。因此保留独立 Custom
+默认值，Team 仅提供有版本的创建输入；拒绝旧配置自动生成团队与 Thread 实时绑定 Team。
+指引在成功创建事务内固定，后续队员和合法 Bootstrap 补发读同一文本；不提供会话指引编辑器。
+代价是旧会话不跟随模板修订，换用新指引需要创建新会话。
+
+创建偏好从旧 JSON 只导入一次到 SQLite，使默认 Team 删除与回退可在一个事务完成。保留旧文件用于
+恢复，避免跨文件提交失败时出现已删 Team 仍被选中的状态。模型输入仅增加非空 TEAM_GUIDANCE 段，
+版本与确认见 [R1](model-context-change-team-guidance.md)。

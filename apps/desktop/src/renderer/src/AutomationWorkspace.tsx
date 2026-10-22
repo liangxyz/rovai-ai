@@ -31,7 +31,6 @@ export function AutomationWorkspace({
   defaultMemberId,
   topNotices,
   onOpenThread,
-  onNotify,
   onLeaveGuardChange
 }: {
   agents: AgentProfile[]
@@ -39,7 +38,6 @@ export function AutomationWorkspace({
   defaultMemberId: string
   topNotices?: React.ReactNode
   onOpenThread(threadId: string): void
-  onNotify(message: string): void
   onLeaveGuardChange?(guard: AutomationLeaveGuard | null): void
 }): React.JSX.Element {
   const client = useThreadClient()
@@ -380,7 +378,6 @@ export function AutomationWorkspace({
       savedFingerprints.current.set(created.automationId, draftFingerprint(normalizedDraft))
       setSelectedId(created.automationId)
       setDraft(normalizedDraft)
-      onNotify(uiAttribute('定时任务已保存'))
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {
@@ -398,10 +395,6 @@ export function AutomationWorkspace({
         commandId: newCommandId(), command: { automationId: current.automationId }
       })
       if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务未能开始。')))
-      const status = String(result.payload.status ?? '')
-      onNotify(status === 'skipped'
-        ? uiAttribute('已有一次运行正在进行，本次已跳过')
-        : status === 'failed' ? uiAttribute('任务未能开始，请查看运行状态') : uiAttribute('任务已开始运行'))
       await refresh(true)
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
@@ -425,7 +418,6 @@ export function AutomationWorkspace({
       })
       const updated = automationFromResult(result)
       replaceAutomation(updated)
-      onNotify(enabled ? uiAttribute('任务已重新开启') : uiAttribute('任务已关闭'))
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {
@@ -450,7 +442,6 @@ export function AutomationWorkspace({
       setAutomations(next)
       automationsRef.current = next
       if (selectedIdRef.current === automationId) setSelectedId(null)
-      onNotify(uiAttribute('定时任务已删除'))
     } catch (nextError) {
       setIssue({ kind: 'action', message: readErrorMessage(nextError) })
     } finally {

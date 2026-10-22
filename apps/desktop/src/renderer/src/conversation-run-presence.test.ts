@@ -1,3 +1,4 @@
+import { languageTestApi } from './interface-language-test-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunView, ThreadMessageView } from '@contracts'
 import { conversationRunPresenceTimeline, formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview } from './conversation-run-presence'
@@ -226,7 +227,7 @@ describe('conversation presence copy and duration', () => {
     expect(new Set(chinese.map(pair => pair[1]))).toEqual(new Set(working))
     expect(runs.map(run => [preview(structuredClone(run), 'runtime_initializing'), preview(structuredClone(run), null)])).toEqual(chinese)
     expect(random).toHaveBeenCalledTimes(runs.length * 2)
-    const api = { setInterfaceLanguage: async (interfaceLanguage: string) => ({ interfaceLanguage }) } as GeneralPreferencesApi
+    const api = languageTestApi
     try {
       await changeInterfaceLanguage(api, 'en')
       runs.forEach((run, index) => {

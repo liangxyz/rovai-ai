@@ -102,8 +102,10 @@ Camp Composer 规则恢复。仅辅助技术可见的 live status 说明“内�
 
 ## References
 
-- [First-run Onboarding v6](../../contracts/first-run-onboarding-v6.md)
+- [First-run Onboarding v7](../../contracts/first-run-onboarding-v7.md)
 - [Desktop Bootstrap Shell](bootstrap-shell.md)
 - [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)
 - [Camp 会话工作区](conversation-workspace.md)
 - [全局设计系统](../../../DESIGN.md)
+
+设置与欢迎页共用“跟随系统 / 简体中文 / English”。创建开始后，系统变化仍可更新应用文案，候选资料使用已冻结的具体语言；保存偏好不写入解析结果。见 [Interface Language v2](../../contracts/interface-language-v2.md)。

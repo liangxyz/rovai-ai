@@ -195,6 +195,7 @@ mod tests {
             kind,
             &crate::agent_profile::ModelSelection::RuntimeDefault,
             crate::member_environment::EnvironmentEdit {
+                inherit_common: None,
                 expected_revision: 0,
                 json: r#"{"API_KEY":"fixture-secret"}"#.into(),
             },
@@ -254,8 +255,9 @@ mod tests {
         let mut file =
             crate::platform::private_storage::create_private_new_file(&key_path).unwrap();
         std::io::Write::write_all(&mut file, &key).unwrap();
+        database.migrate(false).unwrap();
         assert_eq!(
-            crate::member_environment::get(database.connection(), "agent_1", kind, true).unwrap()["environment"]
+            crate::member_environment::get(database.connection(), "agent_1", kind).unwrap()["environment"]
                 ["API_KEY"],
             "fixture-secret"
         );

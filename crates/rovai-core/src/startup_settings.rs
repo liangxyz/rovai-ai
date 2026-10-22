@@ -8,6 +8,7 @@ use crate::application::{
 use anyhow::{Context, Result, ensure};
 use rovai_core::{
     agent_profile::{AdapterKind, AgentProfileService, InstallationSource},
+    member_environment::common,
     runtime_startup::{self, RuntimeStartupConfiguration},
 };
 use serde::Deserialize;
@@ -31,6 +32,8 @@ struct KindParams {
 struct DraftParams {
     runtime_kind: AdapterKind,
     configuration: RuntimeStartupConfiguration,
+    #[serde(default)]
+    common_environment: Option<common::Edit>,
 }
 
 #[derive(Deserialize)]
@@ -43,6 +46,8 @@ struct SaveParams {
     configuration: Option<RuntimeStartupConfiguration>,
     #[serde(default)]
     expected_revision: Option<u64>,
+    #[serde(default)]
+    common_environment: Option<common::Edit>,
 }
 
 impl Core {
@@ -51,7 +56,9 @@ impl Core {
         method: &str,
         params: Value,
     ) -> Result<Value> {
-        match method {
+        let kind: KindParams =
+            serde_json::from_value(json!({"runtimeKind":params.get("runtimeKind")}))?;
+        let mut result = match method {
             "runtime.startup.get" => {
                 let params: KindParams = serde_json::from_value(params)?;
                 let database = self.database.lock().await;
@@ -82,11 +89,26 @@ impl Core {
             "runtime.startup.inspect" | "runtime.startup.check" => {
                 let params: DraftParams = serde_json::from_value(params)
                     .map_err(|_| anyhow::anyhow!("启动设置输入格式无效。"))?;
-                let configuration = runtime_startup::resolve_draft(
-                    &*self.database.lock().await,
-                    params.runtime_kind,
-                    params.configuration,
-                )?;
+                let configuration = {
+                    let database = self.database.lock().await;
+                    let mut configuration = runtime_startup::resolve_draft(
+                        &database,
+                        params.runtime_kind,
+                        params.configuration,
+                    )?;
+                    configuration.environment = common::entries(match params.common_environment {
+                        Some(edit) => {
+                            common::resolve(database.connection(), params.runtime_kind, &edit)?
+                        }
+                        None => common::current(database.connection(), params.runtime_kind)?,
+                    });
+                    configuration.custom_api_snapshot = runtime_startup::native_snapshot(
+                        params.runtime_kind,
+                        &configuration,
+                        database.path(),
+                    );
+                    configuration
+                };
                 if method == "runtime.startup.check" {
                     self.check_runtime_startup(params.runtime_kind, configuration)
                         .await
@@ -102,7 +124,12 @@ impl Core {
                 self.save_runtime_startup(params).await
             }
             _ => anyhow::bail!("Unknown startup settings method"),
+        }?;
+        if matches!(method, "runtime.startup.get" | "runtime.startup.save") {
+            result["commonEnvironment"] =
+                common::get(self.database.lock().await.connection(), kind.runtime_kind)?;
         }
+        Ok(result)
     }
 
     async fn save_runtime_startup(&self, params: SaveParams) -> Result<Value> {
@@ -115,6 +142,10 @@ impl Core {
         let edits = match (params.edits, params.configuration, params.expected_revision) {
             (Some(edits), None, None) => edits,
             (None, Some(configuration), Some(revision)) => {
+                ensure!(
+                    params.common_environment.is_none(),
+                    "Shared environment updates require field edits"
+                );
                 ensure!(
                     configuration.environment.is_empty(),
                     "Runtime environment settings moved to Teammates"
@@ -141,7 +172,17 @@ impl Core {
                 json!({"status":"conflict", "latest":runtime_startup::saved_response(prepared.current), "conflicts":prepared.conflicts}),
             );
         }
-        if prepared.edits.is_empty() && !(initial_legacy_save && prepared.current.revision == 0) {
+        let common = {
+            let database = self.database.lock().await;
+            params
+                .common_environment
+                .map(|edit| common::prepare(database.connection(), kind, edit))
+                .transpose()?
+        };
+        if prepared.edits.is_empty()
+            && !common.as_ref().is_some_and(|edit| edit.changed)
+            && !(initial_legacy_save && prepared.current.revision == 0)
+        {
             return Ok(serde_json::to_value(runtime_startup::saved_response(
                 prepared.current,
             ))?);
@@ -171,14 +212,26 @@ impl Core {
         }
         let settings = {
             let mut database = self.database.lock().await;
-            runtime_startup::commit_save(&mut database, kind, prepared, search.generation())?
+            runtime_startup::commit_save_with_common(
+                &mut database,
+                kind,
+                prepared,
+                search.generation(),
+                common.as_ref(),
+            )?
         };
+        let mut check_configuration = settings.configuration.clone();
+        runtime_startup::apply_common(
+            self.database.lock().await.connection(),
+            kind,
+            &mut check_configuration,
+        )?;
         let search = if settings.reconnect_required {
             search
         } else {
             search.with_generation(self.runtime_search_environment.read().await.generation())
         }
-        .with_startup_configuration(kind, settings.configuration.clone());
+        .with_startup_configuration(kind, check_configuration);
         search.activate_for_runtime_commands();
         *self.runtime_search_environment.write().await = Arc::new(search);
         if settings.reconnect_required {

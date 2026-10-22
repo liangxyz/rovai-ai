@@ -40,6 +40,14 @@ pub enum Operation {
     TasksGet,
     #[serde(rename = "preferences.tasks.set")]
     TasksSet,
+    #[serde(rename = "teams.list")]
+    TeamsList,
+    #[serde(rename = "teams.save")]
+    TeamsSave,
+    #[serde(rename = "teams.delete")]
+    TeamsDelete,
+    #[serde(rename = "preferences.newConversation.setTeam")]
+    NewConversationSetTeam,
     #[serde(rename = "preferences.newConversation.get")]
     NewConversationGet,
     #[serde(rename = "preferences.newConversation.setDefaults")]
@@ -80,6 +88,10 @@ pub enum Operation {
     NotificationInbox,
     #[serde(rename = "notifications.changesSince")]
     NotificationChanges,
+    #[serde(rename = "notifications.threadInterruptions")]
+    NotificationThreadInterruptions,
+    #[serde(rename = "notifications.acknowledgeThreadInterruptions")]
+    NotificationAcknowledgeInterruptions,
     #[serde(rename = "notifications.preference.get")]
     NotificationPreference,
     #[serde(rename = "notifications.preference.update")]
@@ -146,6 +158,8 @@ pub enum Operation {
     RuntimeStartupGet,
     #[serde(rename = "member.runtimeEnvironment.get")]
     MemberEnvironmentGet,
+    #[serde(rename = "runtime.environment.get")]
+    RuntimeEnvironmentGet,
     #[serde(rename = "conversations.memberSession.get")]
     MemberSessionGet,
     #[serde(rename = "conversations.restartNativeSession")]
@@ -241,6 +255,8 @@ pub enum Operation {
     Messages,
     #[serde(rename = "thread.messages.around", alias = "camp.messages.around")]
     MessagesAround,
+    #[serde(rename = "thread.messages.replies")]
+    Replies,
     #[serde(rename = "thread.messages.anchors")]
     UserAnchors,
     #[serde(rename = "thread.messages.anchorPreview")]
@@ -426,6 +442,10 @@ impl Operation {
         match self {
             Self::TasksGet => "preferences.tasks.get",
             Self::TasksSet => "preferences.tasks.set",
+            Self::TeamsList => "teams.list",
+            Self::TeamsSave => "teams.save",
+            Self::TeamsDelete => "teams.delete",
+            Self::NewConversationSetTeam => "preferences.newConversation.setTeam",
             Self::NewConversationGet => "preferences.newConversation.get",
             Self::NewConversationSetDefaults => "preferences.newConversation.setDefaults",
             Self::NewConversationSetOneClick => "preferences.newConversation.setOneClick",
@@ -459,6 +479,10 @@ impl Operation {
             Self::SubsystemRetry => "runtime.subsystems.retry",
             Self::NotificationInbox => "notifications.inbox",
             Self::NotificationChanges => "notifications.changesSince",
+            Self::NotificationThreadInterruptions => "notifications.threadInterruptions",
+            Self::NotificationAcknowledgeInterruptions => {
+                "notifications.acknowledgeThreadInterruptions"
+            }
             Self::NotificationPreference => "notifications.preference.get",
             Self::NotificationPreferenceUpdate => "notifications.preference.update",
             Self::NotificationAcknowledge => "notifications.acknowledge",
@@ -485,6 +509,7 @@ impl Operation {
             Self::McpImport => "mcp.import.commit",
             Self::RuntimeStartupGet => "runtime.startup.get",
             Self::MemberEnvironmentGet => "member.runtimeEnvironment.get",
+            Self::RuntimeEnvironmentGet => "runtime.environment.get",
             Self::MemberSessionGet => "conversations.memberSession.get",
             Self::MemberSessionRestart => "conversations.restartNativeSession",
             Self::RuntimeEnvironmentLegacyList => "runtime.environmentLegacy.list",
@@ -570,6 +595,7 @@ impl Operation {
             Self::CampExists => "camps.exists",
             Self::Messages => "camp.messages.page",
             Self::MessagesAround => "camp.messages.around",
+            Self::Replies => "camp.messages.replies",
             Self::UserAnchors => "camp.messages.anchors",
             Self::UserAnchorPreview => "camp.messages.anchorPreview",
             Self::FindMessages => "camp.messages.find",
@@ -717,6 +743,7 @@ mod tests {
         for (public, internal) in [
             ("runtime.status.get", "runtime.status.get"),
             ("thread.messages.anchors", "camp.messages.anchors"),
+            ("thread.messages.replies", "camp.messages.replies"),
             (
                 "thread.messages.anchorPreview",
                 "camp.messages.anchorPreview",

@@ -13,6 +13,8 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/camp-open-projection')
 
+test('public input history preserves drafts and sends the displayed structured preview', { timeout: 90_000 }, t => runFixture(t, '--input-history'))
+
 test('Steer uses per-recipient routes, attachment-only send and silent execution completion', { timeout: 90_000 }, t => runFixture(t, '--steer'))
 
 test('business-only CampOpen keeps cards, earlier pages and reading position across refresh', { timeout: 60_000 }, t => runFixture(t))

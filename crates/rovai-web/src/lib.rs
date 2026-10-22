@@ -671,6 +671,9 @@ async fn events(
                     let mut payload = json!({"epoch":state.epoch,"revision":revision});
                     if let Ok(change) = &result {
                         if change["method"] == "preferences.tasks_changed" { payload["tasksChanged"] = json!(true); }
+                        if matches!(change["method"].as_str(), Some("notification_episode.changed" | "notification_episode.preference_changed")) {
+                            payload["notificationsChanged"] = json!(true);
+                        }
                         if change["method"] == "thread.messages.changed" {
                             let params = &change["params"];
                             if let (Some(thread_id), Some(index_changed), Some(through)) = (

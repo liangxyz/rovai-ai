@@ -69,7 +69,7 @@ function initialPreference(): RosterPreference {
   }
 }
 
-export function MemberRosterLayout({ children }: { children: ReactNode }): React.JSX.Element {
+export function MemberRosterLayout({ children, separatorLabel = uiAttribute('队员列表宽度') }: { children: ReactNode; separatorLabel?: string }): React.JSX.Element {
   const mobile = useMobileLayout()
   const [preference, setPreference] = useState(initialPreference)
   const [maxWidth, setMaxWidth] = useState(MAX_WIDTH)
@@ -121,15 +121,16 @@ export function MemberRosterLayout({ children }: { children: ReactNode }): React
         style={{ '--member-roster-width': `${preference.collapsed ? COLLAPSED_WIDTH : width}px` } as CSSProperties}
       >
         {children}
-        <MemberRosterSeparator dragging={dragging} setDragging={setDragging} />
+        <MemberRosterSeparator dragging={dragging} setDragging={setDragging} label={separatorLabel} />
       </div>
     </RosterContext.Provider>
   )
 }
 
-function MemberRosterSeparator({ dragging, setDragging }: {
+function MemberRosterSeparator({ dragging, setDragging, label }: {
   dragging: boolean
   setDragging(value: boolean): void
+  label: string
 }): React.JSX.Element {
   const { id, preference, width, maxWidth, collapsed, sorting, setCollapsed, setWidth, restorePreference } = useMemberRosterLayout()
   const handleRef = useRef<HTMLDivElement>(null)
@@ -156,7 +157,7 @@ function MemberRosterSeparator({ dragging, setDragging }: {
       className={`member-roster-resizer ${dragging ? 'is-dragging' : ''}`}
       role="separator"
       tabIndex={sorting ? -1 : 0}
-      aria-label={uiAttribute("队员列表宽度")}
+      aria-label={label}
       aria-disabled={sorting || undefined}
       aria-orientation="vertical"
       aria-valuemin={COLLAPSED_WIDTH}

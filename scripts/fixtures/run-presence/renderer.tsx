@@ -1,3 +1,4 @@
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -50,6 +51,7 @@ function Glyph({ kind }: { kind: string }) {
 
 function Workbench() {
   const state = useSyncExternalStore(model.subscribe, model.get)
+  useEffect(() => { if (params.has('replies')) model.showReplyCase(params.get('replies') === 'long') }, [])
   const [theme, setTheme] = useState(params.get('theme') === 'night' ? 'night' : 'day')
   const [proposal, setProposal] = useState(params.get('baseline') !== '1')
   const [controls, setControls] = useState(params.get('pure') !== '1')
@@ -102,8 +104,8 @@ function Workbench() {
         ...['消息投递与恢复', '会话工作区优化', '发布前检查'].map((title, i) => ({ ...current, id: `demo-thread-${i}`, title, marker: 'none' }))] }] }
   useEffect(() => {
     Object.assign(window, { __presence: { setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields,
-      setLanguage: (language: 'zh-CN' | 'en') => changeInterfaceLanguage({ setInterfaceLanguage: async (interfaceLanguage: string) => ({ interfaceLanguage }) } as any, language),
-      getState: model.get, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
+      setLanguage: (language: 'zh-CN' | 'en') => changeInterfaceLanguage(languageTestApi, language),
+      getState: model.get, showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
       showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot
@@ -174,6 +176,12 @@ function Workbench() {
         <div className="prototype-steps" aria-label="演示阶段">{sequence.steps.map((step, i) => <button type="button" key={i}
           aria-current={state.stage === i ? 'step' : undefined} data-demo-step={i} title={sequence.descriptions[i]}
           onClick={() => model.setStage(i)}>{step}</button>)}</div>
+        {params.has('replies') && <div className="prototype-steps">
+          <button onClick={() => model.showReplyCase()}>重置回复</button>
+          <button onClick={() => model.showReplyCase(true)}>长回复链</button>
+          <button onClick={() => model.withdrawReply()}>撤回示例回复</button>
+          <button onClick={() => model.finishReplyRuns()}>完成示例执行</button>
+        </div>}
         <div className="prototype-bar-actions">
           <button className="prototype-icon" aria-label={state.playing ? '暂停演示' : '自动演示'} title={state.playing ? '暂停演示' : '自动演示'} onClick={() => model.play()}><Glyph kind={state.playing ? 'pause' : 'play'} /></button>
           <button className="prototype-icon" aria-label="重置演示" title="重置演示" onClick={() => { setInspector(null); model.reset() }}><Glyph kind="reset" /></button>

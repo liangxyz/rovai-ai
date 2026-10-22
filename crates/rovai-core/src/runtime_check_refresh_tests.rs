@@ -488,6 +488,88 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
                 .is_err()
         );
     }
+    // Shared credentials are private; saved checks use them, draft checks don't publish them.
+    fixture
+        .core
+        .refresh_runtime_check_environment(true)
+        .await
+        .unwrap();
+    fixture.core.run_runtime_discovery().await;
+    fixture.check().await;
+    fixture.seed_ready().await;
+    let installation_before = rovai_core::agent_profile::AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    let generation_before = fixture
+        .core
+        .runtime_search_environment
+        .read()
+        .await
+        .generation();
+    let shared = fixture.core.handle_runtime_startup("runtime.startup.save", json!({"runtimeKind":KIND,"edits":[],
+        "commonEnvironment":{"expectedRevision":0,"json":r#"{"CHECK_REFRESH_VALUE":"shared-private","API_KEY":"fixture-common-key"}"#}})).await.unwrap();
+    assert_eq!(
+        shared["commonEnvironment"]["environment"]["API_KEY"],
+        "fixture-common-key"
+    );
+    assert!(
+        shared["configuration"]["environment"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .core
+            .runtime_search_environment
+            .read()
+            .await
+            .generation()
+            > generation_before
+    );
+    let installation_after = rovai_core::agent_profile::AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        installation_after.generation, installation_before.generation,
+        "environment saves must not replace live hosts through installation identity"
+    );
+    assert_ne!(fixture.health().await["status"], "ready");
+    assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
+    assert_eq!(
+        std::fs::read_to_string(latest.parent().unwrap().join("environment.txt"))
+            .unwrap()
+            .trim(),
+        "shared-private"
+    );
+    let before = fixture.public_state().await;
+    let preview = fixture.core.handle_runtime_startup("runtime.startup.check", json!({"runtimeKind":KIND,"configuration":automatic,
+        "commonEnvironment":{"expectedRevision":1,"json":r#"{"CHECK_REFRESH_VALUE":"draft-private","API_KEY":"fixture-common-key"}"#}})).await.unwrap();
+    assert!(!preview.to_string().contains("fixture-common-key"));
+    assert_eq!(
+        std::fs::read_to_string(latest.parent().unwrap().join("environment.txt"))
+            .unwrap()
+            .trim(),
+        "draft-private"
+    );
+    assert_eq!(fixture.public_state().await, before);
+    assert_eq!(
+        fixture.settings().await["commonEnvironment"]["environment"]["CHECK_REFRESH_VALUE"],
+        "shared-private"
+    );
+    assert!(
+        fixture
+            .core
+            .handle_runtime_startup(
+                "runtime.startup.save",
+                json!({"runtimeKind":KIND,"edits":[],
+        "commonEnvironment":{"expectedRevision":0,"json":"{}"}})
+            )
+            .await
+            .is_err()
+    );
     // A stalled optional native process cannot own the settings page's response.
     let stalled = fixture.program("settings-only", "0.159.2", true);
     let native_home = fixture.root.join("settings-native");
