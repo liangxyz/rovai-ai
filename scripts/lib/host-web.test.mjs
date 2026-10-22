@@ -249,8 +249,10 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const legacyDefaults = { newConversationDefaults: { memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId }, newConversationDefaultsRequireConfirmation: false, oneClickNewConversationEnabled: true }
     assert.equal((await call(first, defaultsMethod + 'get')).newConversationDefaults, null)
     await host.request(defaultsMethod + 'initialize', legacyDefaults)
-    assert.deepEqual(await call(first, defaultsMethod + 'get'), legacyDefaults)
-    assert.deepEqual(await call(second, defaultsMethod + 'get'), legacyDefaults)
+    // Core now reports the selected Team; imported legacy defaults have none.
+    const importedDefaults = { ...legacyDefaults, newConversationTeamId: null }
+    assert.deepEqual(await call(first, defaultsMethod + 'get'), importedDefaults)
+    assert.deepEqual(await call(second, defaultsMethod + 'get'), importedDefaults)
     const toggled = await call(first, defaultsMethod + 'setOneClick', { enabled: false })
     assert.equal(toggled.oneClickNewConversationEnabled, false)
     // Re-import after restart must never overwrite a choice made in Web.
@@ -260,9 +262,19 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(sharedDefaults.oneClickNewConversationEnabled, true)
     assert.deepEqual(await host.request(defaultsMethod + 'get'), sharedDefaults)
     assert.deepEqual(await call(first, defaultsMethod + 'invalidate', { expectedDefaults: legacyDefaults.newConversationDefaults }), sharedDefaults)
+    // Invalidation only takes effect once a selected member is really unavailable.
+    const stillAvailable = await call(first, defaultsMethod + 'invalidate', { expectedDefaults: nextTeam })
+    assert.equal(stillAvailable.newConversationDefaultsRequireConfirmation, false)
+    const setPresence = async (agentId, presence) => {
+      const member = (await host.request('members.list')).find(profile => profile.agentId === agentId)
+      const result = await host.request('members.presence.set', { commandId: crypto.randomUUID(), command: { agentId, expectedVersion: member.version, presence } })
+      assert.equal(result.status, 'applied')
+    }
+    await setPresence(profiles[1].agentId, 'away')
     const invalidated = await call(first, defaultsMethod + 'invalidate', { expectedDefaults: nextTeam })
     assert.equal(invalidated.newConversationDefaultsRequireConfirmation, true)
     await assert.rejects(host.request(defaultsMethod + 'setOneClick', { enabled: true }))
+    await setPresence(profiles[1].agentId, 'present')
     assert.deepEqual(await call(first, defaultsMethod + 'setDefaults', { defaults: nextTeam, enableOneClick: false }), sharedDefaults)
     for (const defaults of [{ ...nextTeam, defaultLeadAgentId: 'missing' }, { memberAgentIds: ['missing'], defaultLeadAgentId: 'missing' }, { memberAgentIds: [profiles[0].agentId, profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId }]) {
       await assert.rejects(host.request(defaultsMethod + 'setDefaults', { defaults, enableOneClick: false }))
@@ -967,6 +979,9 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       await verifyPastedTextRestart({ origin: reopenedWeb.origin, administratorToken: reopenedWeb.administratorToken, state: pasteState })
       assert.deepEqual(await reopened.request(defaultsMethod + 'get'), sharedDefaults)
       assert.deepEqual(await reopened.request(defaultsMethod + 'initialize', legacyDefaults), sharedDefaults)
+      // Preferences live in Core's database; the retired JSON file is only imported while no row exists.
+      const preferences = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+      try { preferences.prepare('DELETE FROM creation_preferences WHERE singleton=1').run() } finally { preferences.close() }
       const path = join(dataDir, 'new-conversation-preferences.json')
       await writeFile(path, '{broken')
       await assert.rejects(reopened.request(defaultsMethod + 'get'), 'corrupt preferences cannot masquerade as an empty team')
