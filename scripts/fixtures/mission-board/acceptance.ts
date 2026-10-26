@@ -457,9 +457,9 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await fillDescription(createDescription, '关闭后仍应恢复的使命描述')
   const creationProperties = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.mission-create-dialog .mission-editor-property'))
   const initialCreationProperties = creationProperties()
-  check(initialCreationProperties.every(property => !property.querySelector('.dialog-glyph')), 'Create property controls do not show dropdown arrows')
+  check(initialCreationProperties.filter(property => !property.classList.contains('mission-editor-team-property')).every(property => !property.querySelector('.dialog-glyph')), 'Project and tag property controls keep their existing arrow-free presentation')
   const creationPropertyWidths = initialCreationProperties.map(property => property.getBoundingClientRect().width)
-  check(creationPropertyWidths[0] <= 157 && creationPropertyWidths[1] <= 225 && creationPropertyWidths[2] <= 133, 'Create properties remain content-sized and bounded')
+  check(creationPropertyWidths[0] <= 157 && creationPropertyWidths[1] <= 261 && creationPropertyWidths[2] <= 133, 'Create properties remain content-sized and bounded')
   const largeTeamCount = Number(initialCreationProperties[1].getAttribute('aria-label')?.match(/(\d+) 位队员/)?.[1] ?? 0)
   check(largeTeamCount >= 12 && initialCreationProperties[1].querySelector('.mission-editor-team-overflow')?.textContent === `+${largeTeamCount - 2}`, 'A large selected team stays compact while exposing the full count')
   creationProperties()[0].click()
@@ -476,7 +476,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   check(teamList.scrollHeight > teamList.clientHeight, 'Long member catalog remains vertically scrollable')
   const teamPopover = document.querySelector<HTMLElement>('.mission-editor-team-popover')!
   const teamFooter = teamPopover.querySelector<HTMLElement>('.mission-editor-team-footer')!
-  check(teamPopover.querySelector('.mission-editor-team-count')?.textContent === `已选 ${largeTeamCount} / ${largeTeamCount}`, 'Large-team picker reports selected and total counts')
+  check(teamPopover.querySelector('.mission-team-heading small')?.textContent === `${largeTeamCount} 位队员` && teamPopover.querySelectorAll('[role=checkbox][aria-checked=true]').length === largeTeamCount, 'Large-team picker reports its selected roster and checked members')
   teamList.scrollTop = teamList.scrollHeight
   await frames()
   const lastTeamRow = teamList.lastElementChild as HTMLElement

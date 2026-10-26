@@ -3,7 +3,7 @@ document_type: ui-contract
 authority: web-connection-recovery-presentation
 status: accepted
 target_version: cross-version
-last_updated: 2026-10-17
+last_updated: 2026-10-25
 ---
 
 # Web 连接恢复
@@ -23,7 +23,7 @@ Desktop 托管和独立 Server 的 Web 共用一个全屏断线遮罩，宽屏�
 | 恢复未完成 | 仍无法连接服务 | 恢复连接并重试 |
 
 正文只说明页面和草稿保留，以及连接恢复后处理未完成操作。失败时提示确认服务已启动。
-使用单一中性浮层、attention 图标与现有 `conversation-action` 主操作 Token；日夜主题共享结构，
+使用单一中性浮层、attention 图标与现有 `conversation-action` 主操作 Token；所有配色共享结构，
 不得回退到通用蓝色 primary。手机宽度保持边距，短视口允许浮层内部滚动；减少动态效果时停止旋转。
 标题、说明、按钮与恢复通知跟随现有界面语言偏好。保留键盘焦点约束，不添加额外的 focus-visible 描边。
 

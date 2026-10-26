@@ -14,6 +14,8 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
   const root = useRef<HTMLElement>(null), handle = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1040), [available, setAvailable] = useState(1170), [dragging, setDragging] = useState(false)
   const preferred = useRef<number | null>(null)
+  const dragged = useRef(false), dragClickSequence = useRef(false)
+  const pointerUp = useRef<(event: Pick<PointerEvent, 'pointerId' | 'clientX'>) => void>(() => {})
   const latestExpand = useRef(onExpand); latestExpand.current = onExpand
   const preview = useOptionalFilePreview()
   const previewLayout = useOptionalFilePreviewLayout()
@@ -66,7 +68,7 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
       if (stored >= minimum) preferred.current = stored
     } catch {}
     const measure = () => {
-      if (gesture.current) finish(true)
+      if (gesture.current) finish()
       const rail = parseFloat(getComputedStyle(shell).getPropertyValue('--rail-width')) || 0
       const next = Math.max(1, shell.clientWidth - rail - 24)
       setAvailable(next)
@@ -84,7 +86,8 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
   }, [enabled])
 
   useEffect(() => {
-    const cancel = () => finish(true)
+    const settle = () => finish()
+    const end = (event: PointerEvent) => pointerUp.current(event)
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && gesture.current) {
         event.preventDefault()
@@ -92,10 +95,12 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
         finish(true)
       }
     }
-    window.addEventListener('blur', cancel)
+    window.addEventListener('blur', settle)
+    window.addEventListener('pointerup', end, true)
     window.addEventListener('keydown', escape, true)
     return () => {
-      window.removeEventListener('blur', cancel)
+      window.removeEventListener('blur', settle)
+      window.removeEventListener('pointerup', end, true)
       window.removeEventListener('keydown', escape, true)
     }
   }, [])
@@ -104,6 +109,7 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
     const value = gesture.current
     if (!value || (!value.moved && Math.abs(clientX - value.x) < 3)) return
     value.moved = true
+    dragged.current = true
     // Crossing the left threshold ends this drag immediately; pointerup is no
     // longer required and cannot oscillate the presentation back to a drawer.
     if (clientX <= value.snapX && clientX < value.x - 3) {
@@ -114,6 +120,12 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
     hidePreviewBeforeConversationCompacts(value.width, next)
     value.width = next
     setWidth(next)
+  }
+
+  pointerUp.current = event => {
+    if (gesture.current?.id !== event.pointerId) return
+    move(event.clientX)
+    finish()
   }
 
   function chooseWidth(next: number) {
@@ -142,6 +154,7 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
         aria-describedby="mission-drawer-resize-help" title={uiAttribute("向左拖动，到边缘立即展开；双击或 Enter 展开")}
         onPointerDown={event => {
           if (event.button !== 0 || !event.isPrimary || gesture.current) return
+          dragged.current = false
           event.preventDefault()
           event.currentTarget.focus({ preventScroll: true })
           event.currentTarget.setPointerCapture(event.pointerId)
@@ -164,12 +177,18 @@ export function MissionSurface({ enabled = true, full, onExpand, onClose, childr
           document.documentElement.classList.add('mission-drawer-resizing')
         }}
         onPointerMove={event => { if (gesture.current?.id === event.pointerId) move(event.clientX) }}
-        onPointerUp={event => {
-          if (gesture.current?.id !== event.pointerId) return
-          move(event.clientX)
-          finish()
+        onPointerUp={event => pointerUp.current(event)}
+        onPointerCancel={() => finish()} onLostPointerCapture={() => finish()}
+        onClickCapture={event => {
+          if (!event.detail) return
+          if (event.detail === 1) dragClickSequence.current = dragged.current
+          else dragClickSequence.current ||= dragged.current
+          if (dragClickSequence.current) { event.preventDefault(); event.stopPropagation() }
         }}
-        onPointerCancel={() => finish(true)} onLostPointerCapture={() => finish(true)} onDoubleClick={onExpand}
+        onDoubleClickCapture={event => {
+          if (event.detail && (dragged.current || dragClickSequence.current)) { event.preventDefault(); event.stopPropagation() }
+        }}
+        onDoubleClick={onExpand}
         onKeyDown={event => {
           if (event.key === 'Enter' || event.key === 'End') {
             event.preventDefault()

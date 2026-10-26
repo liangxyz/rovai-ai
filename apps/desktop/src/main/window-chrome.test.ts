@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import type { ResolvedTheme, ThemePreference } from '@contracts'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -20,14 +21,14 @@ function themeToken(selector: string, token: string): string {
 
 describe('window chrome', () => {
   it('preserves the existing hidden macOS title bar and traffic lights', () => {
-    expect(windowChromeOptions('darwin', 'night')).toEqual({
+    expect(windowChromeOptions('darwin', { preference: 'ember', resolvedTheme: 'night' })).toEqual({
       titleBarStyle: 'hidden',
       trafficLightPosition: { x: 12, y: 14 }
     })
   })
 
   it('hides the Windows title strip while preserving native controls', () => {
-    const options = windowChromeOptions('win32', 'day')
+    const options = windowChromeOptions('win32', { preference: 'day', resolvedTheme: 'day' })
     expect(options).toEqual({
       autoHideMenuBar: false,
       frame: true,
@@ -41,29 +42,33 @@ describe('window chrome', () => {
     expect(options.titleBarOverlay).not.toHaveProperty('height')
   })
 
-  it('keeps the Windows title-bar overlay in sync with the resolved theme', () => {
-    expect(windowsTitleBarOverlay('day')).toEqual({
-      color: themeToken(':root', '--rail'),
-      symbolColor: themeToken(':root', '--ink')
-    })
-    expect(windowsTitleBarOverlay('night')).toEqual({
-      color: themeToken(':root[data-theme="night"]', '--rail'),
-      symbolColor: themeToken(':root[data-theme="night"]', '--ink')
-    })
+  const preferences: ThemePreference[] = ['system', 'day', 'night', 'horizon', 'classic-red', 'ember']
+  const modes: ResolvedTheme[] = ['day', 'night']
+  it.each(preferences.flatMap(preference => modes.map(resolvedTheme => ({ preference, resolvedTheme }))))(
+    'uses the $preference palette with $resolvedTheme mode at creation and on updates',
+    appearance => {
+      const theme = appearance.preference === 'system' ? appearance.resolvedTheme : appearance.preference
+      const selector = theme === 'day' ? ':root'
+        : theme === 'night' ? ':root[data-theme="night"]' : `:root[data-theme-id="${theme}"]`
+      const expected = {
+        color: themeToken(selector, '--rail'),
+        symbolColor: themeToken(selector, '--ink')
+      }
+      expect(windowsTitleBarOverlay(appearance)).toEqual(expected)
+      expect(windowChromeOptions('win32', appearance).titleBarOverlay).toEqual(expected)
+      const setTitleBarOverlay = vi.fn()
+      applyWindowChromeAppearance({ setTitleBarOverlay }, 'win32', appearance)
+      expect(setTitleBarOverlay).toHaveBeenCalledExactlyOnceWith(expected)
+    }
+  )
 
+  it.each(['darwin', 'linux'] as const)('does not set Windows overlay colors on %s', platform => {
     const setTitleBarOverlay = vi.fn()
-    applyWindowChromeAppearance({ setTitleBarOverlay }, 'win32', 'night')
-    expect(setTitleBarOverlay).toHaveBeenCalledWith({
-      color: '#11161a',
-      symbolColor: '#e7ecef'
-    })
-
-    setTitleBarOverlay.mockClear()
-    applyWindowChromeAppearance({ setTitleBarOverlay }, 'darwin', 'day')
+    applyWindowChromeAppearance({ setTitleBarOverlay }, platform, { preference: 'classic-red', resolvedTheme: 'day' })
     expect(setTitleBarOverlay).not.toHaveBeenCalled()
   })
 
   it('leaves other desktop platforms on their native frame', () => {
-    expect(windowChromeOptions('linux', 'day')).toEqual({ frame: true })
+    expect(windowChromeOptions('linux', { preference: 'day', resolvedTheme: 'day' })).toEqual({ frame: true })
   })
 })

@@ -4,7 +4,7 @@ contract: native-session-bootstrap-v6
 status: accepted
 version: 6
 source_version: v1.72
-last_updated: 2026-10-22
+last_updated: 2026-10-25
 ---
 
 # Native Session Bootstrap v6
@@ -21,7 +21,7 @@ Team 指引。确认的完整前后说明见 [R1](../versions/v1.72/model-contex
 ```
 
 位于 `MEMBER_IDENTITY` 后、`ROVAI_PLATFORM_SKILLS` 前；不附加标题、Team ID、版本、名单、队长或
-解释性提示。内容边界为 [Team Templates v1](team-templates-v1.md) 的 1000 Unicode scalar。
+解释性提示。内容边界为 [Team Templates v1](team-templates-v1.md) 的 10000 Unicode scalar。
 Custom、历史 Thread、空白指引与 Single Chat 省略整个 section；不生成占位符。
 
 ## 来源、冻结与恢复

@@ -32,7 +32,7 @@ describe('local Thread Composer drafts', () => {
   it('settles only the accepted matching public submission and preserves later edits and other Threads', () => {
     const storage = new MemoryStorage()
     const original: ThreadComposerDraftView = { ...emptyLocalThreadComposerDraft('thread-a', 4), body: '已发送',
-      content: { version: 2, segments: [{ kind: 'text', text: '已发送' }] },
+      content: { version: 2, segments: [{ kind: 'text', text: '已发送' }, { kind: 'atom', atom: { type: 'thread_reference', threadId: 'rvcamp_01k87hrb9yfay8vvr14d2pf2db', labelFallback: '旧标题' } }, { kind: 'atom', atom: { type: 'mission_reference', missionId: 'rvm_019abcde123470008000000000000001', labelFallback: '登录\n使命' } }] },
       attachments: [{ id: '11111111-1111-4111-8111-111111111111', sourcePath: '/paste.txt', displayName: '粘贴内容-1.txt',
         kind: 'file', mediaType: 'text/plain', byteSize: 20_000, fileCount: 1, previewKind: 'none',
         availability: 'available', pastedTextPreview: '正文开头' }] }

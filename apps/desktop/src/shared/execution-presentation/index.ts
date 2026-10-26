@@ -239,22 +239,40 @@ export function activityStatusForAgentRun(
   return activityStatus
 }
 
+/** UI stages only: queued is an admitted Run, not proof of a queue blocker. */
+export function agentRunIsStarting(
+  run: Pick<AgentRunView, 'status' | 'waitReason'> & Partial<Pick<AgentRunView, 'failure'>>,
+  hasCurrentActivity = false
+): boolean {
+  return !hasCurrentActivity && (run.status === 'queued' || (run.status === 'running'
+    && run.waitReason === 'runtime_initializing'
+    && run.failure?.code !== 'runtime_network_interrupted'))
+}
+
+/** Only the current execution epoch can replace startup feedback with real activity. */
+export function agentRunHasCurrentActivity(
+  run: Pick<AgentRunView, 'id' | 'executionEpoch'>,
+  events: readonly LiveRuntimeEvent[]
+): boolean {
+  return buildLiveExecutionProgress(events.filter(event => event.agentRunId === run.id
+    && event.executionEpoch === run.executionEpoch), run.id, { includePublicResults: false }).items
+    .some(item => item.kind === 'tool' || item.kind === 'plan' || item.kind === 'narration' && item.body.trim())
+}
+
 export function agentRunPresentation(
   run: Pick<AgentRunView, 'status' | 'waitReason'>
     & Partial<Pick<AgentRunView, 'terminalReasonCode' | 'failure'>>,
-  cancelling = false
+  cancelling = false,
+  hasCurrentActivity = false
 ): SemanticStatus {
   if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
     return { label: '正在停止…', tone: 'neutral' }
   }
-  if (run.status === 'queued') return { label: '已排队', tone: 'neutral' }
+  if (agentRunIsStarting(run, hasCurrentActivity)) return { label: '启动中…', tone: 'neutral' }
   if (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted') {
     return { label: '正在恢复', tone: 'attention' }
   }
-  if (run.status === 'running' && run.waitReason === 'runtime_initializing') {
-    return { label: '正在初始化 Runtime', tone: 'info' }
-  }
-  if (run.status === 'running') return { label: '执行中', tone: 'info' }
+  if (run.status === 'running' || run.status === 'queued') return { label: '执行中', tone: 'info' }
   if (run.status === 'succeeded') return { label: '已完成', tone: 'success' }
   if (run.terminalReasonCode === 'runtime_interrupted') {
     return { label: '执行已中断', tone: 'neutral' }
@@ -308,11 +326,8 @@ export function agentRunStateTag(
   if (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted') {
     return { tag: 'RECOVERING', tone: 'attention' }
   }
-  if (run.status === 'running' && run.waitReason === 'runtime_initializing') {
-    return { tag: 'STARTING', tone: 'brand' }
-  }
+  if (agentRunIsStarting(run)) return { tag: 'STARTING', tone: 'neutral' }
   if (run.status === 'running') return { tag: 'RUNNING', tone: 'brand' }
-  if (run.status === 'queued') return { tag: 'QUEUED', tone: 'neutral' }
   if (run.status === 'succeeded') return { tag: 'DONE', tone: 'success' }
   if (run.terminalReasonCode === 'runtime_interrupted') {
     return { tag: 'INTERRUPTED', tone: 'neutral' }

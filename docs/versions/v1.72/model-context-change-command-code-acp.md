@@ -9,10 +9,17 @@ confirmed_revision: 5
 confirmed_at: 2026-10-05
 authority: model-input-change-statement
 implementation_status: implemented
-last_updated: 2026-10-05
+last_updated: 2026-10-25
 ---
 
 # Command Code 官方 ACP：System Bootstrap revision 5
+
+本页保留 2026-10-05 已确认的前/后输入快照。当前 Bootstrap 经已有 ACP 控制命令更新 Mod 内存；
+首次/warm/cold 不再使用正文文件。Host 材料、预算与恢复实现已由
+[Runtime Launch v72](../../contracts/runtime-launch-and-verification-v72.md)收敛；
+下文初次确认时的正文文件／坏文件退出、新旧 Bootstrap 比较、256 KiB 外层限制或配置 fence
+不作为当前物理交付要求。
+最新实施与能力对照见[当前简化记录](command-code-native-simplification.md#按接入-checklist-对照其余方案2026-10-25)。
 
 User 已明确要求修复 System Bootstrap、warm，并继续完成所有可接能力；本次按此授权实施，不重复询问。
 [revision 4](model-context-change-command-code.md)保留旧 headless 的输入快照。本 revision 只改变 Command
@@ -50,13 +57,15 @@ Bootstrap 和 Dynamic Context 的正文、原生历史与其他 Runtime 输入�
 
 ## 必需门禁与恢复
 
-Core 为每个 Host 创建私有设置覆盖，将必需 Mod 放入官方 `mods.paths`，保留原生其他设置与 Mod；
-不改全局 settings、AGENTS.md 或原生历史。Mod 工厂最后写 `{revision,nonce,pid}`，Core 必须在 initialize
+2026-10-24 内部简化：Core 在用户原生 HOME 下通过官方 `--mod` 加载 Host 临时模块，不创建 settings
+覆盖或原生配置副本；不改全局 settings、AGENTS.md 或原生历史。该调整不改变冻结 B/P、输入角色、选择规则、
+上下文版本或证据，属于物理交付简化，当前完整合同见 [Runtime Launch and Verification v72](../../contracts/runtime-launch-and-verification-v72.md)。
+Mod 工厂最后写 `{revision,nonce,pid}`，Core 必须在 initialize
 之后、首个 session prompt 之前验证它属于当前 Host。文件缺失、加载失败或版本漂移均关闭进程。
 
 Core 在共享 Context 冻结和 Native Binding generation 校验后写入按完整 Native Session ID 命名的绑定。
 内容包括完整 B、Session ID、schemaVersion 与 SHA-256；再次绑定只能完全相同。每次 hook 校验文件、ID、
-摘要、32 KiB Bootstrap 预算与 64 KiB 外层文件预算。上游会捕获普通异常，所以绑定错误以退出码 78 结束
+摘要、共享 128 KiB Bootstrap 预算与 256 KiB 外层文件预算。上游会捕获普通异常，所以绑定错误以退出码 78 结束
 Host，不使用普通 throw 作为门禁。A/B/A 各次均使用自身 state.sessionId，没有进程级 active B 指针。
 
 cold resume 在新的 Host 私有目录重新绑定原始 B；原生 Session storage 保持在 Runtime 自己的目录，
@@ -70,7 +79,7 @@ Node 子进程验证 A/B/A、缺失、非法 ID、错摘要、空值和超预算
 exact cold、实际手动压缩和自动 summarized 后均保留各自 System 身份与早期记忆；隔离 App 经过共享 Core
 首次/warm/重启与 CLI 发送亦通过。短会话的 Nothing to compact 不算压缩成功；overflow/retry 未据此冒领。
 该输入交付变更已实现，不代表完整 First-Class。依据与剩余矩阵见
-[最新 Checklist](../../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
+[当时的 Checklist](../../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
 
 ## 二次确认
 

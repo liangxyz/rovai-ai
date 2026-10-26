@@ -5,7 +5,7 @@ authority: shared-host-web-transport
 status: accepted
 version: 9
 source_version: v1.72
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Host Web v9
@@ -44,3 +44,9 @@ Core 在原上传绑定事务内同时保存上传回执和可删除资格。回
 保护先持久保存，再进入原发送事务，不建立每次发送关联。空附件发送不取附件锁。
 删除复用现有独立请求调度；数据库锁只覆盖读取归属/路径和更新登记，路径校验与异步 unlink 在锁外进行。
 删除失败保留登记，客户端仍等待真实结果，不引入后台清理或持久任务。
+
+## 引用目录失效
+
+现有授权 SSE 的可选 `referencesChanged` 标记由 [Thread Reference v1](thread-reference-v1.md#用户目录)
+定义。它只通知已选引用的展示状态需重读；不传原始 Core 事件、标题或正文，重连仍使用 `resync`。
+此可选字段不改变 Host protocolVersion。

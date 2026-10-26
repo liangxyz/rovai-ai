@@ -121,10 +121,11 @@ describe('localized execution summaries', () => {
     expect(renderGroup([runtime])).not.toContain('Terminal action')
   })
 
-  it('translates stop and retry notices as complete sentences', async () => {
+  it('preserves the command while stopping and translates retry notices', async () => {
     await changeInterfaceLanguage(preferences, 'en')
     const stopping = renderGroup([tool('active', 'terminal', 'running')], false, false, 'running', true)
-    expect(stopping).toContain('aria-label="Stopping…: Waiting for execution to end"')
+    expect(stopping).toContain('aria-label="Running: 指令 active"')
+    expect(stopping).not.toContain('Stopping')
     expect(stopping).not.toContain('正在停止')
     const retry = renderToStaticMarkup(<RuntimeRetryNotice diagnostic={{
       id: 'retry', code: 'runtime_api_retrying', status: 'retrying',
@@ -208,9 +209,15 @@ describe('command disclosure presentation', () => {
       if (runStatus === 'cancelled') expect(unfinished).toContain('tool-call-state status-stopped')
     }
   )
-  it('still presents an in-flight stop before the Run becomes terminal', () => {
-    expect(renderGroup([tool('active', 'terminal', 'running')], false, false, 'running', true))
-      .toContain('正在停止：等待执行结束')
+  it('preserves active and completed step summaries while stopping', () => {
+    const active = renderGroup([tool('active', 'terminal', 'running')], false, false, 'running', true)
+    expect(active).toContain('is-stopping')
+    expect(active).toContain('执行中：指令 active')
+    expect(active).not.toContain('正在停止')
+    expect(active).not.toContain('running-text is-active')
+    const completed = renderGroup([tool('done', 'terminal', 'completed')], true, false, 'running', true)
+    expect(completed).toContain('tool-call-state status-completed')
+    expect(completed).not.toContain('正在停止')
   })
   it('routes a non-truncated canonical Command Diff through its exact Run activity evidence', async () => {
     const evidence = {

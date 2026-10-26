@@ -3,10 +3,76 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-22
+last_updated: 2026-10-26
 ---
 
 # v1.72 实施与验收
+
+## Run 启动与停止展示（2026-10-26）
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-run-start-stop-ui`；
+  分支 `rovai/run-start-stop-ui`，基线 `e5b80b28408fcb73d82058b1d7e45730d088ba57`；Governance：none。
+- 只修改前端共享展示及组件。Run 创建与 Runtime 初始化统一“启动中…”，Delivery 默认“准备中…”，
+  执行台已有的同队员执行／清理事实沿用“排队中”，具体原因降为悬浮说明。
+- Run Card 复用启动与执行布局；停止提交时隐藏停止按钮，只在卡头显示中性文字，保留既有过程。
+  单聊移除有色提示，步骤组保留原摘要，终态不被本地停止标记覆盖。图标保留时间线。
+- 不增加 Core 读投影或业务字段，不改变调度、取消、恢复与 cleanup；不建立全局阶段引擎。
+- 验证沿用现有展示单测、真实组件浏览器测试、类型检查及通用文档门禁；本次没有 Rust 变更。
+- 已通过 `pnpm typecheck`、完整 Vitest（3005 passed / 2 skipped）、`pnpm docs:test` 与基于上述 SHA 的
+  `pnpm docs:check:ci`。`execution-state-transition` 浏览器回归通过；生产组件的 Desktop/Web 启动、
+  当前轮次内容、停止悬浮、取消终态及日夜字体检查通过，状态图标仍在时间线。
+- `test:run-presence-ui` 中独立的 reply-details 导航用例在 `scroll-after-opening` 场景等待
+  `[data-reply-message-id=reply-a]` 超时；任务分支和未改动的 `e5b80b284` 前端基线均复现，
+  作为既有回归问题记录，不修改回复定位逻辑。
+
+## 撤回消息两分钟重新编辑（2026-10-23）
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-withdraw-reedit`；
+  分支 `rovai/withdraw-reedit`，基线 `984e82281ee57c5b33ac5ec320d1e4bf52e4cf4a`；Governance：none。
+- `MessageReeditStore` 拥有逐条本机副本、pending / ready 固定有效期、容量保护和每前端实例一个清理器。
+  读取／回放按 scope 隔离；清理可回收旧 scope 的过期副本，不删除普通草稿或提前淘汰有效副本。
+- `MessageWithdrawal` 保存原命令与参数并复用已有回放；请求未知保留 pending，业务拒绝删除，
+  正常成功与列表刷新分开处理。存储失败不阻止撤回，不增加通用命令队列或重试平台。
+- 正式消息区提供蓝色无下划线入口；已有草稿先确认替换，最终回填再读有效期。只恢复正文和显式成员 @，
+  保留当前附件／引用／回复元数据；默认显示 @ 不带回。撤回与到期不主动结束 ↑↓ 历史预览。
+- [Message Reedit v1](../../contracts/message-reedit-v1.md) 固定客户端合同；Core、数据库、原撤回命令、
+  模型上下文保持原状。交互稿 v4 直接构建正式恢复模块和组件，仅使用合成 transport 与独立存储。
+- 容量为最佳努力占用限制，不预留普通草稿配额；多窗口不新增锁、跨窗口事务或全局调度服务。
+
+验证与交付状态：
+
+- `pnpm typecheck`、`pnpm build:desktop` 通过；后者包含 Web 构建。
+- `pnpm test` 通过：254 个 Vitest 文件、2934 项通过、2 项既有跳过；后续 Node 套件
+  358 项通过、2 项 Windows 专用验证跳过；包含文档与 Skill 通用门禁。
+- `pnpm test:message-reedit-ui` 通过夹具类型检查及 11 组真实组件交互：确认取消／替换、
+  回填后普通草稿与到期分离、默认／显式 @、重启不续期、弹窗跨期、两阶段存储失败、
+  撤回成功但刷新失败、拒绝与未知回执、历史浏览保留／接管、实际同源第二窗口通知和日夜主题。
+  已人工核对截图；仅使用隔离 Chrome 和合成 transport，没有启动日常 App、Core 或真实 Runtime。
+- `pnpm test:rust:pr` 默认 workspace 475 项通过、1 项既有 ignored；未修改 Rust 或测试 owner。
+- `pnpm docs:test`、`pnpm docs:check` 与以本节真实基线执行的 `pnpm docs:check:ci` 通过，无治理例外。
+- 工作树状态 `ready`；交付功能分支和由正式组件构建的 HTML v4，保留 worktree 等待后续评审。
+  按 User 既有偏好只推送分支，不自动创建 PR 或安装日常 App。
+
+### 评审后恢复边界修正（2026-10-23）
+
+- 继续使用上述 worktree / 分支；评审基线 `e356d2a121ce6a0d4ccdc33d364e9e872b1385b0`。
+  新增真实 `ConsoleClient → ThreadAdapter → MessageWithdrawal → MessageReeditStore` 组合复现：
+  原 Promise 在第 90 秒由补查完成时，旧实现错误延长到第 210 秒。另两项无副本重试在旧实现均换 ID，
+  修复前对应 3 项断言失败；不将原有重试缺口描述为新增重复撤回漏洞。
+- 沿现有命令恢复路径携带客户端 `direct / recovery` 来源；补查、Core 错误后补查和显式重放均使用
+  原 pending 剩余窗口，正常直接响应仍从确认成功开始两分钟。原请求、Core 回执与持久化格式不变。
+- 当前撤回实例仅在内存保留未知请求身份与原参数，不依赖正文副本；成功或拒绝后清理。
+  没有跨重启保证，也没有新增自动重试队列。副本过期后的显式重试不能重新创建正文副本。
+- 复用 `validateComposerDocument`，去掉嵌套 JSON 转换；按消息 key 通知订阅者，无变化 sweep 不广播。
+  点击及最终回填继续实时校验；没有引入缓存框架、持久化索引或新的性能承诺。
+- 补齐直接慢响应、三条恢复路径、迟到补查、无副本重试及清理、自动到期与不影响无关历史行的检查。
+  真实 Web 组合验证第 90 秒收到补查结果后仍于第 120 秒失效；正常直接响应则于第 210 秒失效，
+  第 125 秒迟到补查不能重建已删除副本。显式重放保持原 ID 和完整参数。
+- `pnpm test` 通过：255 个 Vitest 文件、2947 项通过、2 项既有跳过；后续 Node 358 项通过、
+  2 项 Windows 专用跳过。`pnpm typecheck`、`pnpm build:desktop` 和 11 组正式组件 UI 验证通过。
+- `pnpm test:rust:pr` 默认 workspace 475 项通过、1 项既有 ignored；通用文档门禁及以原 worktree
+  基线执行的 `pnpm docs:check:ci` 通过。没有修改 Core、Rust 测试或协议。
+- 工作树状态 `ready`；追加修正提交并推送原功能分支，保留 worktree 等待评审，尚未合入 main。
 
 ## 字面 HTML 间距与遍历收尾（2026-10-22）
 
@@ -2848,7 +2914,7 @@ User 明确要求整套已确认方案一并完成。规范见 [Runtime Launch v
 取舍见 [V1.72-D37](decisions.md#v1-72-d37)。
 
 - 当前 Conversation 的类型由既有安装/历史 Run 解析；同类 CLI 保留 exact-ID Resume 资格，历史摘要、安装代次和受控恢复记录不提前否决。
-- Adapter 在恢复调用处提供可靠结论；退役全局文本及 Claude/Antigravity/Pi 的日志猜测。Command Code 继续精确核验完整目录，Pi 区分精确目标不存在与普通 IO 错误。
+- Adapter 在恢复调用处提供可靠结论；退役全局文本及 Claude/Antigravity/Pi 的日志猜测。Command Code 后续已按原生尽力恢复删除目录预检（见本页 Command 收口）；Pi 区分精确目标不存在与普通 IO 错误。
 - 新建前保留旧目标，当前输入 dispatch/accepted/unknown、取消与 epoch 仍阻止自动降级。成功替换与提示事件在绑定事务一同提交；公开/私聊执行详情显示一句提示。
 - 新 Run 正常装配 Bootstrap，不依赖旧 Blob。Migration 195/schema 145 保留所有历史行与引用，仅解除 Binding/generation 唯一约束；同一 Run 已准备输入保持不可变。
 - 进程丢失或重启时，未知输入正常失败并保留清理/防重证据，同时保留原生目标。用户显式续做的未知执行隔离机制不变。
@@ -4032,3 +4098,63 @@ worktree `rovai-ai-restore-agent-file-width`，基线 `c0f8a0df7309913f63f8e12c1
 `pnpm test:composer-input` 三项通过：既有生产夹具验证中英文、日夜主题、用户卡片 224px、
 Agent 列表 620px 上限及 200px 窄容器收缩，截图人工复核通过。验收使用隔离 Electron，无 Core 或真实 Runtime。
 基于上述基线运行通用文档门禁；源码布局评估与机械扫描未发现本次恢复的阻断问题。
+
+
+## 全界面分隔线快速松手（2026-10-23）
+
+User 在分隔线交互 Thread sequence 11 授权全界面实施、PR 到 main 并合并；独立 worktree
+`rovai-ai-splitter-release-consistency`，分支 `rovai/splitter-release-consistency`，基线 `e9cfbeac4`。
+
+共享 `useCollapsibleSplitter` 取消最小值停留计时。越过最小值 64px 立即进入可收起状态并显示短暂提示，
+按住时不自动收起；反向退出阈值取消意图。松手按最终指针坐标提交，未越过阈值保持最小值；
+确认收起后保留 160ms 动画，系统或 App 减少动态效果设置只省去动画。取消、失焦、捕获异常、
+容器或作用域变化恢复手势前状态，正常松手释放捕获不取消已接受的折叠。
+
+覆盖全局导航、队员／团队共用名册、文件／执行 Sidecar、回复详情、定时任务详情和底部执行详情。
+定时任务只在松手后 flush 草稿；失败保留草稿与最小宽度，取消后的迟到响应不得收起面板。
+MCP、原生 Skills、工具箱接入同一提交与取消逻辑，保持 240–560px 调宽范围和独立偏好，不新增折叠。
+修正 CSS zoom 的逻辑像素换算，并防止仅高度变化的 ResizeObserver 重置实时宽度。
+Mission 抽屉和 Diff 文件树已有最终指针提交与缩放换算，保留其全展开／只调宽语义。
+
+同步 DESIGN、当前 UI 页面、队员 surface brief 和中英文文案；属于 Renderer 局部交互收口，
+无 Core、模型上下文、数据库 schema、偏好格式或发布版本变更，无需新增 Version Decision。
+
+
+验证结果：
+
+- `pnpm typecheck`、`pnpm build:desktop` 通过；全量 Vitest 为 253 个文件、2,921 项通过、2 项既有 skip。
+  首次与构建并行时既有 `restorable-location` 文件读取测试触发 5s 超时；独立全量复验通过，未修改超时或业务代码。
+- 七个隔离 Electron owner 通过：`navigation-shell`、`member-editor`、`file-preview-layout`、
+  `automation-splitter`、`execution-avatar-rail`、`capability-workspace` 和 `reply-details`。
+  增加无 pointermove 的最终坐标提交、快速松手、按住不收起、反向取消、草稿保留与异步保存取消断言；
+  设置页覆盖 MCP／原生 Skills／工具箱独立偏好、CSS zoom、仅高度变化和失焦恢复。
+- 文件预览生产组件截图确认短暂“松开收起预览区”提示位置；Skills 阅读页及设置页保持原有视觉结构。
+  既有日夜主题、1040／1440／2560 尺寸、200% 缩放、键盘操作和减少动态效果检查随 owner 回归通过。
+- 回归同步修正 MCP 原生拖动夹具漏带按住标志的问题，以及文件预览 Night 色值断言：旧值已与
+  当前主题 token 不符，本次仅更新测试预期，未修改主题。
+- `pnpm docs:test`、`pnpm docs:check` 与以 `e9cfbeac4` 为 base 的 `pnpm docs:check:ci` 通过。
+  验收全部使用显式隔离 userData 与内存 bridge，无 Core、真实 Runtime 或日常 App 数据写入；未安装日常 App。
+
+
+## Command Code 原生接入简化（2026-10-24）
+
+官方 1.88.0、用户原生 HOME、官方 Mod、ACP MCP 和共享 Fleet 身份复用作为同一交付；删除配置镜像与
+摘要兼容性链。旧 Session/Binding 保留，结构简化本身不恢复公开准入。实现、复杂度对照及定向验证见
+[Command Code 简化记录](command-code-native-simplification.md)。
+
+2026-10-25 按 User 收口继续删除冷恢复 `session/list`，Run 发送前通过已有 ACP 控制命令更新 Mod 内存，
+首次/warm/cold 同路，删除 Bootstrap binding 文件及专属读写、SHA 与文件名限制；补共享
+`.agents/skills` user/project 来源。问卷通过现有 Mod 的官方 active-tools 过滤器移除；原生明确 edit
+新建与普通编辑片段进入现有 Diff 展示，write 创建状态不明确时不推测。没有新生产文件、专属状态或锁。
+固定 1.88 的确定性原生验证与既有 sub2api 真实模型证据分开，详见上述报告。
+
+2026-10-25 User seq61 另行确认 macOS 两架构开放，沿现有 Preview 准入与共享产品目录实施；
+同日 Windows x64 补验后也按 Preview 开放，Linux 保持 NotQualified。最低版本、原生接入和生命周期不变，
+不新增资格门禁；Windows 实测和已知限制见[实施记录](command-code-native-simplification.md#windows-preview-开放2026-10-25)。
+完整 Intel/Core/App 验收不由此次开放推导，决定见 [V1.72-D60](decisions.md#v1-72-d60)。
+
+
+2026-10-25 Linux x64 随独立目标机验收开放 Command Code Preview，保持官方稳定版 ≥1.88.0。
+真实 Core/浏览器、能力、生命周期和已接受差异分别记录于
+[Linux 验收](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)；
+公开范围见 [V1.72-D61](decisions.md#v1-72-d61)，不增加 Runtime 管理机制。

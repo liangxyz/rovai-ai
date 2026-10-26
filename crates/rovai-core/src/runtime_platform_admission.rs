@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:98cbd0f437f7b18c53fc8ca7a50307c44e48a44f4efb6d0dcf2ab78161819cf8";
+    "sha256:84fb23954417904c573e0cb96a2b3470afd897aff7c030a29194ffd552aab988";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -363,9 +363,7 @@ mod tests {
                                 })
                             );
                         }
-                        AdapterKind::CursorAgent
-                        | AdapterKind::ClineCli
-                        | AdapterKind::CommandCodeCli => {
+                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -451,6 +449,16 @@ mod tests {
                     admission.evidence_revision(),
                     Some(DSH_WINDOWS_X64_EVIDENCE_REVISION)
                 );
+                assert_eq!(admission.blocker_code(), None);
+            } else if runtime_kind == AdapterKind::CommandCodeCli {
+                assert_eq!(admission.status(), RuntimePlatformAdmissionStatus::Preview);
+                assert!(admission.allows_runtime_use());
+                assert!(!admission.is_qualified());
+                assert_eq!(
+                    admission.reason_code(),
+                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                );
+                assert_eq!(admission.evidence_revision(), None);
                 assert_eq!(admission.blocker_code(), None);
             } else if !matches!(
                 runtime_kind,
@@ -582,11 +590,18 @@ mod tests {
             }
         }
         for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
-            for kind in [
-                AdapterKind::CursorAgent,
-                AdapterKind::ClineCli,
-                AdapterKind::CommandCodeCli,
-            ] {
+            let command = registry.platform_admission(AdapterKind::CommandCodeCli, platform);
+            assert_eq!(command.status(), RuntimePlatformAdmissionStatus::Preview);
+            assert!(command.allows_runtime_use());
+            assert!(!command.is_qualified());
+            assert_eq!(command.blocker_code(), None);
+            assert_eq!(
+                command.reason_code(),
+                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+            );
+            assert_eq!(command.evidence_revision(), None);
+
+            for kind in [AdapterKind::CursorAgent, AdapterKind::ClineCli] {
                 let admission = registry.platform_admission(kind, platform);
                 assert_eq!(
                     admission.status(),

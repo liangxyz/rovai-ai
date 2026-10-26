@@ -2352,14 +2352,6 @@ async fn run_acp_probe_with_scope(
     };
     match result {
         Ok(result) => Ok(result),
-        Err(_) if matches!(kind, AdapterKind::CommandCodeCli) => {
-            // Native diagnostics and RPC error bodies can contain BYOK
-            // settings. The probe only publishes a stable failure category.
-            Err(anyhow::anyhow!(
-                "{} ACP probe failed; check its native provider configuration",
-                kind.as_str()
-            ))
-        }
         Err(error) if stderr.bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
             let detail = String::from_utf8_lossy(&stderr.bytes);
             let bounded = detail.chars().take(4096).collect::<String>();
@@ -2408,36 +2400,6 @@ pub(crate) fn select_grok_noninteractive_auth_method(
         "Grok Build ACP did not advertise a non-interactive authentication method \
          (expected cached_token or xai.api_key; advertised: {advertised}). \
          Run `grok login` or `grok login --device-auth` before retrying account authentication"
-    )
-}
-
-pub(crate) async fn inspect_command_code_native_mcp_server_names(
-    executable: &Path,
-    cwd: &Path,
-) -> Result<BTreeSet<String>> {
-    if !runtime_launch_allowed(
-        AdapterKind::CommandCodeCli,
-        RuntimeLaunchPurpose::DispatchPreflight,
-    ) {
-        bail!("runtime_launch_disallowed:dispatch_preflight");
-    }
-    let mut command = runtime_command(executable, Some(AdapterKind::CommandCodeCli));
-    command
-        .args(["mcp", "list"])
-        .current_dir(cwd)
-        .env("COMMANDCODE_SKIP_UPDATES", "1")
-        .env("NO_COLOR", "1")
-        .env("FORCE_COLOR", "0");
-    let output = bounded_output(&mut command, Duration::from_secs(15))
-        .await
-        .map_err(|_| anyhow::anyhow!("command_code_native_mcp_inspection_failed"))?;
-    anyhow::ensure!(
-        output.status.success() && !output.stdout.truncated,
-        "command_code_native_mcp_inspection_failed"
-    );
-    crate::command_code_acp::native_mcp_names(
-        std::str::from_utf8(&output.stdout.bytes)
-            .context("command_code_native_mcp_list_invalid")?,
     )
 }
 
@@ -2827,12 +2789,12 @@ pub fn configure_acp_command(
             crate::opencode_compat::Generation::require(version)?.configure_command(command);
         }
         AdapterKind::CopilotCli => {
+            // ACP uses the child process's stdio; interactive remote/session-sync
+            // flags are unnecessary here and were removed in Copilot 1.0.103.
             command.args([
                 "--acp",
                 "--stdio",
                 "--no-auto-update",
-                "--no-remote",
-                "--no-remote-export",
                 "--no-color",
                 "--log-level",
                 "error",
@@ -4226,6 +4188,34 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn additive_acp_launch_shapes_match_the_verified_cli_contracts() {
+        for version in [
+            None,
+            Some("GitHub Copilot CLI 1.0.102."),
+            Some("GitHub Copilot CLI 1.0.103."),
+        ] {
+            for allow_all in [false, true] {
+                let mut command = Command::new("/selected/copilot");
+                configure_acp_command(&mut command, AdapterKind::CopilotCli, allow_all, version)
+                    .unwrap();
+                let args = command
+                    .as_std()
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().to_string())
+                    .collect::<Vec<_>>();
+                let mut expected = vec![
+                    "--acp",
+                    "--stdio",
+                    "--no-auto-update",
+                    "--no-color",
+                    "--log-level",
+                    "error",
+                ];
+                if allow_all {
+                    expected.push("--allow-all");
+                }
+                assert_eq!(args, expected, "Copilot version={version:?}");
+            }
+        }
         for (version, v1) in [
             ("1.18.32", true),
             ("opencode v1.99.1", true),
@@ -4298,20 +4288,6 @@ while IFS= read -r ignored; do :; done
         assert_eq!(arguments(AdapterKind::CommandCodeCli), ["acp"]);
         assert_eq!(arguments(AdapterKind::ClineCli), ["--acp"]);
         assert_eq!(
-            crate::command_code_acp::native_mcp_names("\nNo MCP servers configured\n").unwrap(),
-            BTreeSet::new()
-        );
-        assert_eq!(crate::command_code_acp::native_mcp_names("MCP Servers\n NAME TYPE SCOPE AUTH STATUS\n native stdio user - enabled\n disabled http project x disabled\n Total: 2 servers\n").unwrap(),
-            BTreeSet::from(["native".to_owned(), "disabled".to_owned()]));
-        for invalid in [
-            "NAME TYPE SCOPE AUTH STATUS\nnative stdio project x enabled",
-            "NAME TYPE SCOPE AUTH STATUS\nTotal: 9 servers",
-            "unknown format",
-            "\x1b[31mNo MCP servers configured",
-        ] {
-            assert!(crate::command_code_acp::native_mcp_names(invalid).is_err());
-        }
-        assert_eq!(
             arguments(AdapterKind::GrokBuild),
             ["--no-auto-update", "agent", "--no-leader", "stdio"]
         );
@@ -4352,8 +4328,8 @@ while IFS= read -r ignored; do :; done
         }
     }
 
-    #[test]
-    fn acp_probe_failure_classification_separates_auth_protocol_and_transient_errors() {
+    #[tokio::test]
+    async fn acp_probe_failure_classification_separates_auth_protocol_and_transient_errors() {
         for detail in [
             "ACP probe failed: authentication required",
             "ACP probe failed: not signed in",
@@ -4378,6 +4354,55 @@ while IFS= read -r ignored; do :; done
             classify_acp_probe_failure("ACP probe timed out"),
             AgentRuntimeProbeStatus::ProbeFailed
         );
+
+        // Exercise the real probe boundary: Command must preserve errors just
+        // like other ACP adapters before the common classifier/redactor runs.
+        let directory = env::temp_dir().join(format!("rovai-acp-errors-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let _cleanup = ProbeRootCleanup(directory.clone());
+        let runtime = directory.join("runtime");
+        for (detail, expected) in [
+            (
+                "Not authenticated",
+                AgentRuntimeProbeStatus::AuthenticationRequired,
+            ),
+            (
+                "Method not found",
+                AgentRuntimeProbeStatus::MissingCapabilities,
+            ),
+            ("request timed out", AgentRuntimeProbeStatus::ProbeFailed),
+        ] {
+            fs::write(
+                &runtime,
+                format!(
+                    r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' 'fixture diagnostic' >&2
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"error":{{"code":-32000,"message":"{detail}"}}}}'
+while IFS= read -r ignored; do :; done
+"#
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
+            for kind in [AdapterKind::CommandCodeCli, AdapterKind::KimiCodeCli] {
+                let probe = acp_capability_probe_at_for_purpose(
+                    &runtime,
+                    kind,
+                    RuntimeLaunchPurpose::HealthProbe,
+                    None,
+                    Some("1.88.0"),
+                    false,
+                )
+                .await;
+                assert_eq!(probe.result.status, expected, "{kind:?}: {probe:?}");
+                let diagnostic = probe.result.detail.unwrap();
+                assert!(diagnostic.contains(detail), "{diagnostic}");
+                assert!(diagnostic.contains("fixture diagnostic"), "{diagnostic}");
+            }
+        }
     }
 
     #[test]

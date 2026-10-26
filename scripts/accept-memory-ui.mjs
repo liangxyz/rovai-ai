@@ -498,14 +498,23 @@ async function assertNoMemoryOnboarding(cdp, context) {
 }
 
 async function openMemory(cdp) {
+  const settings = await evaluate(cdp, `(() => {
+    if (document.querySelector('.settings-sidebar-menu')) return true
+    const button = document.querySelector('.sidebar-settings-main')
+    if (!button || button.disabled) return false
+    button.click()
+    return true
+  })()`)
+  assert(settings, 'Could not open Settings for long-term Memory')
+  await waitForSelector(cdp, '.settings-sidebar-menu')
   const navigation = await evaluate(cdp, `(() => {
-    const memory = [...document.querySelectorAll('.unified-sidebar button')]
-      .find((candidate) => candidate.getAttribute('aria-label')?.startsWith('记忆'))
+    const memory = [...document.querySelectorAll('.settings-sidebar-menu button')]
+      .find((candidate) => candidate.textContent?.trim().startsWith('记忆'))
     if (!memory || memory.disabled) return null
     memory.click()
     return { height: memory.getBoundingClientRect().height }
   })()`)
-  assert(navigation, 'Could not open long-term Memory from global navigation')
+  assert(navigation, 'Could not open long-term Memory from Settings')
   assert(navigation.height <= 40,
     `Memory navigation label wrapped unexpectedly (${navigation.height}px high)`)
   await waitForSelector(cdp, '.memory-library')
@@ -743,6 +752,8 @@ async function launchApp(port, width, height) {
     await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
     await waitForExpression(cdp, `Boolean(
       document.querySelector('.unified-sidebar button[aria-label="新对话"]:not(:disabled)')
+      || (document.querySelector('.settings-sidebar-back:not(:disabled)')
+        && document.querySelector('.memory-library'))
     )`, 45_000)
     const health = await request(cdp, 'health.check')
     const expectedDatabasePath = await realpath(join(dataDir, 'rovai.sqlite'))

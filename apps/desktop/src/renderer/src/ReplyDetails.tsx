@@ -6,6 +6,7 @@ import { CopyIcon } from './CopyIcon'
 import { RunPresenceOpen } from './ConversationRunPresence'
 import { conversationRunPresenceTimeline } from './conversation-run-presence'
 import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
+import { SplitterFeedback } from './SplitterFeedback'
 import { uiAttribute, useInterfaceLanguage } from './interface-language'
 import type { LiveRuntimeEvent } from './ui-model'
 import type { ReplyReaderState, ThreadReplyReader } from './thread-reply-reader'
@@ -55,7 +56,8 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
   const splitter = useCollapsibleSplitter({ size: Math.min(width, maximum), collapsed: false,
     minimum: 360, maximum, direction: -1, disabled: full, scopeKey: snapshot.thread.id,
     scale: () => splitterScale(panel.current), capture: () => width,
-    onPreview: onWidth, onCommit: onWidth, onCancel: onWidth, onCollapse: onClose })
+    onPreview: onWidth, onCommit: onWidth, onCancel: onWidth,
+    onCollapse: before => { onWidth(before); onClose() } })
   const firstId = state.page?.messages[0]?.id
   useEffect(() => { scroll.current?.scrollTo({ top: 0 }) }, [firstId, state.messageId])
   const member = (id: string) => snapshot.members.find(value => value.agentId === id)
@@ -77,14 +79,14 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
   }
   return <aside ref={panel} className="reply-detail-panel" tabIndex={-1} role="region" aria-labelledby={titleId}>
     <div className="reply-detail-resize" role="separator" aria-orientation="vertical"
-      aria-label={uiAttribute('调整回复详情宽度')} aria-valuemin={360} aria-valuemax={Math.round(maximum)}
+      aria-label={uiAttribute('调整回复详情宽度')} aria-valuemin={splitter.active ? 0 : 360} aria-valuemax={Math.round(maximum)}
       aria-valuenow={Math.round(Math.min(width, maximum))} tabIndex={0} {...splitter.handlers}
       onKeyDown={event => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return
+        if (splitter.active || !['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return
         event.preventDefault()
         onWidth(event.key === 'Enter' ? Math.min(466, maximum) : event.key === 'Home' ? 360 : event.key === 'End' ? maximum
           : Math.max(360, Math.min(maximum, width + (event.key === 'ArrowLeft' ? 24 : -24))))
-      }} />
+      }}><SplitterFeedback phase={splitter.phase} target={splitter.target} label={uiAttribute('继续拖动收起回复详情')} /></div>
     <header className="reply-detail-header">
       <strong id={titleId}>{uiAttribute('回复详情')}</strong>
       {state.page?.sourceAvailable && <span className="reply-detail-count">{uiAttribute('{0} 条回复', state.page.replyCount)}</span>}

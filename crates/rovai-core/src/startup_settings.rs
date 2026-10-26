@@ -120,7 +120,6 @@ impl Core {
             "runtime.startup.save" => {
                 let params: SaveParams = serde_json::from_value(params)
                     .map_err(|_| anyhow::anyhow!("启动设置输入格式无效。"))?;
-                let _update = self.runtime_search_update.lock().await;
                 self.save_runtime_startup(params).await
             }
             _ => anyhow::bail!("Unknown startup settings method"),
@@ -133,6 +132,7 @@ impl Core {
     }
 
     async fn save_runtime_startup(&self, params: SaveParams) -> Result<Value> {
+        let update = self.runtime_search_update.lock().await;
         let kind = params.runtime_kind;
         ensure!(
             current_runtime_platform_blocker(kind).is_none(),
@@ -237,7 +237,13 @@ impl Core {
         if settings.reconnect_required {
             self.native_skill_discovery.invalidate_cache();
         }
-        // No fleet invalidation: a live host retains its captured process environment.
+        // A starting Host may need this lock before Fleet can retire it.
+        drop(update);
+        // Command applies explicit startup edits through Fleet retirement. Busy
+        // Hosts finish normally; the next Host restores the same Native Session.
+        if settings.reconnect_required && kind == AdapterKind::CommandCodeCli {
+            self.runtime_fleet.invalidate_adapter(kind).await;
+        }
         Ok(serde_json::to_value(runtime_startup::saved_response(
             settings,
         ))?)

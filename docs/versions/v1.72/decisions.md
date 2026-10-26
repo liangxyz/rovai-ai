@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-21
+last_updated: 2026-10-25
 ---
 
 # v1.72 版本决定
@@ -1226,3 +1226,87 @@ User 要求不创建团队也能配置一键新建，且指引只作启动材料
 创建偏好从旧 JSON 只导入一次到 SQLite，使默认 Team 删除与回退可在一个事务完成。保留旧文件用于
 恢复，避免跨文件提交失败时出现已删 Team 仍被选中的状态。模型输入仅增加非空 TEAM_GUIDANCE 段，
 版本与确认见 [R1](model-context-change-team-guidance.md)。
+
+<a id="v1-72-d58"></a>
+## V1.72-D58：引用只定位公开来源，沿用正文和发布事务
+
+- 状态：accepted
+- 日期：2026-10-22
+- 当前权威：[Thread Reference v1](../../contracts/thread-reference-v1.md)、[Composer 架构](../../architecture/camp-composer-draft.md)
+
+### 背景与选择
+
+User 要求在既有输入框选择对话，并在交互迭代中加入使命；明确拒绝上下文版本兼容工程。
+Atom 按 ID 绑定，本机标签只展示；Core 首次发布捕获标题并保存在原消息段。来源弱引用，读取 live 内容，
+不复制全文或自动安排摘要。引用沿既有 body 输出定位链接，成员 mentions 与 Skill 语义保持原样。
+
+### 后果与替代方案
+
+不新增 references 数组、上下文块、Composer V3、serializer 版本或数据库表；不改变已冻结 Context Blob。
+命令回放先于目标读取，源删除不使合法消息失效。若未来需要发送时历史快照，须独立定义读取边界，不能
+用当前引用 ID/标题冒充。未选择标题重绑、自动解析普通文本、跨 Host ID 或引用引发执行的方案。
+
+<a id="v1-72-d59"></a>
+## V1.72-D59：Command Code 回归原生 HOME 与 Binding 身份
+
+- 状态：accepted
+- 日期：2026-10-24
+- 当前权威：[Runtime Launch and Verification v72](../../contracts/runtime-launch-and-verification-v72.md)、[Command Code ACP 边界](../../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)
+
+### 背景与选择
+
+官方 1.88 已提供 ACP BYOK 目录/选模与正式 Mod 参数。用户明确要求删除私有 HOME、配置副本及摘要
+兼容性机制，避免原生状态有多个所有者、外部配置变化被解释为新会话。保留现有共享 Fleet，以实际所属
+身份及进程健康/租约选择 Host，以精确原生 Session ID 延续会话；显式修改通过既有失效事件应用。
+后续审查确认 dispatch 在 Fleet 之前验证磁盘入口仍会阻断 warm；将既有启动验证/刷新收回 cold spawn，
+继续保留显式禁用/删除安装准入。MCP 成功保存不能等同于配置变化，Store 直接传递实际改动涉及成员，
+Fleet 按成员限定失效，不引入配置差异扫描或新依赖管理器。
+后续可用性修复删除新旧 Bootstrap 相等门槛与 JSON 封装额外上限；每 Run 发送前用既有 Context 的
+冻结 B 更新现有 binding，使成员指令在后继 Run 生效，不新增跨 Host 冻结状态。
+成员环境保存只传播实际修改事实，命令重放不重复退役。
+health probe 删除覆盖所有错误的 Command 特例，沿其他 ACP 已有分类与脱敏处理。
+
+### 后果与替代方案
+
+不迁移或清空旧摘要和 Session，不改变冻结 Bootstrap。原生配置加载时机由 CLI 拥有；外部编辑不会由
+Rovai 自动扫描后重启。拒绝保留旧 HOME fallback、把摘要换名为 profile/generation、每轮比较配置快照或
+新增 Command 专属池/缓存。MCP 同名优先交给原生行为，仅保留有实测依据的 cwd/字面量适配。
+冷恢复删除目录预检，直接向原生提交精确 ID；接受 1.88 可能静默打开空会话的代价，不额外承诺恢复证明。
+此决定替代 D27 中 Command 私有原生 MCP 文件路径，不改变 Cline，也不代表公开资格通过。
+
+<a id="v1-72-d60"></a>
+## V1.72-D60：Command Code 在 macOS 与 Windows 开放 Preview
+
+- 状态：accepted
+- 日期：2026-10-25
+- 确认：User 消息 17fcec4d-6c8b-4004-8450-f70af4e7b588（seq61）要求“mac两个端都开放”。
+- 补充确认：同日 Windows 会话要求“缺口你快速验证一下，验证完就开放”，并要求将 Windows 与上述 macOS 提交一同合入。
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#8-command-code-macos-preview)、[Command Code ACP 边界](../../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)。
+
+原生 HOME、官方 Mod/ACP、共享 Fleet 简化已合入；1.88 的 BYOK 与 MCP 原生实测具备使用依据，
+但现有记录不覆盖完整 Core/App、Intel 与子代理资格。选择已有 Preview 状态在 macOS arm64/x64
+允许正常发现、配置、检查和执行，保留缺失资格原因与空 evidenceRevision，不把开放请求当作完整验收证明。
+同日 Windows 真实 Core/MCP、配置更新与撤销、原生压缩、权限拒绝及强杀回收补验后，Windows x64 也采用
+Preview。保留原生 Windows MCP 路径／参数及拒绝后缺少最终回复的已知边界；不据此宣称完整资格。
+最低版本仍为 1.88.0 稳定版；Linux 继续 NotQualified，Cline 与 Cursor 继续暂缓公开。
+
+公开入口共用现有产品目录和 Core 平台准入，不增加 Renderer 平台白名单、专属检查、实验标签或启动分支。
+拒绝继续全平台隐藏 Command，也不凭单平台原生试验直接标为 qualified。此次只改变准入范围，不调整
+Bootstrap、Host/Session 生命周期或用户原生配置；后续完整资格仍须以实际平台证据确认。
+
+
+<a id="v1-72-d61"></a>
+## V1.72-D61：Command Code Linux 随目标机验收开放 Preview
+
+- 状态：accepted
+- 日期：2026-10-25
+- 确认：维护者要求“剩下的赶紧跑完”，随后要求 Linux 完成后更新到 macOS 开放分支。
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#9-command-code-linux-preview)、[Command Code ACP 边界](../../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)。
+
+GNU x64 目标机已用官方 1.88.0、真实 Sub2API 与隔离 Core/浏览器执行验收。选择沿既有 Preview
+开放 Linux，保持稳定版 ≥1.88.0、原生配置所有权和共享 Fleet；不继续全平台隐藏，也不把单台机器
+证据扩张为所有发行版或子代理的完整资格。Windows 的公开范围独立决定。
+
+官方 ACP 将 shell `exit 7` 的 Tool 状态报告为 completed，输出仍包含实际 Exit code: 7；Core 如实
+采用该状态。维护者明确接受这项差异，本轮不再以它阻断开放；不从输出文本另造退出码解析或状态管理。
+其余未通过或未覆盖项按实际证据记录，不由这一接受决定自动豁免。

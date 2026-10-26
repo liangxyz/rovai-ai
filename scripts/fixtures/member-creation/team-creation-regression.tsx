@@ -1,9 +1,10 @@
 import React, { act, useEffect, useState, type ReactNode } from 'react'
 import type { Root } from 'react-dom/client'
-import type { AgentProfile, Team } from '@contracts'
+import type { AgentProfile, Team, ThreadReadInvalidation } from '@contracts'
 import { NewConversationDialog } from '../../../apps/desktop/src/renderer/src/NewConversationDialog'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { TeamWorkspace } from '../../../apps/desktop/src/renderer/src/TeamWorkspace'
+import { useTeams } from '../../../apps/desktop/src/renderer/src/useTeams'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import { creationPreferences, withHostConversationPreferences } from '../../../apps/desktop/src/shared/host-general-preferences'
 
@@ -23,7 +24,7 @@ const find = (selector: string) => {
 const click = (selector: string) => act(async () => { find(selector).click() })
 const type = (selector: string, value: string) => act(async () => {
   const input = find(selector)
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+  Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value)
   input.dispatchEvent(new Event('input', { bubbles: true }))
 })
 
@@ -124,8 +125,119 @@ export async function runTeamCreationRegression(root: Root, app: ReactNode, clie
   await act(async () => { root.render(null) })
   client.request = request
   const availability = await runCreationAvailabilityRegression(root, app, client, agents, environment, events)
+  await runTeamRefreshRegression(root, client, team)
+  await runSavedTeamRegression(root, client, agents, team)
+  await runGuidanceLimitRegression(root, client, agents, team)
   await act(async () => { root.unmount() })
-  return { ok: true, cases: ['save receipt before teams.list', 'retry after list refresh', 'late initial team preserves draft', 'external edits preserve selected version', 'late list preserves Custom', 'deleted source cancels conversation and duplication with a fallback or empty library', ...availability] }
+  return { ok: true, cases: ['save receipt before teams.list', 'retry after list refresh', 'late initial team preserves draft', 'external edits preserve selected version', 'late list preserves Custom', 'deleted source cancels conversation and duplication with a fallback or empty library', ...availability, 'scoped Web invalidation, reconnect and request generation', 'saved version survives discard and list selection', 'guidance accepts 10000 Unicode scalars and rejects 10001 without truncation'] }
+}
+
+async function runGuidanceLimitRegression(root: Root, client: any, agents: AgentProfile[], team: Team) {
+  const writes: any[] = []
+  const scopedClient = { ...client, request: async (method: string, params: any) => {
+    if (method !== 'teams.save') return client.request(method, params)
+    writes.push(params.command)
+    return { status: 'applied', payload: { team: { ...team, ...params.command, version: 2 } } }
+  } }
+  await act(async () => { root.render(<ThreadClientProvider client={scopedClient}><TeamWorkspace
+    teams={[team]} agents={agents} loading={false} loadError={null} defaultTeamId={null} customDefaults={null}
+    refresh={async () => [team]} onNewConversation={() => {}} onLeaveGuardChange={() => {}}/></ThreadClientProvider>) })
+  await click('.team-guidance-toggle')
+  for (const character of ['花', '🌸']) {
+    const tooLong = character.repeat(10001)
+    await type('.team-guidance-editor textarea', tooLong)
+    check(find('.team-guidance-count').textContent, '10001 / 10000', 'Unicode count includes the over-limit character')
+    await click('.team-editor-form button[type="submit"]')
+    check(writes.length, 0, 'over-limit guidance never reaches Core')
+    check((find('.team-guidance-editor textarea') as HTMLTextAreaElement).value, tooLong, 'over-limit draft is not truncated')
+    check(find('[role="alert"]').textContent?.includes('10000'), true, 'error shows the new limit')
+  }
+  const guidance = '花🌸'.repeat(5000)
+  await type('.team-guidance-editor textarea', guidance)
+  check(find('.team-guidance-count').textContent, '10000 / 10000', 'emoji counts as one Unicode scalar')
+  await click('.team-editor-form button[type="submit"]')
+  check(writes.length, 1, '10000-character guidance can be saved')
+  check(writes[0].guidance, guidance, 'complete guidance reaches the save request')
+  check(find('.team-guidance-preview').textContent, guidance, 'save receipt retains complete guidance')
+  await act(async () => { root.render(null) })
+}
+
+async function runTeamRefreshRegression(root: Root, client: any, team: Team) {
+  const requests: ReturnType<typeof deferred<Team[]>>[] = []
+  let invalidate!: (change?: ThreadReadInvalidation) => void
+  let event!: (value: any) => void
+  let library!: ReturnType<typeof useTeams>
+  const scopedClient = { ...client,
+    request: () => { const request = deferred<Team[]>(); requests.push(request); return request.promise },
+    onInvalidated: (listener: typeof invalidate) => { invalidate = listener; return () => {} },
+    onEvent: (listener: typeof event) => { event = listener; return () => {} }
+  }
+  function Library() { library = useTeams(scopedClient, true); return null }
+  await act(async () => { root.render(<Library/>) })
+  for (let sequence = 1; sequence <= 6; sequence++) {
+    await act(async () => { invalidate({ messages: [{ threadId: 'other', indexChanged: false, throughGlobalSequence: sequence }] }) })
+  }
+  await act(async () => { invalidate({ tasksChanged: true }); invalidate({ notificationsChanged: true }); event({ method: 'run.output' }) })
+  check(requests.length, 1, 'unrelated events do not supersede the pending Team read')
+  await act(async () => { requests[0].resolve([team]) })
+  check(library.loading, false, 'initial Team read settles during unrelated activity')
+  await act(async () => { invalidate({ teamsChanged: true }) })
+  check(requests.length, 2, 'Team changes refresh the library')
+  check(library.loading, true, 'a scoped refresh retains its loading state')
+  await act(async () => { invalidate({ resync: true }) })
+  check(requests.length, 3, 'reconnect refreshes the library')
+  await act(async () => { requests[1].resolve([team]) })
+  check(library.loading, true, 'obsolete response cannot settle a newer refresh')
+  const newer = { ...team, version: 2 }
+  await act(async () => { requests[2].resolve([newer]) })
+  check(library.teams, [newer], 'latest refresh wins')
+  check(library.loading, false, 'latest refresh settles loading')
+  await act(async () => { event({ method: 'teams.changed' }) })
+  check(requests.length, 4, 'Desktop Team events still refresh')
+  await act(async () => { requests[3].resolve([newer]); root.render(null) })
+}
+
+async function runSavedTeamRegression(root: Root, client: any, agents: AgentProfile[], team: Team) {
+  const saved = { ...team, name: 'Saved v2', guidance: 'Saved guidance', version: 2 }
+  for (const action of ['discard', 'list', 'conversation', 'duplicate']) {
+    const receipt = deferred<any>(), list = deferred<Team[]>()
+    const opened: Team[] = [], writes: any[] = []
+    const localClient = { ...client, request: async (method: string, params: any) => {
+      if (method !== 'teams.save') return client.request(method, params)
+      writes.push(params.command)
+      return writes.length === 1 ? receipt.promise : { status: 'applied', payload: { team: { ...saved, id: 'copy' } } }
+    } }
+    const render = (teams: Team[]) => <ThreadClientProvider client={localClient}><TeamWorkspace
+      key={action} teams={teams} agents={agents} loading={false} loadError={null}
+      defaultTeamId={null} customDefaults={null} refresh={() => list.promise}
+      onNewConversation={value => opened.push(value)} onLeaveGuardChange={() => {}}/></ThreadClientProvider>
+    await act(async () => { root.render(render([team])) })
+    await type('.team-editor-form input', saved.name)
+    await click('.team-editor-form button[type="submit"]')
+    await act(async () => { receipt.resolve({ status: 'applied', payload: { team: saved } }) })
+    await type('.team-editor-form input', 'Second unsaved draft')
+    if (action === 'discard') await click('.member-editor-cancel')
+    else {
+      if (action === 'list') await click('.team-list-row')
+      else if (action === 'conversation') await click('.team-start-button')
+      else {
+        await act(async () => { find('.team-overflow').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+        await click('.team-crud-menu [role="menuitem"]')
+      }
+      await click('[role="dialog"] .quiet-button:nth-child(2)')
+    }
+    check((find('.team-editor-form input') as HTMLInputElement).value, saved.name, action + ' retains the confirmed version')
+    if (action === 'conversation') check(opened, [saved], 'creation uses the saved snapshot')
+    if (action === 'duplicate') check(writes[1].guidance, saved.guidance, 'duplication uses the saved guidance')
+    else {
+      check(document.querySelector('.team-roster-attention'), null, 'stale list is not an external modification')
+      const newer = { ...saved, name: 'External v3', version: 3 }
+      await act(async () => { root.render(render([newer])); list.resolve([newer]) })
+      await click('.team-roster-attention button')
+      check((find('.team-editor-form input') as HTMLInputElement).value, newer.name, 'explicit reload still accepts a newer version')
+    }
+    await act(async () => { root.render(null) })
+  }
 }
 
 async function runCreationAvailabilityRegression(root: Root, app: ReactNode, client: any, agents: AgentProfile[], environment: any, events: Set<(event: any) => void>) {

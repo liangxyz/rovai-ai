@@ -127,6 +127,14 @@ describe('console transport', () => {
     expect(scoped.takeChanges()).toEqual([{ messages: [], notificationsChanged: true }])
     scoped.push('event: invalidate\ndata: {"notificationsChanged":"true"}\n\n')
     expect(scoped.takeChanges()).toEqual([{ messages: [] }])
+    scoped.push('event: invalidate\ndata: {"teamsChanged":true,"private":"ignored"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [], teamsChanged: true }])
+    scoped.push('event: invalidate\ndata: {"referencesChanged":true,"private":"ignored"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [], referencesChanged: true }])
+    scoped.push('event: invalidate\ndata: {"referencesChanged":"true"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [] }])
+    scoped.push('event: invalidate\ndata: {"teamsChanged":"true"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [] }])
   })
 
   it('retains an unknown command across reauthentication and only looks up its original receipt', async () => {

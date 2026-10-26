@@ -601,8 +601,6 @@ class AcpHost {
       '--acp',
       '--stdio',
       '--no-auto-update',
-      '--no-remote',
-      '--no-remote-export',
       '--no-color',
       '--log-level', 'error',
       '--log-dir', fixture.logs,

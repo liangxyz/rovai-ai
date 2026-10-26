@@ -1,9 +1,10 @@
+import { MissionTeamPicker } from './MissionTeamPicker'
 import { TeamPicker, TeamAvatarSummary } from './TeamPicker'
 import { rejectedMissionMemberIds } from './useMissions'
 import { missionDescriptionContent, missionDescriptionText, missionMentionIds, unavailableMissionMentionIds } from './mission-description'
 import { useThreadClient } from './camp-client'
 import { readErrorMessage } from './error-message'
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Popover from '@radix-ui/react-popover'
@@ -34,7 +35,6 @@ import {
   MissionTagPicker,
   MissionWritingPlane,
   ProjectGlyph,
-  TeamGlyph,
   missionAttachmentDrafts,
   type MissionDraftAttachment,
   type MissionWritingPlaneHandle
@@ -109,6 +109,7 @@ export function NewConversationDialog({
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([])
   const [teamId, setTeamId] = useState<string | null>(null)
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
+  const submittedMissionTeam = useRef<Team | null>(null)
   const customSelection = useRef({ memberIds: [] as string[], leadId: '' })
   const [leadId, setLeadId] = useState('')
   const [optionalOpen, setOptionalOpen] = useState(false)
@@ -178,7 +179,7 @@ export function NewConversationDialog({
     if (draftInitializedRef.current) {
       // A late library may complete the initial selection, but never replace
       // a selected snapshot or reset the user's name, workspace or Custom draft.
-      const loaded = !isMission && teamId && !selectedTeam ? availableTeams.find(team => team.id === teamId) : null
+      const loaded = teamId && !selectedTeam ? availableTeams.find(team => team.id === teamId) : null
       if (loaded) {
         setSelectedTeam(loaded)
         setSelectedMemberIds(loaded.memberAgentIds)
@@ -194,8 +195,8 @@ export function NewConversationDialog({
     setMemberMenuOpen(false)
     setLeadMenuOpen(false)
     customSelection.current = { memberIds, leadId: recommendedLead }
-    const team = isMission ? null : initialTeam ?? availableTeams.find(team => team.id === initialTeamId)
-    setTeamId(isMission ? null : team?.id ?? initialTeamId)
+    const team = initialTeam ?? availableTeams.find(team => team.id === initialTeamId)
+    setTeamId(team?.id ?? initialTeamId)
     setSelectedTeam(team ?? null)
     setSelectedMemberIds(team?.memberAgentIds ?? memberIds)
     setLeadId(team?.defaultLeadAgentId ?? recommendedLead)
@@ -259,6 +260,17 @@ export function NewConversationDialog({
     setMemberError(null)
   }
 
+  const selectTeam = (id: string | null): void => {
+    if (!teamId) customSelection.current = { memberIds: selectedMemberIds, leadId }
+    const team = availableTeams.find(team => team.id === id) ?? null
+    setTeamId(id)
+    setSelectedTeam(team)
+    setMemberError(null)
+    setSubmitError(null)
+    setSelectedMemberIds(team?.memberAgentIds ?? customSelection.current.memberIds)
+    setLeadId(team?.defaultLeadAgentId ?? customSelection.current.leadId)
+  }
+
   const chooseWorkspaceDirectory = async (): Promise<void> => {
     if (projectActionsDisabled) return
     setSubmitError(null)
@@ -298,14 +310,15 @@ export function NewConversationDialog({
     setSubmitting(true)
     setSubmitError(null)
     try {
+      if (isMission && !recovery) submittedMissionTeam.current = selectedTeam
       await onCreate({
-        ...(selectedTeam && !isMission ? { team: { teamId: selectedTeam.id, expectedVersion: selectedTeam.version } } : {}),
+        ...(selectedTeam ? { team: { teamId: selectedTeam.id, expectedVersion: selectedTeam.version } } : {}),
         name: normalizedName || null,
         workspace: workspace ? { projectPath: workspace.projectPath } : null,
         memberAgentIds: selectedMemberIds,
         defaultLeadAgentId: leadId,
         collaborationMode: 'peer'
-      }, enableOneClick, isMission ? {description: '', descriptionContent: await missionEditorRef.current!.flushDescription(), tags, attachments: missionAttachmentDrafts(attachments), start:(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'start'} : undefined)
+      }, isMission ? false : enableOneClick, isMission ? {description: '', descriptionContent: await missionEditorRef.current!.flushDescription(), tags, attachments: missionAttachmentDrafts(attachments), start:(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'start'} : undefined)
       if (isMission) {
         draftInitializedRef.current = false
         setName('')
@@ -349,7 +362,7 @@ export function NewConversationDialog({
           }}
           onCloseAutoFocus={(event) => event.preventDefault()}
           onEscapeKeyDown={(event) => {
-            if (busy || quickHelpOpen || missionDialogContent?.querySelector('.composer-caret-menu, .composer-web-link-actions')) event.preventDefault()
+            if (busy || quickHelpOpen || missionDialogContent?.querySelector('.composer-caret-menu, .composer-web-link-actions, .mission-team-picker')) event.preventDefault()
           }}
           onPointerDownOutside={(event) => {
             if (event.target instanceof Element && event.target.closest('.new-camp-quick-tooltip')) event.preventDefault()
@@ -365,7 +378,7 @@ export function NewConversationDialog({
           <form className="compact-form" onSubmit={(event) => void submit(event)}>
             <div className={`compact-body camp-fields${isMission ? ' mission-editor-body' : ''}`}>
               {attentionMessage && <p className="compact-inline-note" role="status">{attentionMessage}</p>}
-              {recovery && !busy && <p className="compact-inline-note" role="status"><UiText zh={"上次创建结果尚未确认。"} /><button type="button" className="mission-source-link" onClick={() => { setName(recovery.title); setDescriptionContent(missionDescriptionContent(recovery.description, recovery.descriptionContent)); setTags(recovery.tags); setAttachments(recoveryAttachments.map(({id, file, kindHint}) => ({kind:'local', id, file, kindHint}))); setWorkspace(recovery.projectBindingKind === 'directory' ? {name:projects.find(p=>p.projectPath===recovery.projectPath)?.name ?? recovery.projectPath,projectPath:recovery.projectPath} : null); setSelectedMemberIds(recovery.memberAgentIds); setLeadId(recovery.defaultLeadAgentId); setSubmitError(null) }}><UiText zh={"恢复上次内容以重试"} /></button></p>}
+              {recovery && !busy && <p className="compact-inline-note" role="status"><UiText zh={"上次创建结果尚未确认。"} /><button type="button" className="mission-source-link" onClick={() => { setName(recovery.title); setDescriptionContent(missionDescriptionContent(recovery.description, recovery.descriptionContent)); setTags(recovery.tags); setAttachments(recoveryAttachments.map(({id, file, kindHint}) => ({kind:'local', id, file, kindHint}))); setWorkspace(recovery.projectBindingKind === 'directory' ? {name:projects.find(p=>p.projectPath===recovery.projectPath)?.name ?? recovery.projectPath,projectPath:recovery.projectPath} : null); setTeamId(recovery.team?.teamId ?? null); setSelectedTeam(recovery.team ? submittedMissionTeam.current : null); setSelectedMemberIds(recovery.memberAgentIds); setLeadId(recovery.defaultLeadAgentId); setSubmitError(null) }}><UiText zh={"恢复上次内容以重试"} /></button></p>}
               {isMission && <MissionWritingPlane ref={missionEditorRef} titleInputRef={nameInputRef} title={name} descriptionContent={descriptionContent} agents={agents} installations={installations} memberAgentIds={selectedMemberIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={!normalizedName ? undefined : nameLength > 200 ? uiAttribute("使命名称最多 200 个字符。") : undefined} descriptionError={unavailableIds.length ? uiAttribute('提及的队员已不可用，请移除提及或选择其他队员。') : Array.from(description).length > 12000 ? uiAttribute("使命描述最多 12,000 个字符。") : undefined} onTitleChange={setName} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setSubmitError}/>}
               {!isMission && <><div className="compact-row">
                 <span id="new-camp-workspace-label"><UiText zh={"工作目录"} /></span>
@@ -398,18 +411,12 @@ export function NewConversationDialog({
               {isMission && <div className="mission-editor-properties" aria-label={uiAttribute("使命属性")}>
                 <MissionProjectPicker open={projectMenuOpen} onOpenChange={setProjectMenuOpen} projects={projects} workspace={workspace} projectLabel={projectLabel} disabled={projectActionsDisabled} portalContainer={missionDialogContent}
                   onQuickChat={() => { setWorkspace(null); setProjectMenuOpen(false) }} onProject={selectKnownWorkspace} onChooseDirectory={() => { setProjectMenuOpen(false); void chooseWorkspaceDirectory() }}/>
-                <MissionTeamPicker busy={busy} members={preflight.presentMembers} availableMembers={availableMembers} selectedMemberIds={selectedMemberIds} selectedMembers={selectedMembers} leadId={leadId} profileById={profileById} enableOneClick={enableOneClick} triggerRef={memberTriggerRef} portalContainer={missionDialogContent} onEnableOneClick={setEnableOneClick} onToggle={toggleMember} onToggleAll={toggleAllMembers} onLead={setLeadId}/>
+                <MissionTeamPicker busy={busy} members={preflight.presentMembers} availableMembers={availableMembers} selectedMemberIds={selectedMemberIds} selectedMembers={selectedMembers} leadId={leadId} profileById={profileById} triggerRef={memberTriggerRef} portalContainer={missionDialogContent} teams={availableTeams} selectedTeam={selectedTeam} teamId={teamId} loading={teamsLoading} error={teamsError} onRetry={onRetryTeams} onSelect={selectTeam} onToggle={toggleMember} onToggleAll={toggleAllMembers} onLead={setLeadId}/>
                 <MissionTagPicker tags={tags} catalog={missionTagCatalog} disabled={busy} portalContainer={missionDialogContent} onChange={setTags}/>
               </div>}
               {!isMission && <>{workspace && <div className="compact-row-detail"><span title={projectDetail}>{projectDetail}</span>{gitPresentation.kind === 'metadata' && <span className="compact-git">{gitPresentation.label}</span>}{gitPresentation.kind === 'loading' && <span role="status">{gitPresentation.label}</span>}</div>}
               {gitPresentation.kind === 'warning' && <div className="new-camp-workspace-warning" role="alert"><div><strong>{gitPresentation.label}</strong><span>{gitPresentation.detail}</span></div></div>}
-              <div className="compact-row"><span>{uiAttribute('团队与队员')}</span><TeamPicker teams={availableTeams} selectedTeam={selectedTeam} agents={agents} value={teamId} busy={busy} onChange={id => {
-                if (!teamId) customSelection.current = { memberIds: selectedMemberIds, leadId }
-                const team = availableTeams.find(team => team.id === id) ?? null
-                setTeamId(id); setSelectedTeam(team); setMemberError(null); setSubmitError(null)
-                setSelectedMemberIds(team?.memberAgentIds ?? customSelection.current.memberIds)
-                setLeadId(team?.defaultLeadAgentId ?? customSelection.current.leadId)
-              }}/></div>
+              <div className="compact-row"><span>{uiAttribute('团队与队员')}</span><TeamPicker teams={availableTeams} selectedTeam={selectedTeam} agents={agents} value={teamId} busy={busy} onChange={selectTeam}/></div>
               {teamsLoading && <p className="compact-row-detail" role="status">{uiAttribute('正在载入团队…')}</p>}
               {!teamsLoading && teamsError && <div className="compact-inline-error" role="alert">{uiAttribute('团队列表读取失败：{0}', teamsError)}{onRetryTeams && <button type="button" className="compact-text-button" disabled={busy} onClick={onRetryTeams}>{uiAttribute('重试')}</button>}</div>}
               {teamId && <div className="team-conversation-summary"><TeamAvatarSummary ids={selectedTeam?.memberAgentIds ?? []} agents={agents}/><span>{selectedTeam ? uiAttribute('{0} 位队员 · 队长 {1}', String(selectedTeam.memberAgentIds.length), profileById.get(selectedTeam.defaultLeadAgentId)?.displayName ?? uiAttribute('不可用')) : uiAttribute('团队不可用')}</span></div>}
@@ -527,8 +534,6 @@ export function NewConversationDialog({
   )
 }
 
-type MissionMember = ThreadCreationPreflight['presentMembers'][number]
-
 function MissionProjectPicker({
   open,
   projects,
@@ -569,90 +574,6 @@ function MissionProjectPicker({
         {!quickChatMatches && !matchingProjects.length && <p className="mission-picker-empty" role="status"><UiText zh={"没有匹配的项目"} /></p>}
       </div>
       <div className="mission-editor-project-footer"><button type="button" className="compact-option" disabled={disabled} onClick={onChooseDirectory}><DialogControlIcon name="plus"/><span><UiText zh={"选择工作目录…"} /></span></button></div>
-    </Popover.Content></Popover.Portal>
-  </Popover.Root>
-}
-
-function MissionTeamPicker({
-  busy,
-  members,
-  availableMembers,
-  selectedMemberIds,
-  selectedMembers,
-  leadId,
-  profileById,
-  enableOneClick,
-  triggerRef,
-  portalContainer,
-  onEnableOneClick,
-  onToggle,
-  onToggleAll,
-  onLead
-}: {
-  busy: boolean
-  members: MissionMember[]
-  availableMembers: MissionMember[]
-  selectedMemberIds: string[]
-  selectedMembers: MissionMember[]
-  leadId: string
-  profileById: Map<string, AgentProfile>
-  enableOneClick: boolean
-  triggerRef: RefObject<HTMLButtonElement | null>
-  portalContainer: HTMLElement | null
-  onEnableOneClick(value: boolean): void
-  onToggle(agentId: string): void
-  onToggleAll(): void
-  onLead(agentId: string): void
-}): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
-  const lead = selectedMembers.find(member => member.agentId === leadId) ?? null
-  const allSelected = availableMembers.length > 0
-    && selectedMemberIds.length === availableMembers.length
-    && selectedMemberIds.every(id => availableMembers.some(member => member.agentId === id))
-  const normalized = query.trim().toLocaleLowerCase()
-  const matchingMembers = members.filter(member => {
-    const profile = profileById.get(member.agentId)
-    return `${member.displayName}\n${profile?.teamRole ?? ''}\n${newConversationMemberStatus(member)}`.toLocaleLowerCase().includes(normalized)
-  })
-
-  return <Popover.Root open={open} onOpenChange={next => { if (!busy) setOpen(next); if (!next) setQuery('') }}>
-    <Popover.Trigger asChild>
-      <MissionPropertyChip ref={triggerRef} className="mission-editor-team-property" icon={<TeamGlyph/>} disabled={busy || !members.length} aria-invalid={!selectedMemberIds.length} aria-label={selectedMembers.length ? uiAttribute("队员与队长：{0} 位队员，{1}", String(selectedMembers.length), String(lead ? uiAttribute("队长 {0}", String(lead.displayName)) : uiAttribute("未选择队长"))) : availableMembers.length ? uiAttribute("选择队员与队长") : uiAttribute("暂无可用队员")}>
-        <span className="mission-editor-team-summary">
-          {selectedMembers.length ? <><span className="compact-avatar-stack">{selectedMembers.slice(0, 2).map(member => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={profileById.get(member.agentId)?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative/>)}{selectedMembers.length > 2 && <span className="mission-editor-team-overflow" aria-hidden="true">+{selectedMembers.length - 2}</span>}</span>
-            <span className="mission-editor-team-divider" aria-hidden="true"/>
-            <span>{lead ? uiAttribute("队长 {0}", String(lead.displayName)) : uiAttribute("选择队长")}</span></>
-            : <span>{availableMembers.length ? uiAttribute("选择队员") : uiAttribute("暂无可用队员")}</span>}
-        </span>
-      </MissionPropertyChip>
-    </Popover.Trigger>
-    <Popover.Portal container={portalContainer}><Popover.Content className="compact-menu mission-editor-team-popover" align="start" sideOffset={6} collisionPadding={12} onOpenAutoFocus={event => { event.preventDefault(); searchRef.current?.focus() }}>
-      <div className="compact-menu-heading"><span><UiText zh={"队员与队长 "} /><small className="mission-editor-team-count"><UiText zh={"已选 "} />{selectedMemberIds.length} / {members.length}</small></span><button type="button" disabled={busy || !availableMembers.length} onClick={onToggleAll}>{allSelected ? uiAttribute("取消全选") : uiAttribute("全选")}</button></div>
-      <label className="mission-picker-search"><NavigationIcon name="search"/><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} aria-label={uiAttribute("搜索队员")} placeholder={uiAttribute("搜索队员…")}
-        onKeyDown={event => { if (event.key === 'ArrowDown' && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.closest('.mission-editor-team-popover')?.querySelector<HTMLButtonElement>('.mission-editor-team-member:not(:disabled)')?.focus() } }}/></label>
-      <div className="mission-editor-team-list">
-        {matchingMembers.map(member => {
-          const profile = profileById.get(member.agentId)
-          const available = isNewConversationMemberAvailable(member)
-          const selected = selectedMemberIds.includes(member.agentId)
-          const isLead = leadId === member.agentId
-          return <div className="mission-editor-team-row" key={member.agentId} data-disabled={!available ? '' : undefined}>
-            <button type="button" className="mission-editor-team-member" disabled={busy || !available} onClick={() => onToggle(member.agentId)}>
-              <MemberAvatar agentId={member.agentId} avatarRef={profile?.avatarRef ?? null} displayName={member.displayName} size="mention" decorative/>
-              <span>{member.displayName}<small>{profile?.teamRole || uiAttribute('队员')} · {newConversationMemberStatus(member)}</small></span>
-              <span className={`mission-editor-team-check${selected ? ' is-checked' : ''}`}>{selected && <DialogControlIcon name="check"/>}</span>
-            </button>
-            <button type="button" className={`mission-editor-lead-choice${isLead ? ' is-selected' : ''}`} disabled={busy || !available || !selected} onClick={() => onLead(member.agentId)}>{isLead ? uiAttribute("队长") : uiAttribute("设为队长")}</button>
-          </div>
-        })}
-        {!matchingMembers.length && <p className="mission-picker-empty" role="status"><UiText zh={"没有匹配的队员"} /></p>}
-      </div>
-      <div className="mission-editor-team-footer">
-        <label><input type="checkbox" checked={enableOneClick} disabled={busy} onChange={event => onEnableOneClick(event.target.checked)}/><span><UiText zh={"以后使用此队伍一键新建"} /></span></label>
-        <button type="button" className="compact-primary" onClick={() => { setOpen(false); setQuery('') }} disabled={busy}><UiText zh={"完成"} /></button>
-      </div>
     </Popover.Content></Popover.Portal>
   </Popover.Root>
 }

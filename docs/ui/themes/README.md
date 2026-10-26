@@ -2,21 +2,28 @@
 document_type: ui-theme-index
 authority: renderer-theme-routing
 status: accepted
-last_updated: 2026-09-12
+last_updated: 2026-10-25
 ---
 
 # Renderer 主题
 
-Rovai AI 有两套生产主题：
+Rovai AI 有五套配色，外观页提供六项偏好：跟随系统、日间、夜间、晨雾、朝霞、绯夜。
 
-| `ResolvedTheme` | 主题合同 | CSS 选择器 |
-|---|---|---|
-| `day` | [Porcelain Day](porcelain-day.md) | `:root` |
-| `night` | [Steel Night](steel-night.md) | `:root[data-theme="night"]` |
+| `ThemeId` | 主题合同 | `ResolvedTheme` / `color-scheme` | CSS 选择器 |
+|---|---|---|---|
+| `day` | [Porcelain Day](porcelain-day.md) | `day` / `light` | `:root` |
+| `night` | [Steel Night](steel-night.md) | `night` / `dark` | `:root[data-theme="night"]` |
+| `horizon` | [晨雾 / Morning Mist](horizon.md) | `day` / `light` | `:root[data-theme-id="horizon"]` |
+| `classic-red` | [朝霞 / Dawn Glow](classic-red.md) | `day` / `light` | `:root[data-theme-id="classic-red"]` |
+| `ember` | [绯夜 / Crimson Night](ember.md) | `night` / `dark` | `:root[data-theme-id="ember"]` |
 
-`ThemePreference = system | day | night` 是用户偏好。`system` 跟随当前宿主 OS 的应用主题并解析为
-`ResolvedTheme = day | night`，不是第三套主题。第三套视觉主题进入生产前，必须另行评估
-偏好值是否需要与明暗模式、具体主题 ID 解耦。
+显示名称与稳定 `ThemeId` 分离；更名不改变持久化值或合同路径。
+
+`ThemePreference = system | ThemeId` 保存具体偏好；`ResolvedTheme = day | night` 继续表示明暗模式，
+供系统明暗外观、代码高亮与原生控件模式使用。共享 `THEME_MODES` 拥有配色到模式的映射。
+Windows caption controls 的背景与图标色按具体 `ThemeId` 的 `--rail` / `--ink` 同步，不只按明暗模式取色。
+`system` 仅解析为日间或夜间，不随系统自动选择其他配色。根 `data-theme` 保留明暗模式，
+`data-theme-id` 表示有效配色；每次切换均覆盖有效配色属性，避免残留。
 
 依赖方向固定为：
 
@@ -28,12 +35,12 @@ Theme Token → Shared Component → Surface Composition
 
 ## 首次绘制与运行时权威
 
-1. Electron Main 在建窗前设置 `nativeTheme.themeSource` 和匹配的窗口背景；macOS appearance 与 Windows Apps
+1. Electron Main 在建窗前按偏好设置 `nativeTheme.themeSource` 和匹配的配色窗口背景；macOS appearance 与 Windows Apps
    theme 都只解析为同一 `ResolvedTheme`。
 2. `index.html` 在 React 启动前按 `prefers-color-scheme` 写入初始 `data-theme`，避免先亮后暗。
-3. Renderer 收到 Main 的 `AppearanceSnapshot` 后，以其中 `resolvedTheme` 覆盖初值，同时更新
-   `color-scheme`。
-4. 主题切换只更新根 Token 与窗口背景；不得重新挂载页面、移动焦点，或改变 Camp、Tab、
+3. Renderer 收到 Main 的 `AppearanceSnapshot` 后，以其中 `resolvedTheme` 覆盖初始明暗模式，按 `preference` 与模式解析具体配色，
+   同时更新 `data-theme-id` 和 `color-scheme`。
+4. 主题切换只更新根 Token、窗口背景与 Windows caption controls 配色；不得重新挂载页面、移动焦点，或改变 Camp、Tab、
    Draft、滚动、选择、Dialog、Core/IPC 事实。
 
 实现真源是 [`theme.css`](../../../packages/ui/src/theme.css)、
@@ -65,8 +72,8 @@ Web 使用同一外观页面、主题和阅读偏好模型，由浏览器入口�
 整页缩放由浏览器菜单或快捷键控制；Web 外观页解释这一差异，不显示无法控制浏览器倍率的选择器。
 恢复外观默认值不重置浏览器保存的缩放。Desktop 仍使用上述原生 Chrome 档位。
 
-Main 原子保存 schema-v2 偏好，并串行处理连续更新。schema-v1 主题文件按原主题加默认阅读偏好读取，
-显式调整后升级；无效文件保持原字节并在内存使用安全默认值，保存失败不发布成功快照。
+外观保存使用封闭字段校验、串行更新与原子写入；更改主题不重置其他阅读参数。
+无效文件保留原字节并使用安全默认值，保存失败不发布成功快照。
 页面保留未保存的调整和重试入口，恢复默认只重置外观字段。
 
 ## 新增或修改主题
@@ -75,4 +82,21 @@ Main 原子保存 schema-v2 偏好，并串行处理连续更新。schema-v1 主
 2. 为现有完整语义 Token 集提供值，包括八组身份色、十组 Agent artifact 格式色、状态色、证据色和浮层色。
 3. 只修改 canonical Token block；组件选择器不得出现主题专属色值。
 4. 按[主题矩阵](../qa/theme-matrix.md)验证相同页面、状态和功能。
-5. 运行 Renderer 主题 Token/对比度测试，并完成真实 App 双主题验收。
+5. 运行 Renderer 主题 Token/对比度测试，并完成生产组件的所有配色验收，并明确原生平台实测范围。
+
+## 配色与交互边界
+
+控件、文字、品牌、状态与身份色的职责遵循 [DESIGN.md](../../../DESIGN.md#colors)，包括 Portal 内的控件。
+所有配色沿用相同消息几何与交互，不增加主题专属聚焦装饰、动画或功能。
+
+`--scrollbar-thumb` 拥有通用滚动块与 Mission 文件树底色，不复用选中区域色；
+Memory / Automation 的无彩色工作区使用 `--neutral-selected`。透明轨道、尺寸和拖动反馈保持一致。
+
+`--execution-surface` 拥有执行台在底部、浮层和右侧标签中的统一阅读底色，包括头像状态背板与滚动渐隐。
+晨雾的会话使用轻暖白、执行台使用中性白；其他配色的执行台与会话底色一致。
+手机继续由 `--mobile-page` 同时覆盖会话与执行台底色。
+
+主题选择沿用整卡原生 radio、缩略图、名称与选中勾；980px 内容轨道为六列紧凑卡片，
+容器不超过 900px 时三列，不超过 420px 时两列。键盘与焦点遵循共享控件规则。
+`--settings-choice-selected-surface` 拥有外观选项的选中底色；朝霞使用淡灰红区域色，
+其余配色使用各自 `--home-surface` 色值。选中边线继续由 `--settings-choice-selected-line` 拥有。

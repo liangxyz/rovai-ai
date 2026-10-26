@@ -68,7 +68,7 @@ describe('first-run onboarding flow', () => {
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('https://code.claude.com/docs/en/setup')
     expect(markup).not.toContain('Cline')
-    expect(markup).not.toContain('Command Code')
+    expect(markup).toContain('Command Code')
     expect(markup).not.toContain('onboarding-runtime-list')
     expect(markup).not.toContain('onboarding-model-panel')
   })
@@ -85,18 +85,29 @@ describe('first-run onboarding flow', () => {
     expect(markup).not.toContain('暂未找到可用的智能体')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
-    expect(markup).not.toContain('Command Code')
+    expect(markup).toContain('Command Code')
     expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
     expect(onboardingHasUsableRuntime('error', health, [installation])).toBe(false)
     expect(onboardingHasUsableRuntime('ready', emptyHealth(), [])).toBe(false)
   })
 
   it.each(['ready', 'light_ready'] as const)('keeps incomplete qualification detail visible for a %s Runtime', (status) => {
-    const health = healthWithRuntime({ ...readyAvailability(), status }, previewAdmission())
-    const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [codexInstallation()])
-    expect(onboardingHasUsableRuntime('ready', health, [codexInstallation()])).toBe(true)
-    expect(markup).toContain('<small>当前平台已开放使用，完整的平台资格验证记录尚未齐备。')
-    expect(markup).not.toMatch(/测试|试运行|实验性/)
+    for (const runtimeKind of ['codex-cli', 'command-code-cli'] as const) {
+      for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
+        const admission = { ...previewAdmission(), runtimeKind, platform }
+        const availability = { ...readyAvailability(), runtimeKind, status }
+        const health = { ...healthWithRuntime(availability, admission), hostPlatform: platform }
+        const installation = { ...codexInstallation(), adapterKind: runtimeKind, memberRuntimeDefaults: {
+          adapterKind: runtimeKind, model: { mode: 'runtime_default' as const },
+          permissions: { adapterKind: runtimeKind, schemaVersion: 1, values: {} }
+        } }
+        const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [installation])
+        expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
+        expect(onboardingRuntimeCanContinue('ready', onboardingRuntimeSelectionFor(runtimeKind, [installation]), availability, installation, admission)).toBe(true)
+        expect(markup).toContain('<small>当前平台已开放使用，完整的平台资格验证记录尚未齐备。')
+        expect(markup).not.toMatch(/测试|试运行|实验性/)
+      }
+    }
   })
 
   it('keeps selectable and experimental alternatives outside the collapsed runtime list', () => {

@@ -1,5 +1,5 @@
 ---
-version: 11
+version: 12
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -25,8 +25,8 @@ teammate and Lead pickers use a second Radix sheet with a back button. Teammates
 68px rows and a fixed “完成” action. Closing a picker or pressing Escape preserves the parent
 form and restores the originating picker focus without reopening the name keyboard. Desktop
 retains its existing geometry and menus. Both presentations share one draft and submission path.
-Selected teammate checkboxes use the neutral `conversation-action` token and its paired contrast:
-black in Day and light in Night, matching the create action. Disabled candidates keep their muted treatment.
+Selected teammate checkboxes and the create action use the current theme action family, including Portal menus.
+Follow [DESIGN.md](../../../../DESIGN.md#colors); disabled candidates keep their muted treatment.
 
 Header: title “新对话” and an accessibly named close button. Keep the description available to
 assistive technology without repeating it visually. Use the paired dialog label and field tokens,
@@ -45,7 +45,9 @@ arrow-key navigation, `Esc` dismissal and focus return.
    uses the semantic success foreground and surface, while the in-progress inspection state remains neutral.
    Before removed-Project authority is ready, keep Project choices disabled, do not inspect or submit a cached
    directory, and identify the wait with neutral loading copy; Quick Chat creation remains available.
-2. **队员 / 队长** — initialize from the saved team filtered to currently available teammates,
+2. **Team / Custom、队员 / 队长** — source selection follows [Team workspace](../../../../docs/ui/components/team-workspace.md).
+   Team shows a read-only snapshot; Custom retains its draft and the teammate/Lead controls below.
+   Initialize Custom from the saved custom roster filtered to currently available teammates,
    otherwise all available teammates in Member Order. A candidate is available only when its runtime
    configuration is saved and readiness is `ready` or `light_ready`; both display green “可用”.
    Unconfigured candidates display “未配置智能体”; configured but unavailable candidates display
@@ -69,7 +71,7 @@ arrow-key navigation, `Esc` dismissal and focus return.
    not toggle the checkbox. No inline explanation or effective-after-creation text is shown.
    Do not save the workspace or optional name as defaults.
 
-Footer contains “取消 / 新建”. The creation action uses the neutral conversation-action tokens (black in Day, the paired light action in Night). Do not repeat directory, teammate count or Lead in a summary.
+Footer contains “取消 / 新建”. The creation action follows the shared theme action rules. Do not repeat directory, teammate count or Lead in a summary.
 
 ## Submission and recovery
 
@@ -89,11 +91,10 @@ retain the draft and block submission until the user explicitly chooses a valid 
 One-click creation checks the same availability rule and opens this dialog when the saved team is
 unavailable, without permanently invalidating preferences because of a temporary runtime outage.
 
-Do not restore “协作方式 / 并肩协作 / 领队统筹 / 暂未开放”; the request continues to submit the existing
-`peer` semantics. This is a Renderer simplification, not a Core union or SQLite migration.
+Submit the existing `peer` semantics without exposing a collaboration-mode selector.
 
 ## Inheritance and hard boundaries
 
-Inherit root [`DESIGN.md`](../../../../DESIGN.md), both theme contracts and
+Inherit root [`DESIGN.md`](../../../../DESIGN.md), the [theme registry](../../../../docs/ui/themes/README.md) and
 [accessibility baseline](../../../../docs/ui/qa/accessibility.md). This brief cannot alter directory
 safety, Camp creation transactions, Pending/Active semantics, Member Order or Core draft authority.

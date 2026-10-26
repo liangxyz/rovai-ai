@@ -5,7 +5,7 @@ import type { ConsoleClient } from './client'
 import type { AppearanceSnapshot, CurrentUserProfileApi, NavigationPreferencesSnapshot } from '@contracts'
 import { DEFAULT_CURRENT_USER_PROFILE, currentUserNameError, isThreadId } from '@contracts'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
-import { DEFAULT_APPEARANCE, parseAppearancePatch } from '../../desktop/src/shared/appearance'
+import { DEFAULT_APPEARANCE, parseAppearancePatch, resolveThemeMode } from '../../desktop/src/shared/appearance'
 import { EMPTY_SNAPSHOT, sanitizeSnapshot, sourceMatchesSupportedSnapshot, registerNavigationProjects, isNavigationThreadReadState } from '../../desktop/src/shared/navigation-preferences-model'
 import { normalizeProjectDisplayName, projectDisplayNameError } from '../../desktop/src/shared/project-display-name'
 
@@ -50,7 +50,7 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
   let appearance = { ...DEFAULT_APPEARANCE }
   try { appearance = { ...appearance, ...parseAppearancePatch(read('appearance', {})) } } catch { /* Invalid persisted presentation stays untouched until an explicit edit. */ }
   const appearanceListeners = new Set<(snapshot: AppearanceSnapshot) => void>()
-  const snapshot = (): AppearanceSnapshot => ({ ...appearance, resolvedTheme: appearance.preference === 'system' ? media.matches ? 'night' : 'day' : appearance.preference })
+  const snapshot = (): AppearanceSnapshot => ({ ...appearance, resolvedTheme: resolveThemeMode(appearance.preference, media.matches ? 'night' : 'day') })
   const publish = (): void => { for (const listener of appearanceListeners) listener(snapshot()) }
   const commitAppearance = async (patch: unknown): Promise<AppearanceSnapshot> => {
     const next = { ...appearance, ...parseAppearancePatch(patch) }

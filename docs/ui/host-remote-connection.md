@@ -3,7 +3,7 @@ document_type: ui-interaction-draft
 authority: host-remote-connection-settings-review
 status: implemented
 target_version: v1.59
-last_updated: 2026-10-11
+last_updated: 2026-10-25
 ---
 
 # 设置 · 远程连接交互稿
@@ -37,9 +37,9 @@ last_updated: 2026-10-11
 | 分组与选中行 | `CampNavigation`、`SettingsSidebarNavigation`、`SETTINGS_SIDEBAR_GROUPS` | “应用”组内，位于“提醒”之后；能力/支持顺序不变；选中行沿用中性底色 |
 | 页头 | `SettingsPageHeader`、`settings-workspace.css` | 24px/620 标题、12px 说明、无装饰边线；和通用页同一内容轴 |
 | 内容区 | `.settings-panel-general`、`.general-settings`、`.general-settings-section` | 880px 开放阅读面、24px 分区间距与细分隔线；保留稳定滚动条占位，避免短页标题移动 |
-| 控件 | 通用设置的开关、quiet/primary button、输入边界 | 中性按钮、白色关闭态滑块、6px 控件圆角；只有状态使用语义状态色 |
+| 控件 | 通用设置的开关、quiet/primary button、输入边界 | 共享主题操作色、白色关闭态滑块、6px 控件圆角；状态保留独立语义色 |
 | 图标与弹窗 | `NavigationIcon`、`AppDialogContent/Header/Body/Footer` | 侧栏沿用原图标，页面不放设备图标；复用现有 Dialog，二维码关闭后焦点回到触发按钮 |
-| 双主题 | `packages/ui/src/theme.css`、生产 `styles.css` | 同一组件树，全部颜色取语义 token；无按主题分叉的布局 |
+| 全部配色 | `packages/ui/src/theme.css`、生产 `styles.css` | 同一组件树，全部颜色取语义 token；无按主题分叉的布局 |
 
 [新增 CSS](../../apps/desktop/src/renderer/src/remote-connection.css)只拥有连接状态、地址、目录与令牌行的局部组合，
 不复制侧栏、按钮、开关、Dialog 或主题实现。页面与样式由生产组件拥有，fixture 只注入模拟依赖。

@@ -13,7 +13,7 @@ import { UiText, uiAttribute } from './interface-language'
 const EMPTY: RuntimeStartupConfiguration = { programPath: null, environment: [] }
 const INSPECTION_LABELS: Record<RuntimeStartupInspection['status'], string> = {
   missing: '未检测到程序', recognized: '已识别程序', version_unverified: '已识别程序，版本检查未完成',
-  authentication_required: '已识别程序，需要登录', ready: '检查通过', check_failed: '检查未通过，请确认登录和运行环境'
+  authentication_required: '认证未通过，请检查登录状态或凭据配置', ready: '检查通过', check_failed: '检查未通过，请检查运行环境'
 }
 
 export type RuntimeStartupLeaveGuard = () => Promise<boolean>

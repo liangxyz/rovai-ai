@@ -359,7 +359,7 @@ function commandLine(
 }
 
 function liveProgressSummary(commands: Array<Extract<LiveTimelineBlock, { kind: 'command' }>>, snapshot: ExecutionConsoleSnapshot): string {
-  if (!commands.length) return snapshot.run.status === 'queued' ? '等待开始执行…'
+  if (!commands.length) return snapshot.run.status === 'queued' || snapshot.run.waitReason === 'runtime_initializing' ? agentRunPresentation(snapshot.run).label
     : snapshot.run.status === 'waiting' ? agentRunPresentation(snapshot.run).label : '正在准备执行…'
   const count = (status: ActivityStatus): number => commands.filter((command) => command.status === status).length
   return [

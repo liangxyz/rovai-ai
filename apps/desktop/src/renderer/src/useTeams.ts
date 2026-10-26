@@ -26,7 +26,9 @@ export function useTeams(client: ThreadClient, enabled: boolean) {
     const reload = (): void => { void refresh().catch(() => undefined) }
     reload()
     const events = client.onEvent?.(event => { if (event.method === 'teams.changed') reload() })
-    const invalidations = client.onInvalidated?.(reload)
+    const invalidations = client.onInvalidated?.(change => {
+      if (!change || change.resync || change.teamsChanged) reload()
+    })
     return () => { generation.current++; events?.(); invalidations?.() }
   }, [client, enabled, refresh])
   return { teams, loading, error, refresh }

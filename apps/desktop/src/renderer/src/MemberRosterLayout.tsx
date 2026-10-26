@@ -14,6 +14,7 @@ import {
 } from 'react'
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
+import { SplitterFeedback } from './SplitterFeedback'
 
 const STORAGE_KEY = 'rovai-member-roster-width-v2'
 const LEGACY_STORAGE_KEY = 'rovai-member-roster-width-v1'
@@ -40,6 +41,7 @@ interface RosterControls {
   setCollapsed(value: boolean): void
   setWidth(value: number, expand?: boolean): void
   restorePreference(preference: RosterPreference): void
+  setHeldFold(value: boolean): void
 }
 
 const RosterContext = createContext<RosterControls | null>(null)
@@ -75,6 +77,7 @@ export function MemberRosterLayout({ children, separatorLabel = uiAttribute('队
   const [maxWidth, setMaxWidth] = useState(MAX_WIDTH)
   const [sorting, setSorting] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [heldFold, setHeldFold] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const id = `member-roster-${useId()}`
   const width = Math.min(preference.width, maxWidth)
@@ -114,11 +117,11 @@ export function MemberRosterLayout({ children, separatorLabel = uiAttribute('队
   }, [maxWidth])
 
   return (
-    <RosterContext.Provider value={{ id, preference, width, maxWidth, collapsed: !mobile && preference.collapsed, sorting, setSorting, setCollapsed, setWidth, restorePreference: setPreference }}>
+    <RosterContext.Provider value={{ id, preference, width, maxWidth, collapsed: !mobile && (heldFold || preference.collapsed), setHeldFold, sorting, setSorting, setCollapsed, setWidth, restorePreference: setPreference }}>
       <div
         ref={shellRef}
         className={`member-editor-roster-shell ${dragging ? 'is-resizing' : ''}`}
-        style={{ '--member-roster-width': `${preference.collapsed ? COLLAPSED_WIDTH : width}px` } as CSSProperties}
+        style={{ '--member-roster-width': `${(heldFold || preference.collapsed) ? COLLAPSED_WIDTH : width}px` } as CSSProperties}
       >
         {children}
         <MemberRosterSeparator dragging={dragging} setDragging={setDragging} label={separatorLabel} />
@@ -132,7 +135,7 @@ function MemberRosterSeparator({ dragging, setDragging, label }: {
   setDragging(value: boolean): void
   label: string
 }): React.JSX.Element {
-  const { id, preference, width, maxWidth, collapsed, sorting, setCollapsed, setWidth, restorePreference } = useMemberRosterLayout()
+  const { id, preference, width, maxWidth, collapsed, sorting, setCollapsed, setWidth, restorePreference, setHeldFold } = useMemberRosterLayout()
   const handleRef = useRef<HTMLDivElement>(null)
   const shell = (): HTMLElement | null => handleRef.current?.closest('.member-editor-roster-shell') ?? null
   const paintWidth = (value: number): void => shell()?.style.setProperty('--member-roster-width', `${value}px`)
@@ -145,6 +148,7 @@ function MemberRosterSeparator({ dragging, setDragging, label }: {
     onPreview: previewWidth,
     onCommit: previewWidth,
     onCollapseFrame: paintWidth,
+    onFoldPreview: edge => setHeldFold(edge === 'minimum'),
     onCollapse: before => { paintWidth(COLLAPSED_WIDTH); restorePreference({ ...before, collapsed: true }) },
     onCancel: before => { paintWidth(before.collapsed ? COLLAPSED_WIDTH : Math.min(maxWidth, before.width)); restorePreference(before) },
     onActiveChange: setDragging
@@ -166,7 +170,7 @@ function MemberRosterSeparator({ dragging, setDragging, label }: {
       aria-valuetext={collapsed ? uiAttribute("已折叠，按右方向键展开") : uiAttribute("{0} 像素", String(width))}
       aria-controls={id}
       aria-describedby={helpId}
-      title={collapsed ? uiAttribute("向右拖动展开；双击恢复默认") : uiAttribute("拖动调整宽度，最窄处停留后继续向左拖动折叠；双击恢复默认")}
+      title={collapsed ? uiAttribute("向右拖动展开；双击恢复默认") : uiAttribute("拖动调整宽度，最窄处继续向左内推直接收起；双击恢复默认")}
       {...splitter.handlers}
       onDoubleClick={() => { if (!sorting) { splitter.cancel(); setWidth(DEFAULT_WIDTH) } }}
       onKeyDown={(event) => {
@@ -190,7 +194,8 @@ function MemberRosterSeparator({ dragging, setDragging, label }: {
         setWidth(next)
       }}
     >
-      <span className="member-roster-resize-hint" aria-hidden="true">{collapsed ? uiAttribute("已折叠") : `${width} px`}</span>
+      <SplitterFeedback phase={splitter.phase} target={splitter.target} label={uiAttribute('继续拖动收起名册')} />
+      {splitter.phase !== 'detent' && <span className="member-roster-resize-hint" aria-hidden="true">{collapsed ? uiAttribute("已折叠") : `${width} px`}</span>}
       <span id={helpId} className="member-roster-sr-only"><UiText zh={"左右方向键调整；最窄时按左方向键折叠，右方向键展开，回车切换折叠，Home 恢复默认；Escape 取消拖动。"} /></span>
     </div>
   )

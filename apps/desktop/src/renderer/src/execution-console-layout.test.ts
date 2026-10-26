@@ -20,11 +20,11 @@ describe('execution console layout', () => {
     '.execution-process-card',
     '.execution-run-card-header',
     '.execution-process-node'
-  ])('uses the conversation surface for the execution canvas: %s', (selector) => {
-    expect(styleBlock(selector)).toMatch(/background:\s*var\(--conversation-surface\)/)
+  ])('uses the shared execution surface for the execution canvas: %s', (selector) => {
+    expect(styleBlock(selector)).toMatch(/background:\s*var\(--execution-surface\)/)
   })
 
-  it('keeps all Run states on the conversation surface without a running fill override', () => {
+  it('keeps all Run states on the execution surface without a running fill override', () => {
     expect(styleBlock('.camp-conversation-view-controls button[aria-pressed="true"]')).toMatch(
       /background:\s*var\(--brand-soft\)/
     )
@@ -32,7 +32,7 @@ describe('execution console layout', () => {
       /--execution-running-surface:/
     )
     expect(styleBlock('.execution-drawer-header')).toMatch(
-      /background:\s*var\(--conversation-surface\)/
+      /background:\s*var\(--execution-surface\)/
     )
     expect(styleBlock('.execution-process-stage.status-running .execution-process-card')).not.toMatch(/background:/)
     expect(styleBlock('.execution-process-stage.is-focused .execution-process-card') ?? '').not.toMatch(
@@ -53,13 +53,13 @@ describe('execution console layout', () => {
 
   it('blends the avatar rail status backplates and overflow fades into the execution canvas', () => {
     const status = styleBlock('.run-pulse-avatar-rail .run-pulse-chip-state')
-    expect(status).toMatch(/border:\s*2px solid var\(--conversation-surface\)/)
-    expect(status).toMatch(/background:\s*var\(--conversation-surface\)/)
+    expect(status).toMatch(/border:\s*2px solid var\(--execution-surface\)/)
+    expect(status).toMatch(/background:\s*var\(--execution-surface\)/)
     expect(styleBlock('.run-pulse-avatar-scroll.is-left')).toMatch(
-      /background:\s*linear-gradient\(to right, var\(--conversation-surface\) 54%, transparent\)/
+      /background:\s*linear-gradient\(to right, var\(--execution-surface\) 54%, transparent\)/
     )
     expect(styleBlock('.run-pulse-avatar-scroll.is-right')).toMatch(
-      /background:\s*linear-gradient\(to left, var\(--conversation-surface\) 54%, transparent\)/
+      /background:\s*linear-gradient\(to left, var\(--execution-surface\) 54%, transparent\)/
     )
   })
 

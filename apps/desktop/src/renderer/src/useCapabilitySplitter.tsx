@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { uiAttribute } from './interface-language'
+import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
 
 export const DEFAULT_CAPABILITY_WIDTH = 320
 export function defaultCapabilityWidth(viewport: number): number {
@@ -21,65 +22,62 @@ export function capabilityListWidth(preferred: number, available: number): numbe
 export function useCapabilitySplitter(storageKey: string, controls: string, enabled = true) {
   const root = useRef<HTMLDivElement>(null)
   const divider = useRef<HTMLDivElement>(null)
-  const drag = useRef<{
-    pointerId: number
-    startX: number
-    width: number
-  } | null>(null)
   const preferred = useRef<number | null>(null)
   const available = useRef(0)
   const currentWidth = useRef(DEFAULT_CAPABILITY_WIDTH)
-  const [compact, setCompact] = useState(false)
+  const [bounds, setBounds] = useState({ compact: false, maximum: 560 })
   const setWidth = (value: number, save: boolean): void => {
     const width = capabilityListWidth(value, available.current)
     currentWidth.current = width
     root.current?.style.setProperty('--capability-list-width', `${width}px`)
     divider.current?.setAttribute('aria-valuenow', String(width))
-    divider.current?.setAttribute(
-      'aria-valuemax',
-      String(Math.max(240, Math.min(560, Math.floor(available.current - 391))))
-    )
     divider.current?.setAttribute('aria-valuetext', uiAttribute("列表宽度 {0} 像素", String(width)))
     if (save) {
       preferred.current = width
-      try {
-        window.localStorage.setItem(storageKey, String(width))
-      } catch {
-        /* Keep the in-window preference usable. */
-      }
+      try { window.localStorage.setItem(storageKey, String(width)) }
+      catch { /* Keep the in-window preference usable. */ }
     }
   }
+  const splitter = useCollapsibleSplitter({
+    size: currentWidth.current, readSize: () => currentWidth.current,
+    collapsed: false, minimum: 240, maximum: bounds.maximum, direction: 1,
+    disabled: !enabled || bounds.compact, scopeKey: storageKey,
+    scale: () => splitterScale(root.current),
+    capture: () => currentWidth.current,
+    onPreview: width => setWidth(width, false),
+    onCommit: width => setWidth(width, true),
+    onCancel: width => setWidth(width, false),
+    onActiveChange: active => {
+      if (active) root.current?.setAttribute('data-resizing', 'true')
+      else root.current?.removeAttribute('data-resizing')
+    }
+  })
   useEffect(() => {
+    preferred.current = null
     try {
       const stored = Number(window.localStorage.getItem(storageKey))
       if (stored >= 240 && stored <= 560) preferred.current = stored
-    } catch {
-      /* Local layout is available without storage. */
-    }
-    const measure = (): void => {
-      available.current = root.current?.getBoundingClientRect().width ?? 0
-      setCompact(available.current < 620)
+    } catch { /* Local layout is available without storage. */ }
+    const measure = (initial = false): void => {
+      // CSS zoom affects pointer coordinates, not the layout's width budget.
+      const next = root.current?.clientWidth ?? 0
+      if (!initial && next === available.current) return
+      splitter.finish()
+      available.current = next
+      setBounds({ compact: next < 620, maximum: capabilityListWidth(560, next) })
       setWidth(preferred.current ?? defaultCapabilityWidth(window.innerWidth), false)
     }
-    measure()
-    const observer = new ResizeObserver(measure)
+    measure(true)
+    const observer = new ResizeObserver(() => measure())
     if (root.current) observer.observe(root.current)
     return () => observer.disconnect()
   }, [storageKey, enabled])
-  const finish = (cancel = false): void => {
-    const active = drag.current
-    if (!active) return
-    drag.current = null
-    root.current?.removeAttribute('data-resizing')
-    setWidth(cancel ? active.width : currentWidth.current, true)
-    if (divider.current?.hasPointerCapture(active.pointerId))
-      divider.current.releasePointerCapture(active.pointerId)
+  const reset = (): void => {
+    splitter.cancel()
+    preferred.current = null
+    try { window.localStorage.removeItem(storageKey) } catch {}
+    setWidth(defaultCapabilityWidth(window.innerWidth), false)
   }
-  useEffect(() => {
-    const onBlur = (): void => finish()
-    window.addEventListener('blur', onBlur)
-    return () => window.removeEventListener('blur', onBlur)
-  }, [])
   const separator = (
     <div className="capability-divider-rail">
       <div
@@ -90,65 +88,22 @@ export function useCapabilitySplitter(storageKey: string, controls: string, enab
         aria-label={uiAttribute("调整列表宽度")}
         aria-orientation="vertical"
         aria-valuemin={240}
-        aria-valuemax={560}
-        aria-valuenow={DEFAULT_CAPABILITY_WIDTH}
+        aria-valuemax={bounds.maximum}
+        aria-valuenow={currentWidth.current}
+        aria-valuetext={uiAttribute("列表宽度 {0} 像素", String(currentWidth.current))}
         aria-controls={controls}
         title={uiAttribute("拖动调整宽度，双击复位；方向键也可调整")}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return
-          event.preventDefault()
-          event.currentTarget.focus()
-          event.currentTarget.setPointerCapture(event.pointerId)
-          drag.current = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            width: currentWidth.current
-          }
-          root.current?.setAttribute('data-resizing', 'true')
-        }}
-        onPointerMove={(event) => {
-          if (drag.current?.pointerId === event.pointerId)
-            setWidth(drag.current.width + event.clientX - drag.current.startX, false)
-        }}
-        onPointerUp={() => finish()}
-        onPointerCancel={() => finish(true)}
-        onLostPointerCapture={() => finish()}
-        onDoubleClick={() => {
-          preferred.current = null
-          try {
-            window.localStorage.removeItem(storageKey)
-          } catch {}
-          setWidth(defaultCapabilityWidth(window.innerWidth), false)
-        }}
+        {...splitter.handlers}
+        onDoubleClick={reset}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            finish(true)
-            return
-          }
-          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return
+          if (splitter.active || !['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return
           event.preventDefault()
-          if (event.key === 'Enter') {
-            preferred.current = null
-            try {
-              window.localStorage.removeItem(storageKey)
-            } catch {
-              /* In-window reset remains available. */
-            }
-            setWidth(defaultCapabilityWidth(window.innerWidth), false)
-            return
-          }
-          setWidth(
-            event.key === 'Home'
-              ? 240
-              : event.key === 'End'
-                ? 560
-                : currentWidth.current +
-                  (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 24 : 8),
-            true
-          )
+          if (event.key === 'Enter') { reset(); return }
+          setWidth(event.key === 'Home' ? 240 : event.key === 'End' ? bounds.maximum
+            : currentWidth.current + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 24 : 8), true)
         }}
       />
     </div>
   )
-  return { root, compact, separator }
+  return { root, compact: bounds.compact, separator }
 }

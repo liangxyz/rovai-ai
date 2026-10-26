@@ -9,6 +9,9 @@ import { createNavigationRefreshCoordinator } from './navigation-refresh-coordin
 export function missionError(error: unknown): string {
   const message = readErrorMessage(error)
   const reasons: Record<string, string> = {
+    'team.conflict': uiAttribute('团队已变化，请重新选择后创建。'),
+    'team.unavailable': uiAttribute('团队已不可用，请选择其他团队或自定义。'),
+    'camp.invalid_initial_member': uiAttribute('所选队员已不可用，请重新选择。'),
     'mission.workspace_not_prepared': uiAttribute('使命尚未执行，工作区还未创建。'),
     'mission.git_not_applicable': uiAttribute('此工作目录不是 Git 项目。'),
     'mission.git_unavailable': uiAttribute('执行节点找不到 Git，暂时无法读取变更。'),

@@ -1,8 +1,10 @@
 import { pastedTextPreview } from '../../../apps/desktop/src/shared/pasted-text-preview'
 import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AgentProfile, ThreadSnapshot, ThreadComposerDraftView, ThreadMessageView, LocalAttachmentSourceView } from '@contracts'
+import type { AgentProfile, ThreadSnapshot, ThreadComposerDraftView, ThreadMessageView, LocalAttachmentSourceView, MissionDescriptionContent } from '@contracts'
+import { MissionDescriptionComposer, type MissionDescriptionComposerHandle } from '../../../apps/desktop/src/renderer/src/MissionDescriptionComposer'
+import { fuzzyContains } from '../../../apps/desktop/src/renderer/src/thread-reference'
 import { optimisticThreadMessage } from '../../../apps/desktop/src/renderer/src/BusinessApp'
 import { ThreadWorkspace, type ThreadLeaveGuard } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
@@ -79,12 +81,21 @@ let setProfiles: React.Dispatch<React.SetStateAction<AgentProfile[]>>
 let setFixture: React.Dispatch<React.SetStateAction<ThreadSnapshot>>
 let setMobile: React.Dispatch<React.SetStateAction<boolean>>
 let setVisible: React.Dispatch<React.SetStateAction<boolean>>
+let showMission: (visible: boolean) => void
+let flushMission: () => Promise<MissionDescriptionContent>
+const referenceCatalog = [
+  { kind: 'thread', id: 'rvcamp_01m3rs4y3gfjssw5nstbzbdx7j', title: '爱丽丝的会话', projectBindingKind: 'directory', projectPath: '/fixture/workspace' },
+  { kind: 'mission', id: 'rvm_019abcde123470008000000000000001', title: '爱丽丝的使命', projectBindingKind: 'directory', projectPath: '/fixture/workspace' }
+]
 const client = {
   platform: 'darwin', onEvent: () => () => {},
-  request: async (method: string) => {
+  request: async (method: string, input: { kind?: string; query?: string } = {}) => {
     calls.push(method)
+    if (method === 'threadReferences.list') return {
+      items: referenceCatalog.filter(item => item.kind === input.kind && fuzzyContains(item.title, input.query ?? '')), nextCursor: null
+    }
     if (method === 'skills.candidates') return { skills: [{
-      id: 'paste-review', name: 'review-code', description: 'Clipboard regression fixture',
+      id: 'paste-review', name: 'review-code', description: '设计审查 Clipboard regression fixture',
       source: 'native', entryPath: '/fixture/review-code/SKILL.md', memberIds: ['lead']
     }], errors: [] }
     if (method === 'thread.messages.anchors') return { schemaVersion: 1, threadId, throughGlobalSequence: 0, totalCount: 0, items: [] }
@@ -131,6 +142,11 @@ const client = {
 } as unknown as ThreadClient
 let showAgentFiles = () => {}
 function Fixture() {
+  const [missionVisible, setMissionVisible] = useState(false)
+  const [missionContent, setMissionContent] = useState<MissionDescriptionContent>([])
+  const mission = useRef<MissionDescriptionComposerHandle>(null)
+  showMission = visible => { setMissionContent([]); setMissionVisible(visible) }
+  flushMission = async () => mission.current?.flush() ?? []
   const [mobile, updateMobile] = useState(false)
   setMobile = updateMobile
   const [snapshot, setSnapshot] = useState(initial)
@@ -146,7 +162,10 @@ function Fixture() {
   return <MobileLayoutProvider value={mobile}><ThreadClientProvider client={client}><div>
     <header ref={setEntryHost} style={{ height: 40, display: 'flex', justifyContent: 'flex-end' }} />
     <main className="content task-content" style={{ height: 'calc(100vh - 40px)', width: '100vw' }}>
-    {visible && <ThreadWorkspace snapshot={snapshot} projectName={null} optimisticMessages={acceptedMessages} agents={currentProfiles} busy={false} stopping={false}
+    {missionVisible ? <div style={{ margin: 32 }}><MissionDescriptionComposer ref={mission} identity="member-search-mission"
+      content={missionContent} agents={currentProfiles} memberAgentIds={['lead']} disabled={false}
+      onChange={setMissionContent} onPasteFiles={() => {}} /></div>
+      : visible && <ThreadWorkspace snapshot={snapshot} projectName={null} optimisticMessages={acceptedMessages} agents={currentProfiles} busy={false} stopping={false}
       detailEntryHost={entryHost}
       inspectorVisible={inspectorVisible} inspectorTab={inspectorTab}
       onOpenInspector={tab => { setInspectorTab(tab); setInspectorVisible(true) }}
@@ -209,6 +228,8 @@ window.addEventListener('error', e => errors.push(String(e.error?.stack ?? e.mes
 window.addEventListener('unhandledrejection', e => errors.push(String(e.reason)))
 createRoot(document.getElementById('root')!).render(<Fixture />)
 Object.assign(window, { invitationTest: {
+  mission: (visible: boolean) => showMission(visible),
+  missionContent: () => flushMission(),
   state: () => ({ calls, submissions, errors, clipboardWrites, memberIds: visibleSnapshot.members.map(member => member.agentId), outsidePresence: visibleProfiles.find(profile => profile.agentId === 'outside')?.presence, text: document.getElementById('camp-message')?.textContent,
     atoms: document.querySelectorAll('[data-composer-atom="member"]').length,
     publishedMentions: [...document.querySelectorAll<HTMLElement>('.message-bubble [data-agent-id="outside"]')].map(token => ({ label: token.textContent, unavailable: token.classList.contains('is-unavailable'), interactive: token.classList.contains('is-interactive') })),

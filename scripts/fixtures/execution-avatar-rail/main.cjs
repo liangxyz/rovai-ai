@@ -617,17 +617,18 @@ app.whenReady().then(async () => {
     await key('Up')
     const bottomStable = await beginBottom()
     await moveBottom(bottomOrigin.min - 80)
-    // Cancel before the detent expires, then ensure no delayed close revives the gesture.
+    // Cancel an armed fold and ensure no delayed close revives the gesture.
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
     window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
     await stopBottom(); await new Promise(resolve => setTimeout(resolve, 400))
     bottomNear((await bottomState()).height, bottomStable.height)
     assert.equal((await bottomState()).stored, bottomStable.stored)
     await beginBottom(); await moveBottom(bottomOrigin.min - 80)
-    bottomNear((await bottomState()).height, bottomOrigin.min, 'Fast movement must pause visibly')
-    await new Promise(resolve => setTimeout(resolve, 220)); await stopBottom()
     await new Promise(resolve => setTimeout(resolve, 220))
-    assert.equal(await bottomState(), null, 'Mouseup during collapse finishes closing the detail')
+    bottomNear((await bottomState()).height, 0, 'Continued travel folds the drawer before release')
+    await stopBottom()
+    await new Promise(resolve => setTimeout(resolve, 220))
+    assert.equal(await bottomState(), null, 'Immediate release beyond the threshold closes the detail')
     assert.ok(await run('!!document.querySelector(".run-pulse-bottom")'), 'The execution toolbar remains available')
     await click('.run-pulse-bottom .run-pulse-chip[data-agent-id="agent-1"]')
     assert.equal((await bottomState()).stored, bottomStable.stored, 'Folding keeps the prior stable height')
@@ -1005,7 +1006,7 @@ app.whenReady().then(async () => {
       'selection and node retention', 'status refresh/reopen', 'Task navigation/repeated target', '8-member no overflow',
       'long prose containment', 'single-line command and full expanded output',
       'waiting Delivery queue cards', 'independent multi-input popovers', 'Run card geometry and square overview avatars',
-      'Day/Night', '1040/1440/2560/200% layout', 'reduced motion', 'forced colors', 'bottom dock retained', 'bottom minimum dwell/fold/cancel/restore',
+      'Day/Night', '1040/1440/2560/200% layout', 'reduced motion', 'forced colors', 'bottom dock retained', 'bottom minimum/fast release/cancel/restore',
       '0/1/2/16/48 delivery recipients', 'source attribution and deduplication', 'single-line complete avatars',
       'overflow list keyboard scrolling and focus return', 'nested Escape', 'recipient resize and placement preservation',
       'four-grid overview and centering in three placements', 'shared execution icon geometry',

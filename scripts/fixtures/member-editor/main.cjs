@@ -143,6 +143,7 @@ app
         observed.push(await rosterWidth())
       }
       window.webContents.sendInputEvent({ type: 'mouseUp', x: start.x + (Array.isArray(widths.at(-1)) ? widths.at(-1)[0] : widths.at(-1)) - start.width, y: start.y, button: 'left', clickCount: 1 })
+      await wait('!document.querySelector(".member-editor-roster-shell").classList.contains("is-resizing")')
       await settle()
       assert.equal(await run('document.querySelector(".member-editor-roster-shell").classList.contains("is-resizing")'), false)
       return observed
@@ -225,9 +226,10 @@ app
       assert.deepEqual(await dragRoster([179, 170]), [192, 192])
       await new Promise(resolve => setTimeout(resolve, 400))
       assert.equal(await rosterWidth(), 192)
-      assert.deepEqual(await dragRoster([[120, 400], 190, 216]), [76, 76, 216])
+      assert.deepEqual(await dragRoster([[120, 400], 190, 216]), [76, 192, 218])
       await key('Home')
-      assert.deepEqual(await dragRoster([[120, 400]]), [76])
+      await dragRoster([120])
+      assert.equal(await rosterWidth(), 76, 'Fast release folds without a dwell requirement')
       assert.equal(await run('!!document.querySelector(".member-sidebar.is-collapsed")'), true)
       await click('.member-roster-resizer'); await key('Right')
       assert.equal(await rosterWidth(), 256)

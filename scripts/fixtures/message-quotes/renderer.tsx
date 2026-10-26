@@ -58,8 +58,10 @@ function click(selector: string, step: string) {
   check(button, `${step}: missing ${selector}`)
   button!.click()
 }
+const plainBody = (index: number) => messages[index].authorType === 'user' ? messages[index].body.replace(/\r\n/gu, '\n') : undefined
+const project = (index: number) => projectQuoteBody(root(index), plainBody(index))
 function select(index: number, start = 0, end?: number) {
-  const projection = projectQuoteBody(root(index))
+  const projection = project(index)
   const first = projection.positions.find(position => position.end > start)!
   const last = projection.positions.find(position => position.end >= (end ?? Array.from(projection.text).length))!
   const range = document.createRange()
@@ -77,7 +79,9 @@ function messageBody(index: number): ReactNode {
     truncate forceExpanded={false}
   />
   const entry = cases[index]
-  if (entry?.authorType === 'user') return entry.source
+  if (entry?.authorType === 'user') return entry.content
+    ? <StructuredMessageBody body={entry.source} content={entry.content as StructuredThreadMessageContent}
+      members={[{ agentId: 'agent_a', displayName: '芝士*' }] as ThreadSnapshot['members']} /> : entry.source
   if (!entry?.content) return <SafeMarkdown>{messages[index].body}</SafeMarkdown>
   const content = entry.content as StructuredThreadMessageContent
   const members = [{ agentId: 'agent_a', displayName: '芝士*' }] as ThreadSnapshot['members']
@@ -93,7 +97,7 @@ function Fixture() {
   latest = quotes
   const add = async (selection: MessageQuoteSelection) => {
     if (fail) throw { kind: 'infrastructure_failure', code: 'CORE_REQUEST_FAILED', message: 'quote.limit_exceeded', retryable: false, generation: 1, details: {} }
-    const locator = { projectionVersion: 3 as const, startScalar: selection.startScalar, endScalar: selection.endScalar, projectionDigest: await quoteProjectionDigest(projectQuoteBody(root(Number(selection.messageId.split('-')[1]))).text) }
+    const locator = { projectionVersion: 3 as const, startScalar: selection.startScalar, endScalar: selection.endScalar, projectionDigest: await quoteProjectionDigest(project(Number(selection.messageId.split('-')[1])).text) }
     setQuotes(current => [...current, { locator, version: 1, quoteId: crypto.randomUUID(),
       source: { scope: 'camp', threadId: 'fixture', messageId: selection.messageId }, authorAtCapture: { type: 'agent', agentId: 'agent_1', displayName: '叮叮' },
       text: selection.text, format: 'plain_text', capturedAt: '2026-09-09T00:00:00Z', sourceContentDigest: 'fixture', snapshotDigest: 'fixture' }])
@@ -154,12 +158,25 @@ Object.assign(window, { quoteTest: {
       window.getSelection()!.removeAllRanges(); await frames()
     }
     for (const [index, entry] of cases.entries()) {
-      check(projectQuoteBody(root(index)).text === entry.text, `projection: ${entry.name}: ${JSON.stringify(projectQuoteBody(root(index)).text)}`)
+      check(project(index).text === entry.text, `projection: ${entry.name}: ${JSON.stringify(project(index).text)}`)
       if (entry.strong) check(JSON.stringify([...root(index).querySelectorAll('strong')].map(node => node.textContent)) === JSON.stringify(entry.strong),
         `strong markup: ${entry.name}`)
       select(index)
       const candidate = readMessageQuoteSelection(window.getSelection(), 'thread:fixture', id => messages.find(message => message.id === id))
       check(candidate?.selection.text === entry.text, `selection: ${entry.name}`)
+      check(candidate?.selection.bodyAtSelection === entry.source, `original body remains the revision guard: ${entry.name}`)
+      for (const excerpt of entry.selections ?? []) {
+        const start = Array.from(entry.text.slice(0, entry.text.indexOf(excerpt))).length
+        select(index, start, start + Array.from(excerpt).length)
+        const selected = readMessageQuoteSelection(window.getSelection(), 'thread:fixture', id => messages.find(message => message.id === id))
+        check(selected?.selection.text === excerpt && selected.selection.startScalar === start, `reference excerpt: ${entry.name}: ${excerpt}`)
+        const snapshot: MessageQuoteSnapshot = { version: 1, quoteId: 'reference-quote',
+          source: { scope: 'camp', threadId: 'fixture', messageId: messages[index].id }, authorAtCapture: { type: 'user', displayName: '用户' },
+          text: excerpt, format: 'plain_text', capturedAt: '2026-10-23T00:00:00Z', sourceContentDigest: 'fixture', snapshotDigest: 'fixture',
+          locator: { projectionVersion: 3, startScalar: start, endScalar: start + Array.from(excerpt).length, projectionDigest: await quoteProjectionDigest(entry.text) } }
+        await revealMessageQuote(snapshot, root(index), plainBody(index))
+        check(root(index).dataset.quoteLocated === 'true', `reference excerpt reveal: ${entry.name}`)
+      }
       if (entry.currentUserName) check(candidate?.selection.currentUserDisplayName === entry.currentUserName, 'capture only the displayed local-user token name')
       check(!readMessageQuoteSelection(window.getSelection(), 'thread:other', id => messages.find(message => message.id === id)), 'cross owner')
     }

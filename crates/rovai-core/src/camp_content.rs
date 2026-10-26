@@ -150,6 +150,18 @@ pub enum ComposerAtom {
         label_fallback: Option<String>,
     },
     AllMembers,
+    ThreadReference {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        #[serde(rename = "labelFallback", skip_serializing_if = "Option::is_none")]
+        label_fallback: Option<String>,
+    },
+    MissionReference {
+        #[serde(rename = "missionId")]
+        mission_id: String,
+        #[serde(rename = "labelFallback", skip_serializing_if = "Option::is_none")]
+        label_fallback: Option<String>,
+    },
     Skill {
         #[serde(rename = "skillId")]
         skill_id: String,
@@ -178,6 +190,18 @@ pub enum StructuredThreadMessageSegment {
         skill_id: String,
         #[serde(rename = "nameAtSend")]
         name_at_send: String,
+    },
+    ThreadReference {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        #[serde(rename = "titleAtSend")]
+        title_at_send: String,
+    },
+    MissionReference {
+        #[serde(rename = "missionId")]
+        mission_id: String,
+        #[serde(rename = "titleAtSend")]
+        title_at_send: String,
     },
     ExternalQuote {
         #[serde(rename = "senderDisplayName")]
@@ -235,6 +259,38 @@ pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
                     text_bytes = text_bytes
                         .checked_add(label.len())
                         .context("Composer Document size overflow")?;
+                }
+            }
+            ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::ThreadReference {
+                        thread_id,
+                        label_fallback,
+                    },
+            } => {
+                crate::thread_reference::validate_id(
+                    crate::thread_reference::ReferenceKind::Thread,
+                    thread_id,
+                )?;
+                if let Some(label) = label_fallback {
+                    crate::thread_reference::validate_label(label)?;
+                    text_bytes += label.len();
+                }
+            }
+            ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::MissionReference {
+                        mission_id,
+                        label_fallback,
+                    },
+            } => {
+                crate::thread_reference::validate_id(
+                    crate::thread_reference::ReferenceKind::Mission,
+                    mission_id,
+                )?;
+                if let Some(label) = label_fallback {
+                    crate::thread_reference::validate_label(label)?;
+                    text_bytes += label.len();
                 }
             }
             ComposerSegment::Atom {
@@ -305,6 +361,28 @@ pub fn composer_document_to_content(
                 } => StructuredThreadMessageSegment::MemberMention {
                     agent_id: agent_id.clone(),
                 },
+                // Provisional draft labels are never publication authority. The send transaction
+                // replaces these with live titles after command replay has been ruled out.
+                ComposerSegment::Atom {
+                    atom:
+                        ComposerAtom::ThreadReference {
+                            thread_id,
+                            label_fallback,
+                        },
+                } => StructuredThreadMessageSegment::ThreadReference {
+                    thread_id: thread_id.clone(),
+                    title_at_send: label_fallback.clone().unwrap_or_else(|| thread_id.clone()),
+                },
+                ComposerSegment::Atom {
+                    atom:
+                        ComposerAtom::MissionReference {
+                            mission_id,
+                            label_fallback,
+                        },
+                } => StructuredThreadMessageSegment::MissionReference {
+                    mission_id: mission_id.clone(),
+                    title_at_send: label_fallback.clone().unwrap_or_else(|| mission_id.clone()),
+                },
                 ComposerSegment::Atom {
                     atom: ComposerAtom::AllMembers,
                 } => StructuredThreadMessageSegment::AllMembersMention,
@@ -347,6 +425,24 @@ pub fn composer_document_from_content(
                 atom: ComposerAtom::Skill {
                     skill_id,
                     name_at_send,
+                },
+            },
+            StructuredThreadMessageSegment::ThreadReference {
+                thread_id,
+                title_at_send,
+            } => ComposerSegment::Atom {
+                atom: ComposerAtom::ThreadReference {
+                    thread_id,
+                    label_fallback: Some(title_at_send),
+                },
+            },
+            StructuredThreadMessageSegment::MissionReference {
+                mission_id,
+                title_at_send,
+            } => ComposerSegment::Atom {
+                atom: ComposerAtom::MissionReference {
+                    mission_id,
+                    label_fallback: Some(title_at_send),
                 },
             },
             StructuredThreadMessageSegment::CurrentUserMention { .. }
@@ -408,6 +504,28 @@ pub fn render_composer_plain_text(
                 rendered.push_str(&label);
             }
             ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::ThreadReference {
+                        thread_id,
+                        label_fallback,
+                    },
+            } => rendered.push_str(&crate::thread_reference::render_link(
+                crate::thread_reference::ReferenceKind::Thread,
+                thread_id,
+                label_fallback.as_deref().unwrap_or(thread_id),
+            )),
+            ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::MissionReference {
+                        mission_id,
+                        label_fallback,
+                    },
+            } => rendered.push_str(&crate::thread_reference::render_link(
+                crate::thread_reference::ReferenceKind::Mission,
+                mission_id,
+                label_fallback.as_deref().unwrap_or(mission_id),
+            )),
+            ComposerSegment::Atom {
                 atom: ComposerAtom::AllMembers,
             } => rendered.push_str("@所有队员"),
             ComposerSegment::Atom {
@@ -437,6 +555,28 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
                 if agent_id.is_empty() || agent_id.trim() != agent_id || agent_id.len() > 256 {
                     anyhow::bail!("Member Mention requires a canonical Agent ID");
                 }
+            }
+            StructuredThreadMessageSegment::ThreadReference {
+                thread_id,
+                title_at_send,
+            } => {
+                crate::thread_reference::validate_id(
+                    crate::thread_reference::ReferenceKind::Thread,
+                    thread_id,
+                )?;
+                crate::thread_reference::validate_label(title_at_send)?;
+                text_bytes += title_at_send.len();
+            }
+            StructuredThreadMessageSegment::MissionReference {
+                mission_id,
+                title_at_send,
+            } => {
+                crate::thread_reference::validate_id(
+                    crate::thread_reference::ReferenceKind::Mission,
+                    mission_id,
+                )?;
+                crate::thread_reference::validate_label(title_at_send)?;
+                text_bytes += title_at_send.len();
             }
             StructuredThreadMessageSegment::AllMembersMention => {}
             StructuredThreadMessageSegment::CurrentUserMention { user_id } => {
@@ -644,6 +784,22 @@ fn render_plain_text_with_user_offsets(
                     .ok_or_else(|| anyhow!("Member Mention identity does not exist"))?;
                 rendered.push_str(&render_member_mention_plain_text(&name));
             }
+            StructuredThreadMessageSegment::ThreadReference {
+                thread_id,
+                title_at_send,
+            } => rendered.push_str(&crate::thread_reference::render_link(
+                crate::thread_reference::ReferenceKind::Thread,
+                thread_id,
+                title_at_send,
+            )),
+            StructuredThreadMessageSegment::MissionReference {
+                mission_id,
+                title_at_send,
+            } => rendered.push_str(&crate::thread_reference::render_link(
+                crate::thread_reference::ReferenceKind::Mission,
+                mission_id,
+                title_at_send,
+            )),
             StructuredThreadMessageSegment::AllMembersMention => rendered.push_str("@所有队员"),
             StructuredThreadMessageSegment::CurrentUserMention { user_id } => {
                 if user_id != CURRENT_USER_ID {
@@ -705,7 +861,9 @@ fn segment_projects_nonempty(segment: &StructuredThreadMessageSegment) -> bool {
         | StructuredThreadMessageSegment::AllMembersMention
         | StructuredThreadMessageSegment::CurrentUserMention { .. }
         | StructuredThreadMessageSegment::SkillMention { .. }
-        | StructuredThreadMessageSegment::ExternalQuote { .. } => true,
+        | StructuredThreadMessageSegment::ExternalQuote { .. }
+        | StructuredThreadMessageSegment::ThreadReference { .. }
+        | StructuredThreadMessageSegment::MissionReference { .. } => true,
     }
 }
 
@@ -1031,6 +1189,28 @@ mod tests {
                 },
             }
         );
+        let thread_id = crate::camp_id::ThreadId::new().to_string();
+        let mission_id = format!("rvm_{}", uuid::Uuid::now_v7().simple());
+        for (kind, field, id) in [
+            ("thread_reference", "threadId", thread_id),
+            ("mission_reference", "missionId", mission_id),
+        ] {
+            let atom = serde_json::json!({"type": kind, field: id, "labelFallback": "登录 [旧]"});
+            let input = serde_json::json!({"version":2,"segments":[{"kind":"atom","atom":atom}]});
+            let document = parse_composer_document_json(&input.to_string()).unwrap();
+            let content = composer_document_to_content(&document).unwrap();
+            assert_eq!(composer_document_from_content(&content).unwrap(), document);
+            assert!(member_mention_ids(&content).is_empty());
+            assert_eq!(
+                render_composer_plain_text(&document, |_| None).unwrap(),
+                render_plain_text(&content, |_| None).unwrap()
+            );
+            for field in ["titleAtSend", "body", "unknown"] {
+                let mut forged = input.clone();
+                forged["segments"][0]["atom"][field] = "forged".into();
+                assert!(parse_composer_document_json(&forged.to_string()).is_err());
+            }
+        }
     }
 
     #[test]

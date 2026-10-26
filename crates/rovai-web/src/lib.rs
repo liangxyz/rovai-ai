@@ -671,6 +671,10 @@ async fn events(
                     let mut payload = json!({"epoch":state.epoch,"revision":revision});
                     if let Ok(change) = &result {
                         if change["method"] == "preferences.tasks_changed" { payload["tasksChanged"] = json!(true); }
+                        if rovai_core::thread_reference::invalidates_directory(change["method"].as_str().unwrap_or_default(), &change["params"]) {
+                            payload["referencesChanged"] = json!(true);
+                        }
+                        if change["method"] == "teams.changed" { payload["teamsChanged"] = json!(true); }
                         if matches!(change["method"].as_str(), Some("notification_episode.changed" | "notification_episode.preference_changed")) {
                             payload["notificationsChanged"] = json!(true);
                         }
@@ -733,6 +737,7 @@ async fn static_file(state: &WebState, relative: &str) -> Response {
         Some("webp") => "image/webp",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("svg") => "image/svg+xml",
+        Some("ico") => "image/vnd.microsoft.icon",
         _ => return error(StatusCode::NOT_FOUND, "asset_not_found"),
     };
     let Ok(metadata) = tokio::fs::metadata(&path).await else {

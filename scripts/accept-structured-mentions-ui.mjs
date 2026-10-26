@@ -38,6 +38,7 @@ const outputDir = suppliedOutputDir
 const acceptanceHome = join(fixtureRoot, 'home')
 const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT ?? 9491)
 const skillPickerOnly = cliArguments.includes('--skill-picker-only')
+const memberSearchOnly = cliArguments.includes('--member-search-only')
 const skillContextSmoke = cliArguments.includes('--skill-context-smoke')
 const imeNewlineOnly = cliArguments.includes('--ime-newline-only')
 const cutOnly = cliArguments.includes('--cut-only')
@@ -48,7 +49,7 @@ const acceptanceExecutablePath = skillContextSmoke
   ? join(runtimeTempDir, 'codex-acceptance-runtime.mjs')
   : '/usr/bin/true'
 const targetMembers = [
-  { agentId: 'agent_1', displayName: '叮叮', teamRole: '游学者' },
+  { agentId: 'agent_1', displayName: memberSearchOnly ? '爱丽丝' : '叮叮', teamRole: memberSearchOnly ? 'UI 设计师' : '游学者' },
   { agentId: 'agent_2', displayName: '芝士', teamRole: '鉴定士' },
   { agentId: 'agent_3', displayName: '咕咕', teamRole: '巡夜人' }
 ]
@@ -239,8 +240,8 @@ try {
     return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
   })()`)
   const initialSnapshot = await request(running.cdp, 'threads.snapshot', { threadId })
-  assert(initialSnapshot.schemaVersion === 35,
-    `Thread snapshot schema is not v35: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 36,
+    `Thread snapshot schema is not v36: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -249,6 +250,37 @@ try {
   await waitForSelector(running.cdp, '#camp-message.structured-mention-editor')
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'`)
+  if (memberSearchOnly) {
+    const checks = []
+    const queries = [['aili', 'Enter'], ['als', 'Tab'], ['ＡＩＬＩ', 'Enter'], ['爱li', 'Tab'], ['uisj', 'Enter']]
+    for (const [query, key] of queries) {
+      await focusEditorAtEnd(running.cdp)
+      await running.cdp.send('Input.insertText', { text: '@' + query })
+      await waitForExpression(running.cdp, `document.querySelector('.ref-options')?.getAttribute('aria-busy') === 'false'
+        && document.querySelector('.ref-filters [aria-selected=true]')?.textContent === '队员'
+        && !!document.querySelector('.structured-mention-menu [data-agent-id="agent_1"]')`)
+      if (!checks.length) await capture(running.cdp, join(outputDir, 'member-pinyin-candidates.png'))
+      for (const type of ['keyDown', 'keyUp']) await running.cdp.send('Input.dispatchKeyEvent', {
+        type, key, code: key, windowsVirtualKeyCode: key === 'Enter' ? 13 : 9
+      })
+      checks.push({ query, key })
+      const expected = Array.from({ length: checks.length }, () => '@爱丽丝 ').join('')
+      const draft = await waitForValue(() => readComposerDraft(running.cdp, threadId),
+        draft => draft.body === expected, 10_000)
+      const atoms = draft.content.segments.filter(segment => segment.kind === 'atom').map(segment => segment.atom)
+      assert(deepEqual(atoms, checks.map(() => ({ type: 'member', agentId: 'agent_1', labelFallback: '爱丽丝' }))),
+        `Pinyin selection changed the identity: ${JSON.stringify(draft)}`)
+    }
+    await running.cdp.send('Input.insertText', { text: '光标检查' })
+    await waitForExpression(running.cdp, `document.querySelector('#camp-message')?.textContent.endsWith(' 光标检查')`)
+    const snapshot = await request(running.cdp, 'threads.snapshot', { threadId })
+    assert(snapshot.messages.length === 0 && snapshot.agentRuns.length === 0, 'Candidate selection sent a message or started a Run')
+    await capture(running.cdp, join(outputDir, 'member-pinyin-selected.png'))
+    result = { acceptance: 'member-pinyin-ui', appPath, outputDir, threadId, checks,
+      noSend: true, stableIdentity: true, trailingSpaceAndCaret: true,
+      clipboardItemCountBeforeTest: clipboardArchive.length, clipboardRestored: false, isolatedUserDataRemoved: false }
+    break acceptance
+  }
   if (cutOnly) {
     clipboardTouched = true
     const composerCutInspection = await acceptComposerCutRegression(running.cdp, threadId)
@@ -1910,6 +1942,9 @@ async function installAcceptanceRuntime(path, agentIds) {
         default_permission_config_json =
           '{"adapterKind":"codex-cli","schemaVersion":1,"values":{"sandbox_mode":"workspace-write","approval_policy":"on-request"}}'
     WHERE id IN (${ids});
+  `)
+  if (memberSearchOnly) await runSql(path, `
+    UPDATE agent_profile SET display_name = '爱丽丝', team_role = 'UI 设计师' WHERE id = 'agent_1';
   `)
 }
 

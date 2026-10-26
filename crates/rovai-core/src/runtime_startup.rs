@@ -311,6 +311,7 @@ pub fn prepare_save(
     let visible = public(current.clone());
     let mut value = editable(kind, &visible.configuration);
     let mut conflicts = Vec::new();
+    let mut changed = Vec::new();
     let mut seen = BTreeSet::new();
     for edit in &edits {
         ensure!(
@@ -318,13 +319,17 @@ pub fn prepare_save(
             "修改字段无效或重复。"
         );
         let now = value_at(&value, &edit.path).clone();
-        if now != edit.before && now != edit.after {
+        if now == edit.after {
+            continue;
+        }
+        if now != edit.before {
             conflicts.push(FieldConflict {
                 edit: edit.clone(),
                 current: now,
             });
         }
         set_at(&mut value, &edit.path, edit.after.clone())?;
+        changed.push(edit.clone());
     }
     let mut configuration = current.configuration.clone();
     configuration.program_path = serde_json::from_value(value["programPath"].clone())?;
@@ -370,7 +375,7 @@ pub fn prepare_save(
     Ok(PreparedSave {
         current,
         configuration: configuration.validated(cfg!(windows))?,
-        edits,
+        edits: changed,
         conflicts,
     })
 }

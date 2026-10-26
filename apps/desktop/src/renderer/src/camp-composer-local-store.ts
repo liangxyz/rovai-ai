@@ -1,3 +1,4 @@
+import { validReferenceAtom, isReferenceAtom, projectReference } from './thread-reference'
 import type {
   ThreadComposerContinuationIntentView,
   ThreadComposerDraftView,
@@ -39,6 +40,7 @@ function isComposerDocument(value: unknown): value is ComposerDocument {
     if (!object(segment)) return false
     if (segment.kind === 'text') return string(segment.text)
     if (segment.kind !== 'atom' || !object(segment.atom)) return false
+    if (segment.atom.type === 'thread_reference' || segment.atom.type === 'mission_reference') return validReferenceAtom(segment.atom)
     if (segment.atom.type === 'all_members') return true
     if (segment.atom.type === 'member') {
       return string(segment.atom.agentId, 512)
@@ -216,6 +218,7 @@ export function composerBodyForContent(
     const atom = segment.atom
     if (atom.type === 'all_members') return '@所有成员'
     if (atom.type === 'skill') return `$${atom.nameAtSend}`
+    if (isReferenceAtom(atom)) return projectReference(atom)
     return `@${members.find((member) => member.agentId === atom.agentId)?.displayName
       ?? atom.labelFallback
       ?? atom.agentId}`

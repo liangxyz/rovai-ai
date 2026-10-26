@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-22
+last_updated: 2026-10-25
 ---
 
 # Runtime Catalog Boundaries
@@ -45,9 +45,9 @@ Product Runtime Catalog 当前包含十九种已实现 Adapter。Preview 与它�
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
-普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline、Command Code 保留 closed identity 和历史 reader，但不进入
+普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline 保留 closed identity 和历史 reader，但不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
-selector 同样不展示 Cursor、Cline 与 Command Code；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
+selector 同样不展示 Cursor 与 Cline；Command Code 进入公开目录，macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。成员选项在当前主机上继续经过 Runtime Platform Admission，Renderer 不另建平台白名单。
 
 `qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 保留缺失资格证据，检查详情说明记录未齐备。
 `qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
@@ -59,39 +59,52 @@ selector 同样不展示 Cursor、Cline 与 Command Code；其他成员选项来
 <a id="command-code-研究接入边界"></a>
 ## Command Code ACP 实施边界
 
-`command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
-Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
-原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
-[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)曾仅在 macOS arm64 开放开发 Preview。
-2026-10-09 按 User 105 撤回 Preview，所有平台为 NotQualified；Settings、新手引导、成员/Skill 选择、
-安装引导与监控筛选不提供 Command Code。ACP 实现、既有配置和历史 reader 保留；没有 qualification
-evidence，不声称 First-Class。headless 传输、事件归约器、专属测试及探针已删除，历史报告指向退役前固定提交。
+`command-code-cli` 以官方 1.88.0 为基线，接入只有用户原生 HOME、官方 `--mod`、标准 ACP
+与现有共享 Fleet。Adapter 不复制认证/配置、不镜像 HOME、不遍历原生 Mod/MCP，不管理用户原生历史。
+完整字段与行为见 [Runtime Launch and Verification v72](../contracts/runtime-launch-and-verification-v72.md)。
 
-Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
-Host 私有 Home 保留原生 auth/provider/Skill/Mod/Session 路径，仅覆盖私有 settings 的 `mods.paths` 与原生 `mcp.json`，通过
-官方 `appendSystemPrompt({state})` 按 `state.sessionId` 读取完整冻结 Bootstrap。工厂注册完成后写入带
-随机 nonce/当前 PID 的 readiness；Core 在 initialize 后校验，缺失则关闭 Host 且不发 prompt。每次
-hook 检查绑定、摘要和预算，异常直接停止进程，避免上游捕获普通异常后继续。A/B 不共享 active Bootstrap 指针，
-cold Host 重新绑定原冻结字节。原生 System 保留并追加 B，用户 prompt 只含 P；不改项目 AGENTS.md。
+共享 Fleet 对 Command 显式采用 Native Binding 身份策略：所属范围、成员、Binding ID、canonical cwd
+一致且进程健康空闲时复用。配置摘要、安装 generation、程序指纹均不参与其复用或恢复判断；历史摘要仍可读。
+Command 的入口/指纹验证和必要刷新只在 Fleet cold spawn 执行；warm 仍保留显式禁用/删除安装准入。
+显式启动设置和 MCP 实际修改走既有 invalidation，MCP 只影响有效工具变化的成员；增减成员不影响保留
+成员，关闭 Server 的修改和无变化保存不退役。保存先释放配置/数据库锁，再等待 Fleet；安装命令 replay
+与已达到目标值的保存不重复退役。
+忙碌进程结束后退役，新 Host 保留精确旧 Session ID。
+成员环境保存也只使用本次操作的实际变更事实；仅改 JSON 排版和命令重放不退役 Host。
+外部原生配置变化不触发扫描、比较或隐式新 Session；其他 Runtime 的策略不变。
 
-配置 digest 覆盖原生认证/provider/settings、Mod 源、环境与 MCP；项目 MCP 按原生 projects 下的具名
-配置文件保守失效，不读取历史。显式模型来自 ACP 真实目录；原生配置中的默认 BYOK ID 若不在目录中，
-以 runtime-default 哨兵保留默认选择。该 ID 不伪装成 session/set_model 可选项，实际模型仍按原生 Session 记录。
-原生五种权限原值传给 session/set_mode，默认 bypass，审批响应仍由共享 ACP 原生请求路径承载。
-External MCP 合入 Host 私有 Home 的原生 `mcp.json`，session mcpServers 保持空；保留原生定义、工作目录和已解析的环境/请求头，同名采用已存在的 `native_wins_skip`，先通过官方 `mcp list`
-发现有效名称并冻结冲突结果。发现失败/格式漂移阻断投影；不把被原生遮蔽的 Assignment 标为可用。
-原生连接失败可能继续建立 Session，因此握手和配置可见性不是 MCP 调用成功证明。
+Bootstrap 的 `managed_system_prompt` 语义不变：完整冻结 B 经官方 `appendSystemPrompt({state})`
+追加到原生 System，user 只有 P。每 Host 一个 Mod，正文通过已有 ACP 的 `/rovai-bootstrap` 控制命令
+保存在 Mod 内存；初始化只校验一次 revision/局部 nonce/PID 归属并删除 ready 文件。没有 Bootstrap
+正文文件、HOME fallback、专属池/锁/缓存。原输入确认见 [revision 5](../versions/v1.72/model-context-change-command-code-acp.md)；
+其中旧物理交付描述由 v72 替代，冻结内容、选择、上下文版本和证据边界不变。
+每个 Run 发送前交付该 Run 已冻结的 B，控制成功后才发送业务输入；warm 与 cold 使用相同交付时点。
+控制失败停止准备，不使用旧正文继续执行；控制回复不形成业务终态或用量。
+成员编辑不回写正在执行的 Run；后继 Run 使用其准备的新身份，同 Run 重试仍用原冻结字节。
+不比较历史正文、不触发 Host 退役或额外补发，也不另建冻结管理器；具体时点见
+[实施记录](../versions/v1.72/command-code-native-simplification.md#成员身份与长期指令何时生效)。
+大小预算只作用于正文，不因 JSON 转义增长而拒绝有效内容。状态检查与其他 ACP 共用错误分类和脱敏，
+不将认证、协议或网络错误统一改写成 provider 配置提示。
 
-此前 1.74.1 共享 Core Host 门禁和同 PID 成员 A→B→A 控制面已过；以原生默认 sub2api/gpt-6-sol 完成
-真实生成、exact cold、文件工具、原生 allow/deny/cancel、手动及自动压缩后连续性。这不是跨模型切换证据。隔离 App 的首次/warm/
-Core 重启、CLI 公开发送、文件 +/− 与 272000 Context 窗口通过。费用与非零命令状态等未取得结构化字段的
-边界保持未知，不提升 First-Class；详见[完整 Checklist 对照](../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
+分配 MCP 经 `session/new|load|resume.mcpServers`，原生同名配置由 CLI 自动优先。1.88 原生 stdio 使用
+Session cwd；默认／相同目录直接传 command/args，只有不同 cwd 使用现有 argv launcher，不额外扫描目录。
+env/header 按 1.88 实测在 wire 边界转义一次以保留解析值；warm 不运行额外 CLI。
+冷恢复直接携带保存的精确 Session ID 调用原生 load/resume，不做 `session/list` 前置查询。
+采用原生尽力恢复，不额外证明历史完整；1.88 静默接受缺失 ID 的可能性保留，认证/网络错误不冒充缺失。
+显式模型来自真实 ACP 目录，ID（含 provider 前缀及碰撞别名）原样传递；不使用 `acp --model`。
 
-未完成项：1.74.1/1.79.1 ACP 模型目录不包含自定义 BYOK，`session/set_model` 和
-`session/set_config_option` 拒绝这些 ID；1.79.1 `acp --model` 接受参数但未用于会话，不能绕过此缺口。
-已测 BYOK 的 MCP 发现成功但实际调用未通过；费用、部分命令状态等原生缺失字段仍未知。
-[模型选择调查](../research/command-code-runtime/model-selection-2026-10-09.md)与
-[兼容性清单](../runtime-compatibility.md)分别保存原生失败和验收范围。
+同一 Mod 在 `onSessionStart` 从当前 active tools 中移除 `ask_user_question`，官方过滤器负责隐藏
+schema 与拒绝调用，不追加 fallback 或原生问卷界面。Skills 发现复用共享代码的 user/project
+`.commandcode/skills`、`.agents/skills` 来源；原生同名选择由 CLI 拥有，不生成投影副本。
+
+Migration 185 的闭集 identity 与既有历史保持。2026-10-25 按 User 要求开放 macOS Apple Silicon、Intel 与
+Windows x64，Linux x64 随独立目标机验收后开放；四行均采用既有 Preview 准入，可发现、配置、检查和执行；最低版本仍为 1.88.0 稳定版。
+Cline 的暂缓公开不变。Preview 不代表完整平台资格验收通过；不绑定虚构证据，
+不显示常驻实验标签。Linux 取舍见 [V1.72-D61](../versions/v1.72/decisions.md#v1-72-d61)，macOS/Windows 取舍见 [V1.72-D60](../versions/v1.72/decisions.md#v1-72-d60)。旧 1.74.1/1.79.1 BYOK
+目录缺口属于历史证据；1.88 的原生证据与尚未覆盖范围见[实施记录](../versions/v1.72/command-code-native-simplification.md)。
+官方 1.88 Windows 原生 ACP 的 MCP executable 含空格路径／复杂 argv 限制在不经过 Rovai 时同样可复现；
+普通 `node` 与简单参数可用。拒绝写权限会阻止文件修改，原生可能直接结束该轮而不发公开最终回复，
+此时 Core 如实报告缺失最终输出。上述边界不通过修改上游包、复制原生配置或新建进程机制掩盖。
 
 ## Cline 实施边界
 

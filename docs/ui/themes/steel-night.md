@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-10-20
+last_updated: 2026-10-25
 ---
 
 # Steel Night
@@ -13,7 +13,7 @@ last_updated: 2026-10-20
 
 - `theme_id`: `steel-night`
 - Display name: `Steel Night`
-- Runtime value: `ResolvedTheme = "night"`
+- Runtime mapping: `ThemeId = "night"`, `ResolvedTheme = "night"`
 
 ## Mode
 
@@ -21,13 +21,14 @@ Dark. `color-scheme: dark`.
 
 ## Design intent
 
-冷石墨表面与低饱和 Steel 为低光环境提供独立设计的亮度层级。Night 不是 Day 的算法反色，
-也不恢复 Meridian Night；它在相同组件、状态、身份映射和信息架构上替换根 Token。
+冷石墨表面与低饱和 Steel 品牌色；普通操作使用浅色动作 Token。深色层级独立配色，不自动反色。
 
 ## Surface hierarchy
 
 最深 Canvas 承载 rail 和主 surface，raised/input 再上提一级。会话与 Inspector 使用相邻但可辨的
 石墨表面及强分隔线。普通内容保持平面，只有真正浮层使用更深阴影。
+
+控件、品牌、状态、身份和 Memory 的色彩职责继承 [DESIGN.md](../../../DESIGN.md#colors)。
 
 ## Complete semantic token assignments
 
@@ -41,6 +42,7 @@ Dark. `color-scheme: dark`.
 | `--surface-subtle` | `#1a2024` |
 | `--surface-muted` | `#242d33` |
 | `--surface-selected` | `#222c33` |
+| `--scrollbar-thumb` | `#222c33` |
 | `--surface-hover` | `#1d252b` |
 | `--surface-sunken` | `#10161a` |
 | `--workspace-surface-subtle` | `#11171b` |
@@ -61,6 +63,7 @@ Dark. `color-scheme: dark`.
 | `--inspector-surface` | `#171d21` |
 | `--conversation-inspector-line` | `#53616b` |
 | `--home-surface` | `#181d21` |
+| `--settings-choice-selected-surface` | `#181d21` |
 | `--topbar` | `#151a1e` |
 | `--input` | `#1b2227` |
 | `--ink` | `#e7ecef` |
@@ -94,9 +97,6 @@ Dark. `color-scheme: dark`.
 | `--monitoring-output` | `#8ca7c6` |
 | `--monitoring-read` | `#86b098` |
 | `--monitoring-write` | `#c9aa75` |
-
-Reviewed settings locally alias brand actions to the existing neutral conversation-action tokens.
-MCP/Skills retain their current control tokens; diagnostic/status colors remain semantic.
 
 ### Brand, mention and supporting accents
 
@@ -194,11 +194,11 @@ Night 为相同十个格式家族提供独立亮度值；它们只表达文件�
 
 | Token | Value | Token | Value |
 |---|---:|---|---:|
-| `--attachment-web` | `#d0a46c` | `--attachment-code` | `#8fadc0` |
-| `--attachment-notes` | `#abb5bc` | `--attachment-pdf` | `#dc8b85` |
+| `--attachment-web` | `#c98572` | `--attachment-code` | `#70b0ae` |
+| `--attachment-notes` | `#abb5bc` | `--attachment-pdf` | `#d6857f` |
 | `--attachment-word` | `#80abd1` | `--attachment-sheet` | `#82b695` |
-| `--attachment-slide` | `#d2aa72` | `--attachment-image` | `#aa9bc6` |
-| `--attachment-archive` | `#bea773` | `--attachment-generic` | `#abb5bc` |
+| `--attachment-slide` | `#d0a46c` | `--attachment-image` | `#a89ac8` |
+| `--attachment-archive` | `#b58b68` | `--attachment-generic` | `#abb5bc` |
 
 ### Evidence and diff
 
@@ -269,32 +269,22 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 
 ## Brand, semantic, identity, and evidence color rules
 
-New Conversation workspace, member and Lead controls share the dialog field tokens and
-  standard input surface. Optional naming uses the same quiet form treatment.
-
-The same semantic separation as Day applies. Brightened identity colors retain stable ID mapping;
-they do not become statuses. Evidence and diffs remain neutral and structurally labeled. Narrative
-inline code uses the borderless `--inline-code-canvas`; Shell command results use
-`--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence border,
-while other evidence surfaces continue to use `--evidence-canvas`.
-Camp message prose, Runtime process copy in the bottom and Inspector execution surfaces, and
-Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
-`--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer; release notes,
-Tool results and other SafeMarkdown surfaces keep the shared defaults.
-In Night, this layer uses near-neutral gray code canvases and a quieter outline while retaining
-the existing typography and syntax highlighting.
-Public user and Agent message bodies share the Mist Gray
-`--conversation-user-message-surface` / matching `--conversation-user-message-line`, retaining a 1px border allocation.
-Single Chat user bubbles share these tokens; private Agent narrative remains transparent.
+Inherit [DESIGN.md](../../../DESIGN.md#colors). Inline code, Shell results and fenced evidence use their
+respective code tokens. Conversation prose, process copy and Markdown files use the dedicated
+`--conversation-inline-code-canvas`, `--conversation-code-block-canvas` and `--conversation-code-line` layer;
+release notes and Tool results keep shared SafeMarkdown defaults.
+Public user/Agent messages and Single Chat user bubbles share `--conversation-user-message-surface`
+and its matching 1px border allocation; private Agent narrative stays transparent.
 
 ## Contrast requirements
 
-Normal text must meet 4.5:1; focus, control boundaries and non-text state indicators must meet 3:1.
+Normal text must meet 4.5:1; control boundaries and non-text state indicators must meet 3:1.
+Focus behavior follows the [accessibility baseline](../qa/accessibility.md).
 All semantic labels and eight identity tokens are verified on their production Night surfaces.
 
 ## Prohibited substitutions
 
-Do not mechanically invert Day, reuse Meridian Night, reduce the palette to monochrome Steel, or
+Do not mechanically invert Day, reduce the palette to monochrome Steel, or
 add dark-only component markup and behavior.
 
 ## Implementation source
@@ -307,5 +297,3 @@ overridden there intentionally inherit shared geometry and aliases from `:root`.
 
 Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
 first-paint system resolution and switching themes while Draft, focus, selection and overlays are active.
-
-Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. Memory uses the achromatic `--memory-*` surface, input and text family, with the same neutral primary-action hierarchy. Add/revise actions use Memory ink on canvas (inverted at night); other workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns retain their existing tokens; the shared sidebar retains the production theme on the Memory route. Memory neutral overrides are scoped to content, notices and dialog portals, never the global navigation. Focus tokens do not require an extra outline, halo or focused input border.

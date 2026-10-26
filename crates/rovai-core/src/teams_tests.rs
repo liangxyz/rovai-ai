@@ -259,15 +259,20 @@ fn templates_preserve_custom_defaults_and_freeze_thread_guidance() {
     );
 
     draft.expected_version = Some(2);
-    draft.guidance = "花".repeat(1001);
-    assert_eq!(
-        save(&mut db, &envelope("team-too-long", draft.clone()))
+    for character in ["花", "🌸"] {
+        draft.guidance = character.repeat(10001);
+        assert_eq!(
+            save(
+                &mut db,
+                &envelope(&format!("team-too-long-{character}"), draft.clone())
+            )
             .unwrap()
             .result
             .code,
-        "team.invalid"
-    );
-    draft.guidance = "🌸".repeat(1000);
+            "team.invalid"
+        );
+    }
+    draft.guidance = "花🌸".repeat(5000);
     assert_eq!(
         save(&mut db, &envelope("team-max-guidance", draft.clone()))
             .unwrap()
@@ -275,7 +280,25 @@ fn templates_preserve_custom_defaults_and_freeze_thread_guidance() {
             .code,
         "team.saved"
     );
-    assert_eq!(list(&db).unwrap()[0].guidance.chars().count(), 1000);
+    assert_eq!(list(&db).unwrap()[0].guidance, draft.guidance);
+    let mut long_create = CreateThreadCommand::for_test(directory.to_string_lossy().into_owned());
+    long_create.team = Some(TeamSelection {
+        team_id: team.id.clone(),
+        expected_version: 3,
+    });
+    let long_thread = service
+        .create_camp(&mut db, &envelope("long-team-thread", long_create))
+        .unwrap();
+    assert_eq!(long_thread.result.code, created.result.code);
+    assert_eq!(
+        thread_guidance(
+            db.connection(),
+            long_thread.result.payload["threadId"].as_str().unwrap()
+        )
+        .unwrap()
+        .as_deref(),
+        Some(draft.guidance.as_str())
+    );
     let delete_command = envelope(
         "team-delete",
         DeleteTeamCommand {

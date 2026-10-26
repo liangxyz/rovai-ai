@@ -115,7 +115,7 @@ board return, retaining the same Camp draft and preview ownership. Renderer cons
 Core's cleanup capability and does not infer it from Mission status. Deletion defaults to leaving worktree and
 branch in place. Optional cleanup records its intent in the same transaction that deletes the Mission, removes
 the card immediately, and exposes only failed orphan work through the existing cleanup route; retained resources
-never enter that route. Protocol and failure behavior live in [Mission v12](../contracts/mission-v12.md); UI in
+never enter that route. Protocol and failure behavior live in [Mission v13](../contracts/mission-v13.md); UI in
 [Mission board](../ui/components/mission-board.md). Reasons for the durable workspace and simplified model
 interface are in [V1.59-D11](../versions/v1.59/decisions.md#v1-59-d11); the explicit minimal cleanup choice is in
 [V1.59-D14](../versions/v1.59/decisions.md#v1-59-d14). Global discovery and current-only mutation are explained
@@ -137,4 +137,13 @@ The shared Composer has a Mission mode for individual references and Enter-to-ne
 broadcast semantics in this surface. Renderer derives pending invitations from the current document and current
 membership; it does not maintain a second invite list. Core validates identities again at save. Model-facing
 Mission reads retain the existing readable `description` field, while UI reads receive the ordered structure.
-Storage/upgrade and legacy text replacement semantics are owned by [Mission v12](../contracts/mission-v12.md).
+Storage/upgrade and legacy text replacement semantics are owned by [Mission v13](../contracts/mission-v13.md).
+
+## Saved Team creation
+
+User creation may choose a saved Team or independent Custom roster. Mission delegates the optional Team
+selection and description member IDs to the existing Thread creation transaction. That owner resolves the
+authoritative roster and Lead, adds distinct mentioned members, and freezes nonempty guidance together with
+the Thread. Mission insertion remains in the same transaction. There is no live Team binding or Mission-specific
+Bootstrap path; editing/deleting Teams cannot change existing Mission Threads. General defaults only initialize
+the dialog; Mission creation never writes one-click preferences. See [Mission v13](../contracts/mission-v13.md).

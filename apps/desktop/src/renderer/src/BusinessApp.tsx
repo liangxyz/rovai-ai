@@ -1,3 +1,6 @@
+import { ThreadReferencePreviewProvider } from './ThreadReferencePreview'
+import { MessageReeditStore } from './message-reedit-store'
+import { MessageWithdrawal } from './message-withdrawal'
 import { useTeams } from './useTeams'
 import { TeamWorkspace, type TeamLeaveGuard } from './TeamWorkspace'
 import { MemoryChangeNotice } from './MemoryChangeNotice'
@@ -1013,6 +1016,8 @@ export function BusinessApp({
   const taskCapabilityRef = useRef(taskCapability.enabled)
   taskCapabilityRef.current = taskCapability.enabled
   const { client, preferences: uiPreferences, desktop } = environment
+  const reeditStore = useMemo(() => new MessageReeditStore(client.reeditScope ?? '',
+    client.reeditScope ? undefined : null), [client])
   const userAnchorNavigationFor = useThreadUserAnchorCache(client)
   const interfaceLanguage = useInterfaceLanguage()
   const onboardingLanguageRequest = useRef(0)
@@ -3818,6 +3823,7 @@ export function BusinessApp({
   }
 
   function hideAcceptedThreadDeletion(threadId: string): void {
+    reeditStore.deleteThread(threadId)
     deletingThreadIdsRef.current.add(threadId)
     const currentNavigation = navigationSnapshotRef.current
     if (currentNavigation) {
@@ -3942,20 +3948,31 @@ export function BusinessApp({
     }
   }
 
-  const withdrawThreadMessage = async (message: ThreadMessageView): Promise<void> => {
+  const withdrawalCallbacks = useRef({ refresh: refreshActiveThreadSnapshot, notify })
+  withdrawalCallbacks.current = { refresh: refreshActiveThreadSnapshot, notify }
+  const messageWithdrawal = useMemo(() => new MessageWithdrawal({
+    store: reeditStore,
+    request: request => client.withdrawMessage ? client.withdrawMessage(request)
+      : client.request<StoredCommandResult>('thread.messages.withdraw', request).then(result => ({ result, source: 'direct' })),
+    accepted: (_threadId, messageId) => {
+      setOptimisticThreadMessages(current => current.filter(entry => entry.message.id !== messageId))
+    },
+    refresh: threadId => withdrawalCallbacks.current.refresh(threadId),
+    notify: message => withdrawalCallbacks.current.notify(message),
+    rejectionMessage: commandFailureMessage
+  }), [client, reeditStore])
+  useEffect(() => {
+    const stop = reeditStore.start()
+    messageWithdrawal.recoverPending()
+    const recover = (): void => { reeditStore.sweep(); messageWithdrawal.recoverPending() }
+    window.addEventListener('online', recover)
+    window.addEventListener('focus', recover)
+    const unsubscribe = client.onInvalidated?.(recover)
+    return () => { stop(); unsubscribe?.(); window.removeEventListener('online', recover); window.removeEventListener('focus', recover) }
+  }, [client, reeditStore, messageWithdrawal])
+  const withdrawThreadMessage = (message: ThreadMessageView): Promise<void> => {
     const threadId = activeThreadIdRef.current
-    if (!threadId || message.id.startsWith('optimistic:') || !message.canWithdraw) return
-    const result = await client.request<StoredCommandResult>('thread.messages.withdraw', {
-      commandId: newCommandId(),
-      command: {
-        threadId,
-        messageId: message.id,
-        expectedVersion: message.version
-      }
-    })
-    if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-    setOptimisticThreadMessages((current) => current.filter((entry) => entry.message.id !== message.id))
-    await refreshActiveThreadSnapshot(threadId)
+    return threadId ? messageWithdrawal.withdraw(threadId, message) : Promise.resolve()
   }
 
   const resolveActionApproval = async (
@@ -4123,9 +4140,9 @@ export function BusinessApp({
   const missionSource = (messageId: string): void => {
     setNotificationFocus({ requestId: ++notificationFocusSequence.current, kind: 'camp_message', threadTurnId: null, messageId, active: true })
   }
-  async function createMission(draft: Omit<CreateThreadRequest, 'commandId' | 'activationState'>, saveTeam: boolean, definition?: {description: string; descriptionContent: MissionDescriptionContent; start: boolean; tags: string[]; attachments: MissionAttachmentDraft[]}): Promise<void> {
+  async function createMission(draft: Omit<CreateThreadRequest, 'commandId' | 'activationState'>, _enableOneClick: boolean, definition?: {description: string; descriptionContent: MissionDescriptionContent; start: boolean; tags: string[]; attachments: MissionAttachmentDraft[]}): Promise<void> {
     if (!definition) throw new Error(uiAttribute('缺少使命定义'))
-    const command: MissionCreate = { title: draft.name ?? '', description: definition.description, descriptionContent: definition.descriptionContent, memberAgentIds: draft.memberAgentIds, defaultLeadAgentId: draft.defaultLeadAgentId, projectBindingKind: draft.workspace ? 'directory' : 'quick_chat', projectPath: draft.workspace?.projectPath ?? '', tags: definition.tags }
+    const command: MissionCreate = { ...(draft.team ? { team: draft.team } : {}), title: draft.name ?? '', description: definition.description, descriptionContent: definition.descriptionContent, memberAgentIds: draft.memberAgentIds, defaultLeadAgentId: draft.defaultLeadAgentId, projectBindingKind: draft.workspace ? 'directory' : 'quick_chat', projectPath: draft.workspace?.projectPath ?? '', tags: definition.tags }
     const attachmentSignature = JSON.stringify(definition.attachments.map(({ id, file, kindHint }) => [id, file.name, file.size, file.lastModified, file.type, kindHint]))
     // Unknown transport outcomes retry the exact command. A different draft cannot
     // accidentally create a second Mission while the first result is unresolved.
@@ -4146,17 +4163,16 @@ export function BusinessApp({
       const threadId = stringField(result.payload, 'threadId'), missionId = stringField(result.payload, 'missionId')
       if (!threadId || !missionId) throw new Error(uiAttribute('使命已保存，但返回的标识不完整。请刷新使命板。'))
       missionCreation.current = null; setNewMissionOpen(false)
-      if (saveTeam) {
-        try { setGeneralPreferences(await uiPreferences.generalPreferences.setNewConversationDefaults({ memberAgentIds: draft.memberAgentIds, defaultLeadAgentId: draft.defaultLeadAgentId }, true)) }
-        catch { notifyError(uiAttribute('使命已创建，但默认队伍设置未保存。可在设置中重试。')) }
-      }
       if (definition.start) {
         try { await missionCommand(client, 'missions.start', { missionId }) }
         catch (error) { notifyError(uiAttribute("使命已保存，暂时未开始：{0}", String(missionError(error)))) }
       }
       await missionList.refresh()
     } catch (error) {
-      if (error instanceof MissionCommandRejected) missionCreation.current = null
+      if (error instanceof MissionCommandRejected) {
+        missionCreation.current = null
+        if (error.result.code.startsWith('team.')) void teamLibrary.refresh().catch(() => undefined)
+      }
       throw error
     } finally { setBusy(null) }
   }
@@ -4388,6 +4404,14 @@ export function BusinessApp({
     <MobileLayoutProvider value={mobile}>
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
+    <ThreadReferencePreviewProvider threadId={view === 'camp' ? activeThreadId : null} onOpen={async reference => {
+      if (reference.kind === 'thread') await activateThread(reference.id, { reconcileDefaultLead: false })
+      else {
+        const mission = await client.request<MissionRecord | null>('missions.get', { missionId: reference.id })
+        if (!mission) throw new Error('引用不可用')
+        await openMission(mission)
+      }
+    }}>
     <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!mobile && renderNavigation()}
@@ -4475,6 +4499,7 @@ export function BusinessApp({
               return result.status
             }}
             onWithdrawMessage={withdrawThreadMessage}
+            reeditStore={reeditStore}
             onPendingDraftPersisted={refreshPendingThreadNavigation}
             onPendingThreadLeave={settlePendingThreadOnLeave}
             onThreadLeaveGuardChange={registerThreadLeaveGuard}
@@ -4717,6 +4742,9 @@ export function BusinessApp({
       <NewConversationDialog purpose="mission" open={newMissionOpen} recovery={missionCreation.current?.command ?? null} recoveryAttachments={missionCreation.current?.attachments ?? []}
         initialWorkspace={currentProjectWorkspace(displayNavigation, currentProject)}
         initialSelection={generalPreferences?.newConversationDefaults ?? null}
+        initialTeamId={generalPreferences?.newConversationTeamId ?? null}
+        teams={teamLibrary.teams} teamsLoading={teamLibrary.loading} teamsError={teamLibrary.error}
+        onRetryTeams={() => { void teamLibrary.refresh().catch(() => undefined) }}
         projects={displayNavigation?.projects ?? []} missionTagCatalog={[...new Set(missionList.missions.flatMap(mission => mission.tags))]} preflight={campCreationPreflight} agents={agents} installations={installations}
         busy={busy === 'create-mission'} projectAccessReady={removedProjectAuthorityReady}
         onOpenChange={open => { if (!busy) setNewMissionOpen(open) }}
@@ -4751,6 +4779,7 @@ export function BusinessApp({
     </NavigationShell>
     {startupStatus !== 'waiting' && <StartupLoadingCanvas visible={startupLoadingVisible} route={startupLoadingRoute} />}
     </MissionInteractionProvider>
+    </ThreadReferencePreviewProvider>
     </FilePreviewProvider>
     </MobileLayoutProvider>
     </ThreadInterruptionAttentionContext.Provider>

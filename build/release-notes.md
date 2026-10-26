@@ -1,39 +1,45 @@
-# Rovai AI v0.4.19
+# Rovai AI v0.5.0
 
 <!-- lang:zh-CN -->
 
-本次更新合并上游 v0.4.16 的全部变更。主要新增智能体通用环境变量、输入历史和回复详情，支持长文本粘贴转附件，并调整会话提醒、设置入口与操作反馈。
+本次更新新增团队管理、会话与使命引用、撤回后重新编辑和三款主题，重新开放 Command Code 接入，并补齐 Web 端长文本附件。
 
-- 【功能】**支持智能体通用环境变量。** 在智能体启动设置中保存通用配置，使用同一种智能体的队员可选择继承或独立配置；同名变量以队员设置为准，并可查看合并结果。修改在新进程启动时生效，不打断正在运行的任务。
-- 【交互】**环境变量填写更方便。** 支持直接输入字符串、数字和布尔值，保存时统一转为字符串。编辑器直接显示变量值，空配置提供简短 JSON 示例；保存失败时保留原始草稿。
-- 【功能】**公屏和单聊支持查看历史输入。** 在输入框起点按 ↑ 浏览已加载的历史输入，可修改后再次发送；按 Esc 或向下翻过最新一条，可恢复原草稿和光标位置。
-- 【功能】**新增回复详情。** 点击消息中的回复块，可集中查看同一回复链的内容和相关执行过程，支持调整宽度、完整阅读、复制和回到原文，查看时保留当前输入草稿。
-- 【功能】**长文本粘贴自动转为附件。** 桌面端公屏单次粘贴超过 10,000 个字符的纯文本时，自动生成保留全文的 `.txt` 附件，卡片显示内容开头。已修正 Windows 路径处理，支持附件预览、重启恢复和移除。
-- 【功能】**界面语言支持“跟随系统”。** 桌面端根据本机语言、Web 端根据浏览器语言选择简体中文或英文，也可手动指定；切换时不重载页面、不清空草稿或中断执行。
-- 【功能】**增加执行中断提醒。** 因应用退出或已确认的执行异常中断时，侧栏会话显示提醒蓝点；打开并查看会话后自动确认，也可手动标记已读。
-- 【界面】**调整设置入口与会话展示。** “智能体”移至设置中“能力”分组的首项；会话顶栏调整字号与字重，区分项目名和会话名。用户附件卡片更紧凑，队员交付的文件列表保留原有宽度。
-- 【交互】**统一会话浮层的收起操作。** 单聊、执行、队员和任务浮层使用一致的收起按钮与 Esc 提示；修正打开回复详情后，执行和队员浮层收起按钮无法点击的问题。
-- 【交互】**减少重复的操作提示。** 移除复制、撤回、成员管理、定时任务及长文本转换等操作的重复成功提示；执行来源定位统一使用已有的“回到最新”按钮。
-- 【修复】**修复部分合法文件名无法作为附件发送的问题。** 包含时间冒号等字符的附件名称会原样保留，不再被错误拒绝或改写。
+- 【功能】**新增团队管理。** 可保存常用的队员组合、队长和协作指引，创建会话时直接选用，也可设为一键创建的默认配置。指引最多支持 10,000 字；修改团队不会改变已有会话。
+- 【功能】**支持引用其他会话和使命。** 在公屏输入 `@`，可切换选择队员、会话或使命；引用支持查看来源、跳转打开，并随草稿和历史消息保留。
+- 【功能】**撤回消息后支持重新编辑。** 公屏消息撤回后两分钟内，可在当前客户端将正文和显式 @ 队员回填输入框，修改后重新发送；已有草稿时会先确认替换。
+- 【功能】**重新开放 Command Code 接入（预览）。** 支持 macOS Apple Silicon、Intel、Windows x64 和 Linux x64，要求官方 CLI 1.88.0 或更新稳定版。使用原生配置，支持模型选择、会话恢复、Skills 和 MCP。
+- 【界面】**新增“晨雾”“朝霞”“绯夜”三款主题。** 可在外观设置中切换，并同步调整窗口标题栏、滚动条、选择框和弹出菜单的配色。
+- 【交互】**查找队员支持拼音和首字母。** 在公屏、待发送草稿和使命描述中，可通过中文、拼音或首字母搜索队员名称与角色。
+- 【功能】**Web 端补齐长文本粘贴转附件。** 在公屏单次粘贴超过 10,000 个字符的纯文本，会生成保留全文的 `.txt` 附件，支持预览、刷新恢复和移除；移除未发送文件时不再阻塞其他请求。
+- 【交互】**修复面板拖动后宽度回跳。** 分隔线按松手位置保存；可折叠面板支持继续向边缘拖动收起，反向拖动展开，并改善回复详情收起后的宽度恢复。
+- 【交互】**精简输入框中的 Skills 选择列表。** 使用更紧凑的名称、说明和关联队员展示，同名 Skill 标注来源，保留搜索、键盘选择与失败重试。
+- 【修复】**修复消息中的部分文字被隐藏。** 尖括号占位符和 HTML 原文按文字显示，不再被当作标签丢弃，同时修正相关引用选文和文件链接间距。
+- 【修复】**补全 TRAE 等智能体的错误详情。** 配额不足等错误可显示服务方返回的具体原因，不再只留下笼统的 `Internal error`。
+- 【优化】**调整 Claude Code 和 CodeBuddy 的后台任务收尾。** 优先前台执行必要任务，并要求收集后台任务结果后再结束回复，减少工作尚未完成就提前收尾的情况。
+- 【修复】**修复设置页的布局问题。** 切换“世界地图”和“会话任务”时，设置行保持原位；放大界面后，默认团队选择框可换行显示，避免横向溢出。
+- 【修复】**修复 Web 端部分智能体图标无法显示的问题。** 补齐 ICO 图标资源的读取支持。
 
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.18...v0.4.19)
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.0)
 
 ---
 
 <!-- lang:en -->
 
-This release merges all upstream v0.4.16 changes. It adds shared agent environment settings, input history, reply details, and text attachments for long pastes. It also updates conversation reminders, settings navigation, and action feedback.
+This release adds team presets, conversation and mission references, re-editing after message withdrawal, and three themes. It also reopens Command Code integration and brings long-paste attachments to Web.
 
-- [Feature] **Share environment variables between teammates using the same agent.** Save common settings in the agent's startup settings. Teammates can inherit them or use independent settings, override matching names, and inspect the merged result. Changes apply when a new process starts without interrupting running tasks.
-- [Interaction] **Enter environment variables more easily.** Values can be strings, numbers, or booleans and are converted to strings when saved. The editor displays values directly and shows a short JSON example for empty settings. Failed saves preserve the original draft.
-- [Feature] **Recall previous input in public conversations and direct chats.** Press the up arrow at the start of the input to browse inputs from loaded messages, edit them, and send again. Press Esc or move down past the newest entry to restore the original draft and cursor position.
-- [Feature] **Read related messages in reply details.** Click a message's reply block to read its reply chain and inspect related executions. Resize the pane, switch to full reading, copy messages, or return to their original locations without losing the current input draft.
-- [Feature] **Turn long text pastes into attachments.** A single plain-text paste exceeding 10,000 characters in a Desktop public conversation becomes a complete `.txt` attachment, with the beginning of its contents shown on the card. Windows path handling has been corrected, including attachment preview, recovery after restarting, and removal.
-- [Feature] **Follow the system interface language.** Desktop uses the local device's language and Web uses the browser's language to select Simplified Chinese or English, with manual selection still available. Switching does not reload the page, clear drafts, or interrupt executions.
-- [Feature] **Show reminders for interrupted executions.** A conversation's sidebar entry displays a reminder dot when an execution is interrupted by an App exit or a confirmed execution loss. Opening and viewing the conversation acknowledges the reminder; it can also be marked as read manually.
-- [UI] **Adjust settings navigation and conversation presentation.** Move Agents to the first item in the Capabilities settings group. Distinguish project and conversation names with updated header typography. User attachment cards are more compact, while teammate file lists retain their existing width.
-- [Interaction] **Make conversation panel dismissal consistent.** Direct chat, execution, teammate, and task panels use consistent collapse buttons and Esc hints. Fix collapse buttons becoming unclickable in execution and teammate panels after opening reply details.
-- [Interaction] **Remove repeated action notices.** Remove redundant success notices for copying, withdrawing messages, managing teammates, scheduled tasks, and converting long pastes. Execution source navigation uses the existing return-to-latest button.
-- [Fix] **Accept valid attachment filenames that were previously rejected.** Preserve display names containing characters such as colons in timestamps instead of rejecting or rewriting them.
+- [Feature] **Save reusable teams.** Store a teammate lineup, lead, and collaboration guidance, then select it when creating a conversation or use it as the one-click default. Guidance supports up to 10,000 characters. Editing a team does not change existing conversations.
+- [Feature] **Reference other conversations and missions.** Type `@` in a public conversation to choose teammates, conversations, or missions. Inspect a reference, open its source, and keep it in drafts and message history.
+- [Feature] **Re-edit withdrawn messages.** Within two minutes of withdrawing a public message, restore its text and explicit teammate mentions to the input on the same client, edit, and send again. Replacing an existing draft requires confirmation.
+- [Feature] **Reopen Command Code integration in Preview.** Support macOS Apple Silicon, Intel, Windows x64, and Linux x64 with the official CLI version 1.88.0 or a newer stable release. Use native configuration with model selection, session restoration, Skills, and MCP.
+- [UI] **Add Morning Mist, Dawn Glow, and Crimson Night themes.** Choose them in Appearance settings, with matching colors for window captions, scrollbars, checkboxes, and pop-up menus.
+- [Interaction] **Find teammates by pinyin or initials.** Search teammate names and roles using Chinese text, pinyin, or initials in public inputs, pending drafts, and mission descriptions.
+- [Feature] **Support long-paste attachments on Web.** A single plain-text paste exceeding 10,000 characters in a public conversation becomes a complete `.txt` attachment. Preview, restore after refresh, and remove it. Removing an unsent file no longer blocks other requests.
+- [Interaction] **Fix panels snapping back after resizing.** Save the divider position when released. Drag collapsible panels further toward an edge to fold them, reverse the drag to expand, and restore a useful width when reopening reply details.
+- [Interaction] **Make the input's Skills picker more compact.** Show names, descriptions, and associated teammates in a smaller list. Label the sources of duplicate names while retaining search, keyboard selection, and retry.
+- [Fix] **Preserve text that was incorrectly hidden in messages.** Display angle-bracket placeholders and literal HTML as text instead of dropping them as tags. Correct related quote selection and spacing around file links.
+- [Fix] **Show more complete error details from TRAE and other agents.** Keep provider explanations for errors such as exhausted quotas instead of showing only a generic `Internal error`.
+- [Improvement] **Adjust background-task completion for Claude Code and CodeBuddy.** Favor foreground execution for required work and instruct agents to collect background results before their final reply, reducing premature completion.
+- [Fix] **Fix settings layout issues.** Toggling World Map or Conversation Tasks no longer shifts the settings layout. The default-team picker wraps at high zoom to avoid horizontal overflow.
+- [Fix] **Restore missing agent icons on Web.** Serve packaged ICO logo resources alongside the existing image formats.
 
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.18...v0.4.19)
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.0)

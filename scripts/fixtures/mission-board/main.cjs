@@ -13,7 +13,7 @@ app.whenReady().then(async () => {
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   await window.loadFile(renderer, mode === 'large-diff'
     ? { query: { largeDiff: '1' } }
-    : mode === 'editor-pointer' ? { query: { pointerCatalog: '1' } } : undefined)
+    : mode === 'editor-pointer' ? { query: { pointerCatalog: '1' } } : mode === 'team-source' ? { query: { missionTeams: '1' } } : undefined)
   const waitFor = async (expression, message, timeout = 6000) => {
     const deadline = Date.now() + timeout
     while (Date.now() < deadline) {
@@ -44,6 +44,12 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 1000 })
   }
   const settle = () => window.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 250))', true)
+  if (mode === 'splitters') {
+    await require('./splitters.cjs')({ window, waitFor, click, settle })
+    console.log(JSON.stringify({ ok: true, cases: ['Mission drawer and Diff tree settle final release, interruption, drag-click isolation and Escape'] }))
+    app.exit(0)
+    return
+  }
   if (mode === 'web-links') {
     try {
       await require('./web-links.cjs')({ window, userData, waitFor, click, settle })
@@ -59,6 +65,12 @@ app.whenReady().then(async () => {
   if (mode === 'mention-pointer') {
     await require('./mention-pointer.cjs')({ window, userData, waitFor, click, wheel, settle })
     console.log(JSON.stringify({ ok: true, cases: ['Mission mention candidates are visible and selectable with native input'] }))
+    app.exit(0)
+    return
+  }
+  if (mode === 'team-source') {
+    await require('./team-source.cjs')({ window, userData, waitFor, click, settle })
+    console.log(JSON.stringify({ ok: true, cases: ['Mission Team source, guidance, Custom, late library and exact retry'] }))
     app.exit(0)
     return
   }
@@ -87,7 +99,7 @@ app.whenReady().then(async () => {
     await wheel('.mission-editor-team-list')
     await waitFor("document.querySelector('.mission-editor-team-list')?.scrollTop > 0 && !!document.querySelector('.mission-editor-team-popover')", 'Team picker did not remain open and scroll under wheel input', 1500)
     await click('.mission-editor-team-list .mission-editor-team-row:last-child .mission-editor-team-member')
-    await waitFor("!!document.querySelector('.mission-create-dialog') && !!document.querySelector('.mission-editor-team-popover') && document.querySelector('.mission-editor-team-count')?.textContent?.includes('已选 19 / 20')", 'Team pointer selection closed the picker or failed to toggle', 1500)
+    await waitFor("!!document.querySelector('.mission-create-dialog') && !!document.querySelector('.mission-editor-team-popover') && document.querySelectorAll('.mission-editor-team-member[aria-checked=true]').length === 19", 'Team pointer selection closed the picker or failed to toggle', 1500)
     await click('.mission-editor-team-footer .compact-primary')
     await waitFor("!!document.querySelector('.mission-create-dialog') && !document.querySelector('.mission-editor-team-popover')", 'Team completion did not return to the Mission dialog', 1500)
     await settle()
@@ -113,6 +125,7 @@ app.whenReady().then(async () => {
       document.querySelector('.mission-board-card').click()
     })()`, true)
     await waitFor("!!document.querySelector('.mission-drawer .mission-drawer-resize-handle')", 'Wide Mission drawer did not open')
+    await window.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))', true)
     const point = await window.webContents.executeJavaScript(`(() => {
       const handle = document.querySelector('.mission-drawer-resize-handle')
       const drawer = document.querySelector('.mission-drawer')

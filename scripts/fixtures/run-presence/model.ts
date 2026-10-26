@@ -427,9 +427,10 @@ export const model = {
       members: state.snapshot.members.map((member: any) => member.agentId === aid(0) ? { ...member, membershipStatus, profilePresence } : member)
     } })
   },
-  showStartupStatus(waitReason: 'runtime_initializing' | null, preserveEvidence = false) {
+  showStartupStatus(waitReason: 'runtime_initializing' | null, preserveEvidence = false, status?: 'queued' | 'running') {
     update({ streamPaused: true, snapshot: { ...state.snapshot,
-      agentRuns: state.snapshot.agentRuns.map((run: any) => run.id === 'run-alice' ? { ...run, waitReason } : run),
+      agentRuns: state.snapshot.agentRuns.map((run: any) => run.id === 'run-alice' ? { ...run, waitReason,
+        ...(status ? { status } : {}), executionEvidenceCount: preserveEvidence ? run.executionEvidenceCount : 0 } : run),
       executionEvidence: preserveEvidence ? state.snapshot.executionEvidence
         : state.snapshot.executionEvidence.filter((item: any) => item.agentRunId !== 'run-alice')
     } })

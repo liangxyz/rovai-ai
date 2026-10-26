@@ -472,7 +472,13 @@ pub fn capture_quote(
         _ => anyhow::bail!("quote.source_not_supported"),
     };
     let projection = if author_type == "user" {
-        body.replace("\r\n", "\n")
+        if let Some(content) = revision.get("content") {
+            let content: StructuredThreadMessageContent = serde_json::from_value(content.clone())?;
+            render_current_plain_text(transaction, &user_quote_content(&content))?
+                .replace("\r\n", "\n")
+        } else {
+            body.replace("\r\n", "\n")
+        }
     } else if let Some(content) = revision.get("content") {
         let content: StructuredThreadMessageContent = serde_json::from_value(content.clone())?;
         let name = selection
@@ -547,6 +553,23 @@ pub fn capture_quote(
     };
     quote.snapshot_digest = quote.digest()?;
     Ok(quote)
+}
+
+// User Text is literal. Only structured references have a different visible label;
+// the original content/body still owns revision validation and the saved digest.
+fn user_quote_content(content: &StructuredThreadMessageContent) -> StructuredThreadMessageContent {
+    content
+        .iter()
+        .map(|segment| match segment {
+            StructuredThreadMessageSegment::ThreadReference { title_at_send, .. }
+            | StructuredThreadMessageSegment::MissionReference { title_at_send, .. } => {
+                StructuredThreadMessageSegment::Text {
+                    text: title_at_send.clone(),
+                }
+            }
+            _ => segment.clone(),
+        })
+        .collect()
 }
 
 /// Mirrors the two production structured-prefix rendering seams; plain Markdown keeps its own parser.
@@ -1033,7 +1056,16 @@ mod tests {
         for case in cases {
             assert_eq!(
                 if case["authorType"].as_str() == Some("user") {
-                    case["source"].as_str().unwrap().replace("\r\n", "\n")
+                    if let Some(content) = case.get("content") {
+                        crate::camp_content::render_plain_text(
+                            &user_quote_content(&serde_json::from_value(content.clone()).unwrap()),
+                            |_| Some("芝士*".into()),
+                        )
+                        .unwrap()
+                        .replace("\r\n", "\n")
+                    } else {
+                        case["source"].as_str().unwrap().replace("\r\n", "\n")
+                    }
                 } else if let Some(content) = case.get("content") {
                     project_structured_quote_text(
                         &serde_json::from_value(content.clone()).unwrap(),
@@ -1137,21 +1169,21 @@ mod tests {
             "../../../packages/contracts/fixtures/message-quote-projection-v3.json"
         ))
         .unwrap();
-        for case in projection_cases
-            .iter()
-            .filter(|case| case["authorType"].as_str() != Some("user"))
-        {
+        let mut reference_snapshots = Vec::new();
+        for case in &projection_cases {
             transaction
                 .execute("UPDATE agent_profile SET display_name='芝士*'", [])
                 .unwrap();
             transaction
                 .execute(
-                    "UPDATE camp_message SET structured_content_json=?1",
-                    [case
-                        .get("content")
-                        .cloned()
-                        .unwrap_or_else(|| json!([{"kind":"text","text":case["source"]}]))
-                        .to_string()],
+                    "UPDATE camp_message SET structured_content_json=?1, author_type=?2",
+                    params![
+                        case.get("content")
+                            .cloned()
+                            .unwrap_or_else(|| json!([{"kind":"text","text":case["source"]}]))
+                            .to_string(),
+                        case["authorType"].as_str().unwrap_or("agent")
+                    ],
                 )
                 .unwrap();
             let content: StructuredThreadMessageContent = serde_json::from_value(
@@ -1176,6 +1208,48 @@ mod tests {
             )
             .unwrap();
             assert_eq!(captured.text, text);
+            if let Some(excerpts) = case["selections"].as_array() {
+                let original = render_current_plain_text(&transaction, &content).unwrap();
+                assert_eq!(original, case["source"].as_str().unwrap());
+                for excerpt in excerpts {
+                    let excerpt = excerpt.as_str().unwrap();
+                    let start = text[..text.find(excerpt).unwrap()].chars().count();
+                    let selection = QuoteSelection {
+                        message_id: "message_a".into(),
+                        body_at_selection: original.clone(),
+                        start_scalar: start,
+                        end_scalar: start + excerpt.chars().count(),
+                        text: excerpt.into(),
+                        current_user_display_name: None,
+                    };
+                    let snapshot = capture_quote(&transaction, "camp_a", None, &selection).unwrap();
+                    assert_eq!(snapshot.text, excerpt);
+                    reference_snapshots.push(snapshot);
+                    let mut stale = selection.clone();
+                    stale.body_at_selection = text.into();
+                    assert!(
+                        capture_quote(&transaction, "camp_a", None, &stale)
+                            .unwrap_err()
+                            .to_string()
+                            .contains("source_changed")
+                    );
+                }
+                // A caller cannot capture the hidden URI projection as though it were visible.
+                let hidden = QuoteSelection {
+                    message_id: "message_a".into(),
+                    body_at_selection: original.clone(),
+                    start_scalar: 0,
+                    end_scalar: original.chars().count(),
+                    text: original,
+                    current_user_display_name: None,
+                };
+                assert!(
+                    capture_quote(&transaction, "camp_a", None, &hidden)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("projection_mismatch")
+                );
+            }
             assert_eq!(
                 captured.locator.unwrap().projection_digest,
                 format!("{:x}", Sha256::digest(text.as_bytes()))
@@ -1185,6 +1259,10 @@ mod tests {
             .execute("UPDATE agent_profile SET display_name='renamed'", [])
             .unwrap();
         transaction.execute("DELETE FROM camp_message", []).unwrap();
+        for snapshot in reference_snapshots {
+            let saved = serde_json::to_string(&vec![snapshot.clone()]).unwrap();
+            assert_eq!(parse_quotes(&saved).unwrap(), vec![snapshot]);
+        }
         let frozen = parse_quotes(&saved).unwrap();
         assert_eq!(
             frozen,

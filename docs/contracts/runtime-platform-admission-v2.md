@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-10-18
+last_updated: 2026-10-25
 ---
 
 # Runtime Platform Admission v2
@@ -135,3 +135,28 @@ Ready 检查。取舍见 [V1.59-D10](../versions/v1.59/decisions.md#v1-59-d10)�
 [验收报告](../research/minimax-code-runtime/linux-qualification-2026-10-18.md)分别记录；partial Usage、
 原生权限/plan、取消问卷和原生管理命令的边界保持。其他平台、其他 Runtime、普通动态检查和执行
 fail-closed 门槛不因本项晋升改变；不建立 Renderer allowlist。
+
+## 8. Command Code macOS Preview
+
+2026-10-25，User seq61 明确要求 macOS 两个架构开放。`command-code-cli × macos-arm64` 与
+`command-code-cli × macos-x64` 均为 `preview / reasonCode=runtime_platform.qualification_evidence_missing`，
+`evidenceRevision=null`，沿既有准入允许 discovery、检查、成员配置与普通执行。同日按 User 要求完成
+Windows 补验后，Windows x64 同样采用 Preview；Linux x64 的独立 Preview 开放见第 9 节，其他 Runtime 的资格不变。
+
+使用现有公开产品目录与官方安装说明入口，不增加 Renderer 平台白名单、专属门禁或实验标签。
+Command 原生接入及 1.88.0 稳定版下限保持；本次开放不宣称已完成完整 Core/App、Intel 或子代理资格。
+理由见 [V1.72-D60](../versions/v1.72/decisions.md#v1-72-d60)，既有实测与此次验证见
+[Command Code 实施记录](../versions/v1.72/command-code-native-simplification.md)。
+
+## 9. Command Code Linux Preview
+
+2026-10-25，维护者要求完成 Linux 实测并与 macOS 开放改动一同交付。
+`command-code-cli × linux-x64` 沿既有 Preview 准入开放发现、检查、配置和执行；
+reason 为 `runtime_platform.qualification_evidence_missing`，evidenceRevision 仍为 null。
+官方稳定版下限为 1.88.0，普通认证、模型、权限、能力和 Ready 门槛继续生效。
+
+目标机的真实 Core、Sub2API、Linux 浏览器和故障注入分别记录于
+[Linux 验收](../research/command-code-runtime/linux-acceptance-2026-10-25.md)。验收范围不继承到其他发行版、
+ARM64、Windows、子代理或未来版本；Preview 不冒充完整平台资格。
+已接受的原生命令非零退出状态差异及公开范围理由见
+[V1.72-D61](../versions/v1.72/decisions.md#v1-72-d61)。

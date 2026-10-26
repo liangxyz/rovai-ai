@@ -130,6 +130,7 @@ pub mod team_tool;
 pub mod team_tool_catalog;
 pub mod teams;
 pub mod thread_compat;
+pub mod thread_reference;
 pub mod thread_runs;
 #[cfg(windows)]
 mod windows_runtime_entrypoint;

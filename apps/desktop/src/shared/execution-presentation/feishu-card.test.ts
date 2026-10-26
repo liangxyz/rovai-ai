@@ -209,7 +209,7 @@ describe('Feishu execution console card', () => {
     expect(bodyText(card)).toContain('正文 40')
     expect(countElements(elements(card))).toBeLessThanOrEqual(30)
     const queued = executionConsoleCard(snapshot('queued'))
-    expect(bodyText(queued)).toContain('等待开始执行…')
+    expect(bodyText(queued)).toContain('启动中…')
     const waiting = executionConsoleCard(snapshot('waiting', { run: { status: 'waiting', waitReason: 'approval', terminalReasonCode: null } }))
     expect(waiting.header).toMatchObject({ title: { content: '芝士 · 等待审批' }, template: 'orange' })
     expect(bodyText(waiting)).toContain('等待审批')

@@ -115,11 +115,11 @@ describe('conversation Run presence', () => {
     ])
   })
 
-  it('omits queues, private and terminal Runs; preserves started approval waits', () => {
+  it('shows admitted startup Runs, omits private and terminal Runs, and preserves approval waits', () => {
     const runs = [run('queued','',{status:'queued'}),run('unstarted','',{status:'waiting',startedAt:null}),
       run('private','',{invocationKind:'single_chat'}),run('done','',{status:'succeeded'}),
       run('stopped','',{status:'cancelled'}),run('approval','alice',{status:'waiting',waitReason:'approval'})]
-    expect(slots(runs)).toEqual([['approval',false]])
+    expect(slots(runs)).toEqual([['approval',false],['queued',false]])
     expect(runPresencePreview(runs[5]).text).toBe('等待审批')
   })
 
@@ -130,8 +130,8 @@ describe('conversation Run presence', () => {
     expect(slots([failed],[],false)).toEqual([])
     expect(slots([failed,next])).toEqual([['next',false]])
     expect(slots([failed,{...next,status:'succeeded'}])).toEqual([])
-    expect(slots([failed,{...next,status:'queued'}])).toEqual([['failed',false]])
-    expect(slots([{...failed,hasAcceptedContinuation:true},{...next,status:'queued'}])).toEqual([])
+    expect(slots([failed,{...next,status:'queued'}])).toEqual([['next',false]])
+    expect(slots([{...failed,hasAcceptedContinuation:true},{...next,status:'queued'}])).toEqual([['next',false]])
     expect(slots([{...failed,hasAcceptedContinuation:true},{...next,status:'failed'}])).toEqual([['next',false]])
     expect(slots([{...failed,invocationKind:'direct'}])).toEqual([])
     const rejected = { ...failed, startedAt: null, failure: {
@@ -167,7 +167,7 @@ describe('conversation Run presence', () => {
   it('shows current-epoch activity before a late ACK while keeping old evidence behind the connection fence', () => {
     const initializing = run('a', 'alice', { waitReason: 'runtime_initializing' })
     const accepted = { ...initializing, waitReason: null }
-    const connecting = expect.stringMatching(/^正在(?:和alice接上线|联系alice|与alice会合)…$/)
+    const connecting = '启动中…'
     const working = expect.stringMatching(/^alice(?:正在为你推进|正在推进这项任务|正与你一起推进)…$/)
     const thinking: LiveRuntimeEvent = { id: 'phase', agentRunId: 'a', executionEpoch: 1,
       eventType: 'agent_run.runtime_phase_changed', payload: { phase: 'thinking' }, createdAt: '2026-10-10T12:00:00Z' }
@@ -197,6 +197,7 @@ describe('conversation Run presence', () => {
     // A reconnect can still have earlier evidence; it must describe the new initialization.
     expect(runPresencePreview({ ...initializing, executionEpoch: 2 }, [text, command]).text).toEqual(connecting)
     expect(runPresencePreview({ ...initializing, cancelRequestedAt: 'now' }, [text, command]).text).toBe('正在停止…')
+    expect(runPresencePreview({ ...initializing, status: 'cancelled', cancelRequestedAt: 'now' }, [text, command]).text).toBe('已取消')
     expect(runPresencePreview({ ...initializing, status: 'failed' }, [text, command]).kind).toBe('error')
     expect(runPresencePreview({ ...initializing, status: 'waiting', waitReason: 'approval' }, [text, command]).text).toBe('等待审批')
   })
@@ -211,22 +212,22 @@ describe('conversation presence copy and duration', () => {
       2 / 3 - Number.EPSILON, 2 / 3, 1 - Number.EPSILON, 1 - Number.EPSILON]
     let draw = 0
     const random = vi.spyOn(Math, 'random').mockImplementation(() => samples[draw++ % samples.length])
-    const connecting = ['正在和爱丽丝接上线…', '正在联系爱丽丝…', '正在与爱丽丝会合…']
+    const connecting = ['启动中…']
     const working = ['爱丽丝正在为你推进…', '爱丽丝正在推进这项任务…', '爱丽丝正与你一起推进…']
-    const englishConnecting = ['Connecting with 爱丽丝…', 'Reaching 爱丽丝…', 'Joining up with 爱丽丝…']
+    const englishConnecting = ['Starting…']
     const englishWorking = ['爱丽丝 is moving this forward…', '爱丽丝 is working on this task…', '爱丽丝 is working through this with you…']
     const runs = Array.from({ length: 30 }, (_, index) => run(`choice-${index}`, 'alice'))
     const preview = (run: AgentRunView, waitReason: string | null) => runPresencePreview({ ...run, waitReason }, [], '爱丽丝').text
     const chinese = runs.map(run => [preview(run, 'runtime_initializing'), preview(run, null)])
-    expect(random).toHaveBeenCalledTimes(runs.length * 2)
+    expect(random).toHaveBeenCalledTimes(runs.length)
     expect(chinese.slice(0, 5)).toEqual([
       [connecting[0], working[0]], [connecting[0], working[0]],
-      [connecting[0], working[1]], [connecting[1], working[2]], [connecting[2], working[2]]
+      [connecting[0], working[0]], [connecting[0], working[0]], [connecting[0], working[0]]
     ])
     expect(new Set(chinese.map(pair => pair[0]))).toEqual(new Set(connecting))
     expect(new Set(chinese.map(pair => pair[1]))).toEqual(new Set(working))
     expect(runs.map(run => [preview(structuredClone(run), 'runtime_initializing'), preview(structuredClone(run), null)])).toEqual(chinese)
-    expect(random).toHaveBeenCalledTimes(runs.length * 2)
+    expect(random).toHaveBeenCalledTimes(runs.length)
     const api = languageTestApi
     try {
       await changeInterfaceLanguage(api, 'en')
@@ -241,7 +242,7 @@ describe('conversation presence copy and duration', () => {
     }
     expect(runs.map(run => [preview(run, 'runtime_initializing'), preview(run, null)])).toEqual(chinese)
     expect(runPresencePreview(runs[0], [], '另一位队员').text).toContain('另一位队员')
-    expect(random).toHaveBeenCalledTimes(runs.length * 2)
+    expect(random).toHaveBeenCalledTimes(runs.length)
   })
 
   it('uses real start/end facts, clamps clock reversal and omits unknown durations', () => {

@@ -433,7 +433,7 @@ export function GeneralSettings({
         <section className="section-block general-settings-section" aria-labelledby="general-conversation-heading">
           <div className="section-heading"><div><h2 id="general-conversation-heading"><UiText zh={"会话"} /></h2><p><UiText zh={"阅读面与沉浸视图"} /></p></div></div>
           <div className="general-section-body">
-            <label className="general-world-map-setting">
+            <label className="general-world-map-setting" aria-busy={worldMapBusy}>
               <span>
                 <strong><UiText zh={"世界地图"} /></strong>
                 <small id="general-world-map-description"><UiText zh={"在对话中显示地图视图及切换入口。"} /></small>
@@ -448,18 +448,18 @@ export function GeneralSettings({
                 onChange={(event) => void setWorldMapEnabled(event.target.checked)}
               />
             </label>
-            {worldMapBusy && <p className="general-inline-status" role="status"><UiText zh={"正在保存会话偏好…"} /></p>}
+            <div className="sr-only" role="status">{worldMapBusy && <UiText zh={"正在保存会话偏好…"} />}</div>
             {worldMapError && (
               <div className="general-inline-status is-error" role="alert">
                 <span>{worldMapError}</span>
                 <button className="quiet-button compact" type="button" onClick={() => void loadPreferences()}><UiText zh={"重新读取"} /></button>
               </div>
             )}
-            <label className="general-world-map-setting general-task-setting">
+            <label className="general-world-map-setting general-task-setting" aria-busy={tasks.saving}>
               <span><strong><UiText zh="会话任务" /></strong><small id="general-task-description"><UiText zh="在所有会话中提供任务面板和队员任务工具；关闭不删除已有任务记录。" /></small></span>
               <input type="checkbox" role="switch" aria-label={uiAttribute('会话任务')} aria-describedby="general-task-description" checked={tasks.enabled} disabled={!tasks.ready || tasks.saving} onChange={event => void tasks.setEnabled(event.target.checked)} />
             </label>
-            {tasks.saving && <p className="general-inline-status" role="status"><UiText zh="正在保存…" /></p>}
+            <div className="sr-only" role="status">{tasks.saving && <UiText zh="正在保存…" />}</div>
             {tasks.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={tasks.error === 'save' ? '未能保存，请重试。' : '无法读取会话任务设置，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void tasks.retry()}><UiText zh="重试" /></button></div>}
           </div>
         </section>

@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # 长期接口合同
@@ -15,7 +15,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 ## Team 与启动指引
 
-- [Team Templates v1](team-templates-v1.md)：创建预设、独立 Custom 默认值、CAS 与旧偏好迁移。
+- [Team Templates v2（当前）](team-templates-v2.md)：Thread/Mission 创建预设、独立 Custom 默认值与不可变指引。
+- [Team Templates v1（历史）](team-templates-v1.md)：初始 Thread 创建预设、CAS 与旧偏好迁移。
 - [Native Session Bootstrap v6](native-session-bootstrap-v6.md)：唯一可选 TEAM_GUIDANCE、冻结文本和恢复边界。
 
 ## 会话 Task 能力（当前）
@@ -25,7 +26,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [ContextManifest Evidence v40 / v42](context-manifest-evidence-v42.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
 - [Run Facts v10](run-facts-v10.md)
-- [Camp Message Send v28](camp-message-send-v28.md)
+- [Camp Message Send v29](camp-message-send-v29.md)
+- [Thread Reference v1](thread-reference-v1.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
 - [AgentRun Continuation v4](agent-run-continuation-v4.md)
 - [Camp Open Projection v30](camp-open-projection-v30.md)
 - [Notification Episode v12](notification-episode-v12.md)
@@ -57,12 +59,14 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 - [Navigation Read v1（当前）](navigation-read-v1.md)：单会话、单分组、完整摘要快照，观察水位内已读确认与局部失效。
 - [Input History v1（当前）](input-history-v1.md)：公共/单聊从现有消息生成本轮固定内容、同步导航与草稿预览。
+- [Message Reedit v1（当前）](message-reedit-v1.md)：客户端两分钟撤回文字副本、原命令回放、容量与清理、确认回填。
 
 ## Mission
 
 | 合同 | 范围 |
 | --- | --- |
-| [Mission v12（当前）](mission-v12.md) | 结构化个人提及与描述原子保存、自动加入队外成员；Agent 仍读取 description 文本 |
+| [Mission v13（当前）](mission-v13.md) | Mission 复用 Team 创建、权威名册与描述邀请合并、不可变 Thread 指引 |
+| [Mission v12（历史）](mission-v12.md) | 结构化个人提及与描述原子保存、自动加入队外成员；Agent 仍读取 description 文本 |
 | [Mission v11（历史）](mission-v11.md) | 继承 v10；清理请求只做领域准入，worker 的正常成功路径最多启动 4 个 Git 进程，安全拒绝保留可用工作区与可重试诊断 |
 | [Mission v10（历史）](mission-v10.md) | 继承 v9；Worktree 归属与受管分支删除解耦，安全保留非受管分支、脏现场与不可达 detached 提交，并恢复未发生删除的失败状态；其重复预检与同步拒绝由 v11 替代 |
 | [Mission v9（历史）](mission-v9.md) | 继承 v8；持久 Worktree 的当前检出不再作为执行门禁，实时 checkout 与受管分支身份分离，Diff 视图不复用旧临时 index；其非受管 checkout 清理拒绝由 v10 替代 |
@@ -87,7 +91,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp History v12（历史）](camp-history-v12.md)：mentions 统一，作者字段保留原始身份。
 - [ContextManifest v34（历史）](context-manifest-evidence-v34.md)：路由投影精简，public 34/11/9、non-batch 35/12/6，旧输入原格式恢复。
 - [ContextManifest v33（历史）](context-manifest-evidence-v33.md)：新 Run Mention 字段、原版本恢复和现有预算/摘要。
-- [Camp History v14（当前）](camp-history-v14.md)：新 Run 实时目录、消息发送时间排序、撤回回退与独立正文边界；继承 v13 发送者输出。
+- [Camp History v15（当前）](camp-history-v15.md)：新 Run 实时目录、消息发送时间排序、撤回回退与独立正文边界；继承 v13 发送者输出。
 - [Camp History v13（历史）](camp-history-v13.md)：read/search 统一发送者，Agent Output 12；历史回执保持。
 
 ## 生命周期
@@ -163,7 +167,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v71（当前）](runtime-launch-and-verification-v71.md) | 通用 ACP Host 同时接受字符串 `error.data` 与 `error.data.error`；共用脱敏、输入确认与失败分类，不回填旧 Run |
+| [Runtime Launch and Verification v72（当前）](runtime-launch-and-verification-v72.md) | Command Code 1.88 原生 HOME、官方 Mod、ACP MCP、按 Binding 身份复用与启动失败材料所有权 |
+| [Runtime Launch and Verification v71（历史）](runtime-launch-and-verification-v71.md) | 通用 ACP Host 同时接受字符串 `error.data` 与 `error.data.error`；共用脱敏、输入确认与失败分类，不回填旧 Run |
 | [Runtime Launch and Verification v70（历史）](runtime-launch-and-verification-v70.md) | 继承环境输入规则；Claude 复用私有 settings 与进程环境，CodeBuddy 只注入后台启动变量，原生配置与 Session 保持自有边界 |
 | [Runtime Launch and Verification v69（历史）](runtime-launch-and-verification-v69.md) | 环境值直接显示；Renderer 标量转字符串、取消独立条数和名称长度限制，保留私有存储与三层合并 |
 | [Runtime Launch and Verification v68（历史）](runtime-launch-and-verification-v68.md) | Host＋Runtime 通用环境、继承选择、三层合并与私有通用版本 |
@@ -546,7 +551,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v19（当前）](camp-composer-draft-v19.md) | Web 公屏长粘贴、浏览器草稿接纳、Host 生成文件存储与清理 |
+| [Camp Composer Draft v20（当前）](camp-composer-draft-v20.md) | Web 公屏长粘贴、浏览器草稿接纳、Host 生成文件存储与清理 |
 | [Camp Composer Draft v18（历史）](camp-composer-draft-v18.md) | 内部复制的纯正文也按单次长粘贴阈值附件化；仅恢复后仍含 Atom 的内容优先按结构化粘贴 |
 | [Camp Composer Draft v17（历史）](camp-composer-draft-v17.md) | Desktop 长粘贴生成文件、Thread 归属、单向发送保护与先保存后清理；不改变本机草稿权威 |
 | [Camp Composer Draft v16（历史）](camp-composer-draft-v16.md) | Active 与普通一键 Pending 的本机独立草稿、保存失败保护和首发送清空；同项目可多份 |
@@ -666,7 +671,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Execution Record Storage v3（当前）](execution-record-storage-v3.md) | 新操作去掉同结果重复 diff、预览总预算、独立摘要减少进度正文写入；旧格式保持 |
 | [Execution Record Storage v2（历史）](execution-record-storage-v2.md) | 新操作与活动共用一行、小字段兼容读取、按需 diff，保留旧格式与 v1 回收 |
 | [Execution Record Storage v1（历史）](execution-record-storage-v1.md) | 新操作独立输入／结果、按页组合预览、旧格式收尾与会话删除 Blob 候选登记 |
-| [Run Process Detail Surface v55（当前）](run-process-detail-surface-v55.md) | 执行行按 Run 输入引用原消息，支持批量、按需历史定位，共用会话“回到最新”；保留身份、模型与执行控制 |
+| [Run Process Detail Surface v56（当前）](run-process-detail-surface-v56.md) | 启动文案统一、Delivery 准备／排队简化、中性停止反馈；仅改展示，图标保留在时间线上 |
+| [Run Process Detail Surface v55（历史）](run-process-detail-surface-v55.md) | 执行行按 Run 输入引用原消息，支持批量、按需历史定位，共用会话“回到最新”；保留身份、模型与执行控制 |
 | [Run Process Detail Surface v54（历史）](run-process-detail-surface-v54.md) | 独立执行行复用队员卡片与模型浮层，显示本 Run 的模型与强度；精确 Run 身份衔接不变 |
 | [Run Process Detail Surface v53（历史）](run-process-detail-surface-v53.md) | 执行行固定启动时公开消息边界；任何 Run 均不能拆开回复与附属卡片 |
 | [Run Process Detail Surface v52（历史）](run-process-detail-surface-v52.md) | 当前轮次活动优先于晚到的输入受理回执，保留新轮次连接反馈；Desktop / Web 共用 |

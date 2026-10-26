@@ -12,7 +12,7 @@ import { RunModelSummary } from './ThreadModelInformation'
 import { formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview, type ConversationRunPresenceSlot } from './conversation-run-presence'
 import { identityColorToken } from './theme'
 import { uiAttribute, useInterfaceLanguage } from './interface-language'
-import type { LiveRuntimeEvent } from './ui-model'
+import { agentRunIsStarting, agentRunHasCurrentActivity, type LiveRuntimeEvent } from './ui-model'
 import { groupExecutionEventsByRunId } from './execution-events'
 import { useExecutionWindow } from './useExecutionWindow'
 import { useNavigationPressMenu } from './useNavigationPressMenu'
@@ -99,7 +99,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
                 onActivate={onActivateMember}>{content}</MessageAuthorProfileTrigger>
             : content
         }
-        const state = submittingId === run.id ? 'stopping' : stopState(run)
+        const state = submittingId === run.id && ['queued', 'running', 'waiting'].includes(run.status) ? 'stopping' : stopState(run)
         const canStop = state === 'available' || state === 'stopping' || state === 'confirming'
         const inputTooLarge = run.failure?.code === 'context_payload_too_large'
         const canRetry = !inputTooLarge && run.status === 'failed' && run.invocationKind === 'batch' && (run.inputMessageIds?.length ?? 0) > 0
@@ -234,17 +234,20 @@ export function RunPresenceOpen({ threadId, run, name, description, windowedEvid
     const merged = groupExecutionEventsByRunId([{ id: run.id }], tail.evidence, windowedEvidence ? events?.slice(-48) ?? [] : events ?? [])
     return merged.get(run.id) ?? []
   }, [tail.evidence, events, run.id, windowedEvidence])
-  const preview = useMemo(() => runPresencePreview(run, mergedEvents, name), [run, mergedEvents, name, language])
-  const running = run.status === 'running' && !run.cancelRequestedAt && !stopping
+  const preview = useMemo(() => stopping && ['queued', 'running', 'waiting'].includes(run.status)
+    ? { kind: 'status' as const, text: uiAttribute('正在停止…') }
+    : runPresencePreview(run, mergedEvents, name), [run, mergedEvents, name, language, stopping])
+  const starting = agentRunIsStarting(run) && !agentRunHasCurrentActivity(run, mergedEvents)
+  const running = (run.status === 'running' || starting) && !run.cancelRequestedAt && !stopping
   const button = <button ref={trigger} {...menu.rowProps} className={`run-presence-open is-${preview.kind}`} type="button" data-preview-kind={preview.kind}
     title={uiAttribute('查看执行过程')} aria-label={`${name}，${preview.text}，${description}`}
-    aria-describedby={elapsedId} aria-expanded={menu.open} aria-controls={menu.open ? menuId : undefined}
+    aria-describedby={starting ? undefined : elapsedId} aria-expanded={menu.open} aria-controls={menu.open ? menuId : undefined}
     onClick={event => onOpen(run.agentId, event.currentTarget, { runId: run.id })}>
     {running && <span className="run-presence-spinner" aria-hidden="true"><ExecutionStatusGlyph status="cancelling" /></span>}
     {!running && <span className={`run-presence-status is-${run.status}`} aria-hidden="true"><ExecutionStatusGlyph status={run.status} /></span>}
     {preview.iconKind && <ToolCallIcon iconKind={preview.iconKind} />}
     <span className={`run-presence-preview is-${preview.kind}`}>{preview.text}</span>
-    <RunPresenceTime run={run} id={elapsedId} />
+    {!starting && <RunPresenceTime run={run} id={elapsedId} />}
   </button>
   const bounds = menu.open ? trigger.current?.getBoundingClientRect() : undefined
   const point = menu.contextPoint ?? { x: bounds?.left ?? 0, y: bounds?.bottom ?? 0 }

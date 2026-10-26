@@ -1,5 +1,5 @@
 ---
-version: 6
+version: 7
 slug: "memory-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemoryLibrary.tsx"
 related_targets:
@@ -19,7 +19,7 @@ Three quiet inline counts show active memories, active agent-origin memories, an
 Loading counts use a dash. A compact dismissible change notice remains visible on the Memory page and in the Thread.
 No capacity meters or separate lifecycle/source filter row is shown.
 
-Use the achromatic `--memory-*` family in both themes. Add and Revise use dark neutral primary actions in day and
+Use the achromatic `--memory-*` family under every App palette, according to its day/night mode. Add and Revise use dark neutral primary actions in day and
 inverse light actions at night. Amber means attention; red means error or permanent forgetting. Do not add blue
 selection, badges, borders or decoration. Scope neutral overrides to Memory content and portals. The shared sidebar, logo and identity avatars keep their production theme; its pending dot is vertically centered.
 

@@ -276,6 +276,7 @@ function Harness() {
           const flushed = flush ? await composerRef.current?.flush() : null
           const element = editor()
           const menu = document.getElementById(element.getAttribute('aria-controls') ?? '')
+          const scroller = menu?.classList.contains('ref-options') ? menu : menu?.closest<HTMLElement>('.mention-menu') ?? menu
           const selected = menu?.querySelector<HTMLElement>('[aria-selected="true"]')
           const options = [...(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])]
           return {
@@ -319,11 +320,11 @@ function Harness() {
             activeOption: selected?.dataset.skillName ?? selected?.innerText ?? null,
             activeDescendantMatches: Boolean(selected?.id)
               && element.getAttribute('aria-activedescendant') === selected?.id,
-            activeVisible: Boolean(selected && menu
-              && selected.getBoundingClientRect().top >= menu.getBoundingClientRect().top
-              && selected.getBoundingClientRect().bottom <= menu.getBoundingClientRect().bottom),
-            menuOverflows: Boolean(menu && menu.scrollHeight > menu.clientHeight),
-            menuScrollTop: menu?.scrollTop ?? 0,
+            activeVisible: Boolean(selected && scroller
+              && selected.getBoundingClientRect().top >= scroller.getBoundingClientRect().top
+              && selected.getBoundingClientRect().bottom <= scroller.getBoundingClientRect().bottom),
+            menuOverflows: Boolean(scroller && scroller.scrollHeight > scroller.clientHeight),
+            menuScrollTop: scroller?.scrollTop ?? 0,
             localVersion: composerRef.current?.getLocalVersion() ?? -1,
             dirty,
             localStatus,

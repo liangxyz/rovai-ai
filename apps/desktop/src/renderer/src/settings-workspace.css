@@ -529,7 +529,7 @@
 }
 :root .settings-panel-appearance .appearance-settings-page .appearance-option:has(input:checked) {
   border-color: var(--settings-choice-selected-line);
-  background: var(--home-surface);
+  background: var(--settings-choice-selected-surface);
   box-shadow: none;
 }
 :root .settings-panel-appearance .appearance-settings-page .theme-card-check {

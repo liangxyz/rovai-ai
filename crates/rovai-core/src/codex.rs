@@ -2523,8 +2523,8 @@ mod tests {
                 values: json!({}),
             },
             native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
-            binding_compatibility_digest: "sha256:binding".to_string(),
-            host_config_digest: "sha256:host-v1".to_string(),
+            binding_compatibility_digest: Some("sha256:binding".to_string()),
+            host_config_digest: Some("sha256:host-v1".to_string()),
             config_digest: "sha256:run-v1".to_string(),
         }
     }
@@ -2571,7 +2571,7 @@ mod tests {
         next.search_environment_generation += 1;
         next.capabilities.push("turn.fast".to_string());
         next.native_session_compatibility_key = Some("codex-cli:next-session".to_string());
-        next.binding_compatibility_digest = "sha256:next-binding".to_string();
+        next.binding_compatibility_digest = Some("sha256:next-binding".to_string());
         let next_digest =
             runtime_compatibility_digest(&next, &root, &attachment_authorization).unwrap();
         assert_eq!(first_digest, next_digest);
@@ -2660,7 +2660,7 @@ mod tests {
             .complete_agent_run("run-2", 1, FleetReleaseDisposition::Reusable)
             .await;
 
-        next.host_config_digest = "sha256:host-v2".to_string();
+        next.host_config_digest = Some("sha256:host-v2".to_string());
         let replacement_digest =
             runtime_compatibility_digest(&next, &root, &attachment_authorization).unwrap();
         assert_ne!(replacement_digest, first_digest);
@@ -3592,8 +3592,8 @@ for line in sys.stdin:
                 values: json!({}),
             },
             native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
-            binding_compatibility_digest: "smoke-binding".to_string(),
-            host_config_digest: "smoke-host".to_string(),
+            binding_compatibility_digest: Some("smoke-binding".to_string()),
+            host_config_digest: Some("smoke-host".to_string()),
             config_digest: "smoke-config".to_string(),
         };
         let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));

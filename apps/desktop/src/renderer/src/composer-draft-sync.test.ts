@@ -13,6 +13,7 @@ import {
   ComposerDraftSync,
   COMPOSER_DRAFT_RETRY_DELAYS_MS,
   ROVAI_ATOM_PRESENTATION_TAG,
+  ROVAI_COMPOSER_INITIALIZE_TAG,
   ROVAI_INPUT_HISTORY_PREVIEW_TAG,
   StaleComposerSyncEpochError
 } from './composer-draft-sync'
@@ -48,6 +49,28 @@ function replaceText(editor: LexicalEditor, value: string): void {
 afterEach(() => vi.useRealTimers())
 
 describe('ComposerDraftSync', () => {
+  it('publishes effective reference identities when unsaved edits recover before persistence', async () => {
+    vi.useFakeTimers()
+    const editor = createComposerEditor()
+    const effective = vi.fn()
+    const persist = vi.fn(async (_document: ComposerDocument) => {})
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), {
+      atomIsAvailable: () => true, persist, onEffectiveDocumentChange: effective
+    })
+    const unregister = editor.registerUpdateListener(payload => sync.handleEditorUpdate(payload))
+    const recovered: ComposerDocument = { version: 2, segments: [
+      { kind: 'atom', atom: { type: 'mission_reference', missionId: 'rvm_0199f2ec587a70008000000000000001', labelFallback: '恢复使命' } }
+    ] }
+    editor.update(() => $replaceEditorWithComposerDocument(recovered), { discrete: true, tag: ROVAI_COMPOSER_INITIALIZE_TAG })
+    expect(effective).not.toHaveBeenCalled()
+    sync.restoreLocalState(editor.getEditorState())
+    expect(effective).toHaveBeenLastCalledWith(recovered)
+    expect(persist).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(350)
+    expect(persist).toHaveBeenCalledWith(recovered, { localVersion: 1 })
+    unregister(); sync.destroy()
+  })
+
   it('previews live recipients while autosave and leave flush retain the original dirty draft', async () => {
     vi.useFakeTimers()
     const editor = createComposerEditor('saved')

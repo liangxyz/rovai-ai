@@ -21,6 +21,7 @@ test('message quotes preserve native selection, compact interaction and copy bou
       build: { outDir: join(fixture, 'renderer'), minify: false } })
     const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete env.ELECTRON_RUN_AS_NODE
+    console.log(JSON.stringify({ channel: 'automatic_acceptance', userData: join(fixture, 'user-data'), core: false, runtime: false, skillLibrary: 'unused' }))
     child = spawn(electron, [join(root, 'scripts/fixtures/message-quotes/main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')

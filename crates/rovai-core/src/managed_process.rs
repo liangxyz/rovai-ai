@@ -538,8 +538,61 @@ pub struct ManagedProcess {
     tree_termination_requested: bool,
 }
 
+/// Keeps the actual child reachable if ownership capture fails after spawn.
+/// Callers that own temporary materials must reap this failure before cleanup.
+pub(crate) struct ManagedProcessSpawnFailure {
+    error: anyhow::Error,
+    #[cfg(unix)]
+    child: Option<tokio::process::Child>,
+}
+
+impl From<anyhow::Error> for ManagedProcessSpawnFailure {
+    fn from(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            #[cfg(unix)]
+            child: None,
+        }
+    }
+}
+
+impl ManagedProcessSpawnFailure {
+    pub(crate) fn process_started(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.child.is_some()
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
+    pub(crate) async fn reap(mut self) -> (anyhow::Error, bool) {
+        #[cfg(unix)]
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await;
+            // Capture failed; even a reaped leader cannot prove that no child
+            // escaped. Retain caller materials, with the existing diagnostic.
+            return (
+                self.error
+                    .context("managed_process.spawn_cleanup_unconfirmed"),
+                false,
+            );
+        }
+        (self.error, true)
+    }
+}
+
 impl ManagedProcess {
     pub fn spawn(spec: ManagedProcessLaunchSpec) -> Result<Self> {
+        Self::spawn_owned(spec).map_err(|failure| failure.error)
+    }
+
+    pub(crate) fn spawn_owned(
+        spec: ManagedProcessLaunchSpec,
+    ) -> std::result::Result<Self, ManagedProcessSpawnFailure> {
         #[cfg(unix)]
         {
             let mut command = command_from_spec(&spec);
@@ -552,9 +605,18 @@ impl ManagedProcess {
             })?;
             let process_group_id = child.id().and_then(|pid| i32::try_from(pid).ok());
             #[cfg(any(target_os = "linux", target_os = "macos"))]
-            let owned_tree = process_tree::ProcessTree::new(
-                process_group_id.context("managed process PID unavailable")?,
-            )?;
+            let owned_tree = match process_group_id
+                .context("managed process PID unavailable")
+                .and_then(|pid| process_tree::ProcessTree::new(pid).map_err(Into::into))
+            {
+                Ok(tree) => tree,
+                Err(error) => {
+                    return Err(ManagedProcessSpawnFailure {
+                        error,
+                        child: Some(child),
+                    });
+                }
+            };
             Ok(Self {
                 child,
                 #[cfg(not(target_os = "macos"))]
@@ -581,7 +643,9 @@ impl ManagedProcess {
         #[cfg(not(any(unix, windows)))]
         {
             let _ = spec;
-            bail!("managed_process.spawn_failed: unsupported host platform");
+            return Err(
+                anyhow::anyhow!("managed_process.spawn_failed: unsupported host platform").into(),
+            );
         }
     }
 
@@ -596,6 +660,20 @@ impl ManagedProcess {
         }
         #[allow(unreachable_code)]
         None
+    }
+
+    /// Validate a reported Runtime PID without exposing platform handles.
+    /// Windows launchers may report a live descendant in this exact Job;
+    /// other platforms retain the managed leader's PID requirement.
+    pub fn owns_process_id(&self, pid: u32) -> bool {
+        #[cfg(windows)]
+        {
+            self.child.owns_process_id(pid)
+        }
+        #[cfg(not(windows))]
+        {
+            pid > 0 && self.id() == Some(pid)
+        }
     }
 
     #[cfg(windows)]
@@ -1543,6 +1621,10 @@ mod tests {
             .parse::<u32>()
             .expect("grandchild handshake PID was invalid");
         assert!(windows::process_is_running_for_test(grandchild_pid).unwrap());
+        assert!(process.owns_process_id(grandchild_pid));
+        assert!(!process.owns_process_id(process.id().unwrap()));
+        assert!(!process.owns_process_id(std::process::id()));
+        assert!(!process.owns_process_id(0));
 
         process.force_terminate_tree().unwrap();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
@@ -1552,6 +1634,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(!windows::process_is_running_for_test(grandchild_pid).unwrap());
+        assert!(!process.owns_process_id(grandchild_pid));
         std::fs::remove_dir_all(directory).unwrap();
     }
 

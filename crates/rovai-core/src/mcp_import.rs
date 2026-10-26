@@ -1397,11 +1397,31 @@ mod tests {
         ));
         assert!(fs::read(store.path()).unwrap() == old_bytes);
         let result = McpImportScanner
-            .commit_specs(&store, params, &agents(), specs())
+            .commit_specs(&store, params.clone(), &agents(), specs())
             .unwrap();
-        let McpMutationResult::Ok { config, .. } = result else {
+        let McpMutationResult::Ok {
+            config,
+            affected_agent_ids,
+            ..
+        } = result
+        else {
             panic!("explicit re-import should replace legacy references");
         };
+        assert_eq!(affected_agent_ids, BTreeSet::from(["agent_1".to_string()]));
+        let replaced_bytes = fs::read(store.path()).unwrap();
+        let mut unchanged = params;
+        unchanged.expected_config_digest = config.config_digest.clone();
+        let result = McpImportScanner
+            .commit_specs(&store, unchanged, &agents(), specs())
+            .unwrap();
+        let McpMutationResult::Ok {
+            affected_agent_ids, ..
+        } = result
+        else {
+            panic!("identical re-import should succeed");
+        };
+        assert!(affected_agent_ids.is_empty());
+        assert_eq!(fs::read(store.path()).unwrap(), replaced_bytes);
         let replaced = config
             .servers
             .iter()
@@ -1508,6 +1528,54 @@ mod tests {
         assert!(
             receiver.join().unwrap(),
             "isolated HTTP receiver must receive the complete Authorization value"
+        );
+        store
+            .set_enabled(
+                crate::mcp::SetMcpServerEnabledParams {
+                    expected_config_digest: store.get(&agents()).unwrap().config_digest,
+                    server_id: server_id.clone(),
+                    enabled: false,
+                    acknowledge_high_risk: false,
+                },
+                &agents(),
+            )
+            .unwrap();
+        let mut disabled_source = source_json;
+        disabled_source["mcpServers"]["docs"]["env"]["PADDED"] =
+            Value::String("changed while disabled".into());
+        fs::write(&source, disabled_source.to_string()).unwrap();
+        let inspection = scan();
+        let candidate = inspection
+            .candidates
+            .iter()
+            .find(|item| item.source_name == "docs")
+            .unwrap();
+        let result = McpImportScanner
+            .commit_specs(
+                &store,
+                CommitMcpImportParams {
+                    expected_config_digest: inspection.config_digest,
+                    selections: vec![McpImportSelection {
+                        candidate_id: candidate.candidate_id.clone(),
+                        action: McpImportAction::Replace,
+                        replace_server_id: Some(server_id),
+                        definition_json: candidate.normalized_definition_json.clone().unwrap(),
+                        has_blocking_issues: false,
+                    }],
+                },
+                &agents(),
+                specs(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok {
+            affected_agent_ids, ..
+        } = result
+        else {
+            panic!("disabled Server import should still save");
+        };
+        assert!(
+            affected_agent_ids.is_empty(),
+            "disabled tools do not retire Hosts"
         );
         drop(database);
         fs::remove_dir_all(root).unwrap();

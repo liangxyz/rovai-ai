@@ -14,11 +14,13 @@ describe('input history content extraction', () => {
       { kind: 'member_mention', agentId: 'member' },
       { kind: 'all_members_mention' },
       { kind: 'skill_mention', skillId: 'skill', nameAtSend: 'my-skill' },
+      { kind: 'thread_reference', threadId: 'rvcamp_01k87hrb9yfay8vvr14d2pf2db', titleAtSend: '发布标题' },
+      { kind: 'mission_reference', missionId: 'rvm_019abcde123470008000000000000001', titleAtSend: '使命' },
       { kind: 'current_user_mention', userId: 'local_user' },
       { kind: 'external_quote', senderDisplayName: 'External', body: 'external quote', attachmentSummaries: [], contentDigest: 'sha256:fixture' }
     ]
     const inputs = [message('fallback\n'), message('derived display text', content), message('same'), message('same'),
-      message('  \n\t'), message('do not revive this quote', content.slice(4)),
+      message('  \n\t'), message('do not revive this quote', content.slice(6)),
       { ...message('withdrawn'), withdrawn: true },
       { ...message('other user'), authorId: 'other' },
       { ...message('agent output'), authorType: 'agent' as const },
@@ -29,7 +31,9 @@ describe('input history content extraction', () => {
         { kind: 'text', text: '  code\n' },
         { kind: 'atom', atom: { type: 'member', agentId: 'member' } },
         { kind: 'atom', atom: { type: 'all_members' } },
-        { kind: 'atom', atom: { type: 'skill', skillId: 'skill', nameAtSend: 'my-skill' } }
+        { kind: 'atom', atom: { type: 'skill', skillId: 'skill', nameAtSend: 'my-skill' } },
+        { kind: 'atom', atom: { type: 'thread_reference', threadId: 'rvcamp_01k87hrb9yfay8vvr14d2pf2db', labelFallback: '发布标题' } },
+        { kind: 'atom', atom: { type: 'mission_reference', missionId: 'rvm_019abcde123470008000000000000001', labelFallback: '使命' } }
       ] }, composerDocumentFromText('same'), composerDocumentFromText('same')
     ])
     inputs[0].body = 'changed'

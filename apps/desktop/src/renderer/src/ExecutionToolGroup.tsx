@@ -781,22 +781,13 @@ export function ToolActivityGroup({
     },
     block
   )
-  // Cancellation intent is retained in history; an authoritative terminal Run wins.
+  // A local stop submission must not replace completed steps or the current command.
   const nonTerminal = runStatus === 'queued' || runStatus === 'running' || runStatus === 'waiting'
-  const presentation = cancelling && nonTerminal
-    ? {
-        ...settledPresentation,
-        status: 'stopped' as const,
-        statusLabel: t('正在停止'),
-        primary: t('正在停止'),
-        currentTitle: t('等待执行结束'),
-        countLabel: null,
-        accessibleLabel: t('{0}：{1}', t('正在停止'), t('等待执行结束'))
-      }
-    : settledPresentation
+  const stopping = cancelling && nonTerminal
+  const presentation = settledPresentation
   const active = presentation.status === 'running' || presentation.status === 'waiting'
   return (
-    <details ref={root} className={`tool-activity-group status-${presentation.status}`} open={expanded}
+    <details ref={root} className={`tool-activity-group status-${presentation.status}${stopping ? ' is-stopping' : ''}`} open={expanded}
       data-execution-item-key={block?.key ?? items[0]?.key}
       data-execution-group-sequence={block?.sequence}
       data-execution-group-loaded={childEvidence?.length}
@@ -812,7 +803,7 @@ export function ToolActivityGroup({
       >
         {active && presentation.currentIconKind ? <ToolCallIcon iconKind={presentation.currentIconKind} /> : <ToolActivityGroupIcon />}
         {active ? <span className="tool-group-copy tool-group-command-copy" aria-hidden="true">
-          <RunningText className="tool-group-current" active={presentation.status === 'running' && !expanded}
+          <RunningText className="tool-group-current" active={presentation.status === 'running' && !expanded && !stopping}
             text={presentation.status === 'waiting' ? `${presentation.primary} · ${presentation.currentTitle}` : presentation.currentTitle ?? presentation.primary} />
           <CommandExpandCue />
         </span> : <span className="tool-group-copy" aria-hidden="true">

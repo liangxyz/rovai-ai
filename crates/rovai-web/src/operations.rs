@@ -301,6 +301,10 @@ pub enum Operation {
     NativeSkillsRead,
     #[serde(rename = "skills.candidates")]
     SkillCandidates,
+    #[serde(rename = "threadReferences.list")]
+    ThreadReferencesList,
+    #[serde(rename = "threadReferences.resolve")]
+    ThreadReferencesResolve,
     #[serde(rename = "mcp.config.get")]
     Mcp,
     #[serde(rename = "messageQuotes.mutateDraft")]
@@ -618,6 +622,8 @@ impl Operation {
             Self::NativeSkillsList => "nativeSkills.list",
             Self::NativeSkillsRead => "nativeSkills.read",
             Self::SkillCandidates => "skills.candidates",
+            Self::ThreadReferencesList => "threadReferences.list",
+            Self::ThreadReferencesResolve => "threadReferences.resolve",
             Self::Mcp => "mcp.config.get",
         }
     }

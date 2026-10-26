@@ -213,6 +213,8 @@ impl MissionRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateMissionCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<crate::teams::TeamSelection>,
     pub title: String,
     #[serde(default)]
     pub description: String,
@@ -446,19 +448,17 @@ impl MissionService {
             if let Some(rejection) = validate_description_members(tx, &content, None)? { return Ok(rejection); }
             let description = mission_description::render(tx, &content)?;
             validate_content(None, Some(&description))?;
-            let mut members = input.member_agent_ids.clone();
-            for id in mission_description::member_ids(&content) { if !members.contains(&id) { members.push(id); } }
             let mission_id = format!("rvm_{}", Uuid::now_v7().simple());
             tx.execute("INSERT INTO mission_number_sequence DEFAULT VALUES", [])?;
             let number = tx.last_insert_rowid();
             let camp_id = ThreadId::new();
             let created = create_camp_in_tx(tx, &envelope.actor, envelope.execution_epoch, &CreateThreadCommand {
-                team: None,
+                team: input.team.clone(),
                 name: Some(input.title.trim().chars().take(80).collect()),
                 project_binding_kind: input.project_binding_kind, project_path: input.project_path.clone(),
-                member_agent_ids: members, default_lead_agent_id: input.default_lead_agent_id.clone(),
+                member_agent_ids: input.member_agent_ids.clone(), default_lead_agent_id: input.default_lead_agent_id.clone(),
                 collaboration_mode: ThreadCollaborationMode::Peer, activation_state: ThreadActivationState::Active,
-            }, &camp_id)?;
+            }, &camp_id, &mission_description::member_ids(&content))?;
             if created.status == CommandResultStatus::Rejected { return Ok(created); }
             let now = chrono::Utc::now().to_rfc3339();
             tx.execute("INSERT INTO mission(id,number,camp_id,title,description,status,tags_json,source_attachments_json,details_version,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'not_started',?6,?7,1,?8,?8)",
@@ -1203,6 +1203,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    team: None,
                     title: "References".into(),
                     description: "literal @Alice".into(),
                     description_content: None,
@@ -1354,6 +1355,126 @@ mod tests {
                 .code,
             "mission.member_unavailable"
         );
+
+        // The Mission owner covers Team resolution together with description
+        // invitations. Bootstrap formatting/late-join semantics remain owned by
+        // the existing Thread/context tests.
+        let mut team_draft = crate::teams::SaveTeamCommand {
+            team_id: None,
+            expected_version: None,
+            name: "Implementation and review".into(),
+            member_agent_ids: vec!["agent_1".into(), "agent_2".into()],
+            default_lead_agent_id: "agent_2".into(),
+            guidance: "Implement, review, report.".into(),
+        };
+        let saved = crate::teams::save(&mut db, &command(team_draft.clone())).unwrap();
+        let team_id = saved.result.payload["team"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut team_create = command(CreateMissionCommand {
+            team: Some(crate::teams::TeamSelection {
+                team_id: team_id.clone(),
+                expected_version: 1,
+            }),
+            title: "Team Mission".into(),
+            description: String::new(),
+            description_content: Some(vec![
+                MemberMention {
+                    agent_id: "agent_3".into(),
+                },
+                MemberMention {
+                    agent_id: "agent_1".into(),
+                },
+                MemberMention {
+                    agent_id: "agent_3".into(),
+                },
+            ]),
+            project_path: "/tmp".into(),
+            project_binding_kind: ProjectBindingKind::Directory,
+            // A Team is authoritative even if a client sends a stale projection.
+            member_agent_ids: vec!["missing".into()],
+            default_lead_agent_id: "missing".into(),
+            tags: vec![],
+            source_attachments: vec![],
+        });
+        let before_counts: (i64, i64, i64) = db.connection().query_row(
+            "SELECT (SELECT COUNT(*) FROM mission), (SELECT COUNT(*) FROM camp), (SELECT COUNT(*) FROM thread_team_bootstrap)", [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        db.connection().execute_batch("CREATE TEMP TRIGGER reject_mission BEFORE INSERT ON mission BEGIN SELECT RAISE(ABORT,'fixture mission failure'); END;").unwrap();
+        assert!(service.create(&mut db, &team_create).is_err());
+        let failed_counts = db.connection().query_row(
+            "SELECT (SELECT COUNT(*) FROM mission), (SELECT COUNT(*) FROM camp), (SELECT COUNT(*) FROM thread_team_bootstrap)", [],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+        ).unwrap();
+        assert_eq!(failed_counts, before_counts);
+        db.connection()
+            .execute_batch("DROP TRIGGER reject_mission")
+            .unwrap();
+        let created = service.create(&mut db, &team_create).unwrap();
+        let record = service
+            .get(&db, created.result.payload["missionId"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.member_agent_ids.len(), 3);
+        for id in ["agent_1", "agent_2", "agent_3"] {
+            assert!(record.member_agent_ids.contains(&id.to_string()));
+        }
+        assert_eq!(record.default_lead_agent_id.as_deref(), Some("agent_2"));
+        assert_eq!(
+            crate::teams::thread_guidance(db.connection(), &record.camp_id)
+                .unwrap()
+                .as_deref(),
+            Some("Implement, review, report.")
+        );
+        assert_eq!(
+            db.connection()
+                .query_row("SELECT COUNT(*) FROM agent_run", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        team_draft.team_id = Some(team_id.clone());
+        team_draft.expected_version = Some(1);
+        team_draft.guidance.clear();
+        crate::teams::save(&mut db, &command(team_draft)).unwrap();
+        assert!(service.create(&mut db, &team_create).unwrap().replayed);
+        team_create.command_id = Uuid::new_v4().to_string();
+        assert_eq!(
+            service.create(&mut db, &team_create).unwrap().result.code,
+            "team.conflict"
+        );
+        team_create.command_id = Uuid::new_v4().to_string();
+        team_create.payload.team.as_mut().unwrap().expected_version = 2;
+        let empty = service.create(&mut db, &team_create).unwrap();
+        let empty_record = service
+            .get(&db, empty.result.payload["missionId"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(
+            crate::teams::thread_guidance(db.connection(), &empty_record.camp_id)
+                .unwrap()
+                .is_none()
+        );
+        crate::teams::delete(
+            &mut db,
+            &command(crate::teams::DeleteTeamCommand {
+                team_id,
+                expected_version: 2,
+            }),
+        )
+        .unwrap();
+        team_create.command_id = Uuid::new_v4().to_string();
+        assert_eq!(
+            service.create(&mut db, &team_create).unwrap().result.code,
+            "team.unavailable"
+        );
+        assert_eq!(
+            crate::teams::thread_guidance(db.connection(), &record.camp_id)
+                .unwrap()
+                .as_deref(),
+            Some("Implement, review, report.")
+        );
     }
 
     #[test]
@@ -1363,6 +1484,7 @@ mod tests {
         std::fs::create_dir_all(&directory).unwrap();
         let service = MissionService::default();
         let create = command(CreateMissionCommand {
+            team: None,
             description_content: None,
             title: "使命".repeat(65),
             description: "original".into(),
@@ -1505,6 +1627,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    team: None,
                     description_content: None,
                     title: "普通消息执行使命".into(),
                     description: String::new(),
@@ -2078,6 +2201,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    team: None,
                     description_content: None,
                     title: "cleanup projection".into(),
                     description: String::new(),
@@ -2159,6 +2283,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    team: None,
                     description_content: None,
                     title: "same execution root".into(),
                     description: String::new(),
@@ -2295,6 +2420,7 @@ mod tests {
             .create(
                 &mut db,
                 &command(CreateMissionCommand {
+                    team: None,
                     description_content: None,
                     title: "带附件的使命".into(),
                     description: "附件应随使命定义保存，并在开始时交付。".into(),
@@ -2417,6 +2543,7 @@ mod tests {
             .create(
                 &mut database,
                 &command(CreateMissionCommand {
+                    team: None,
                     description_content: None,
                     title: "非 Git 交付".into(),
                     description: String::new(),
@@ -2506,6 +2633,7 @@ mod tests {
                 .create(
                     &mut database,
                     &command(CreateMissionCommand {
+                        team: None,
                         description_content: None,
                         title: title.into(),
                         description: format!("{title} details"),
@@ -2558,6 +2686,7 @@ mod tests {
             .create(
                 &mut database,
                 &command(CreateMissionCommand {
+                    team: None,
                     description_content: None,
                     title: "Epsilon".into(),
                     description: "Created between keyset pages".into(),

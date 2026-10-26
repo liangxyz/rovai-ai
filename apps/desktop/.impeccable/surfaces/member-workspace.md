@@ -1,5 +1,5 @@
 ---
-version: 21
+version: 22
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -32,13 +32,12 @@ All split boundaries, including the roster, highlight their full 1px line with `
 The roster shares the detail's workspace
 surface (white in Day), with a 1px divider separating the two reading planes. Its default width is 256px;
 expanded widths range from 192px to 360px and protect 400px for the detail when space permits.
-Dragging holds at 192px; a 180ms dwell plus 64px further inward folds to the 76px avatar rail
-over 160ms. Releasing at the stop retains the minimum; reduced motion omits the fold animation.
-Dragging a collapsed rail past 208px expands it. Escape, lost capture, blur or resizing the window
-restores the pre-gesture layout; mouseup during an accepted fold lets it finish.
-The 9px pointer target stays mounted through collapse so the gesture can reverse without losing capture.
+Use the shared fold gesture from [DESIGN.md](../../../../DESIGN.md#components), folding to a 76px avatar rail.
+Dragging a collapsed rail to 208px expands it. Escape restores the pre-gesture layout; blur, lost capture and
+container-width changes settle the last observed position. Page changes discard the stale gesture.
+The 9px pointer target stays mounted through collapse and supports dragging open again.
 Expanding restores the useful width before the collapse gesture. Remember width and
-collapse locally, accepting the previous collapse-only preference; viewport clamping does not overwrite
+collapse locally; viewport clamping does not overwrite
 the chosen width. Double-click or Home restores 256px, arrows resize and collapse/expand at the boundary,
 and Enter toggles collapse. The separate collapse button and roster options menu are absent. A reorder gesture temporarily disables
 the splitter. The detail scrolls internally instead of shrinking identity or actions below usability.
@@ -92,6 +91,10 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 “运行参数” directly visible by default in the vertical reading flow. Do not restore the removed
 “高级设置”, summary-model configuration or “对话压缩模型”.
 
+Normal roster and detail views omit permanent availability or verification explanations; show actionable problems only.
+Fast changes the saved preference without starting an eligibility check. Retain the Runtime name and known version;
+version ownership follows [Runtime Launch v64](../../../../docs/contracts/runtime-launch-and-verification-v64.md).
+
 For any `light_ready` installation, expose Runtime default model plus only permissions described by the
 static Adapter schema. Login, model and capability validation happens in the real task Host; do not add
 routine copy explaining that mechanism. Native choices require catalog evidence; manually entered IDs only record user intent
@@ -99,7 +102,7 @@ and retain each Adapter's execution checks. TRAE uses the same model
 catalog cache and Picker behavior as every other Runtime; its permission draft still defaults to the statically
 admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
-Every boolean Runtime permission switch on this page uses the neutral action family for its on state across
+Every boolean Runtime permission switch on this page uses the current theme action family for its on state across
 Desktop, Web and Mobile; it does not fall back to the Steel brand family.
 Use the accepted understated permission guidance from the [member configuration UI contract](../../../../docs/ui/components/member-identity.md#队员配置页): ordinary recommendation text appears only inside an open menu, with one short line below switches. The inline permission switch face and its minimum height are both 36px. Guidance never changes a saved value or draft, and language changes preserve both.
 
@@ -173,7 +176,7 @@ and no create/edit dialogs. Name and team role share a row; professional respons
 principles and growth share a collapsed “更多设定” disclosure with an optional “已设置” label, never a completion count.
 Collapsing preserves drafts; validation expands and focuses the field. Avatar selection and framing use their own dialog.
 
-Each section owns its “放弃更改” and neutral primary save control: a 14px outline save icon plus “保存”, with full accessible names “保存队员信息” / “保存运行配置”. Member selection preserves
+Each section owns its “放弃更改” and theme primary save control: a 14px outline save icon plus “保存”, with full accessible names “保存队员信息” / “保存运行配置”. Member selection preserves
 both sections' pending drafts for each visited teammate. Saving one section advances its accepted baseline
 without resetting the other. A conflicting external update preserves the local draft and blocks that section's
 save until the user reloads its saved values. Leaving the workspace confirms discarding pending changes.
@@ -194,8 +197,8 @@ an additional Runtime parameters heading in this continuous form.
 
 The compact header and identity form use one column when space narrows, without a portrait column.
 Personality, principles and growth are collapsed together under “更多设定”; validation reveals the affected fields.
-Both themes keep the same geometry, semantic colors and restrained 1px input borders. Neutral primary buttons
-and sliders follow the current theme. Preserve destructive removal preview, blockers, errors and keyboard operation.
+All registered palettes keep the same geometry, semantic roles and restrained 1px input borders. Primary buttons
+and sliders follow the shared theme action rules. Preserve destructive removal preview, blockers, errors and keyboard operation.
 
 The production-component regression is `node --test scripts/lib/member-editor.test.mjs`. It runs an isolated
 Electron fixture, covers both saves, cross-member drafts, conflicts, inline creation, keyboard focus and
@@ -209,7 +212,7 @@ shows the source snapshot and a selectable roster, preselecting only unconfigure
 require selection and an inline replacement preview. Runtime drafts, busy targets and frozen configurations cannot
 be overwritten; independent identity drafts survive. Per-target receipt, retry and unknown-outcome behavior belongs
 to the [member configuration UI contract](../../../../docs/ui/components/member-identity.md#应用运行配置到其他队员).
-Mobile presents the same content in a bottom sheet with fixed actions and 44px touch controls. Keep both themes,
+Mobile presents the same content in a bottom sheet with fixed actions and 44px touch controls. Keep all registered palettes,
 language switching and native Runtime values on this same component tree. `pnpm test:member-runtime-apply` verifies
 the production component with explicit transport fixtures, including unknown responses, version conflicts, phone
 portrait/landscape and zoom; no real Runtime or daily profile participates.

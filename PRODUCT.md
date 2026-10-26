@@ -74,6 +74,6 @@ are stated plainly rather than hidden behind optimistic status language.
 
 ## Accessibility & Inclusion
 
-Primary desktop surfaces support keyboard operation, visible focus, screen-reader labels, reduced
-motion, both production themes, 200% zoom and the minimum `1040×700` window without page-level
+Primary desktop surfaces support keyboard operation, predictable focus behavior, screen-reader labels, reduced
+motion, all registered palettes, 200% zoom and the minimum `1040×700` window without page-level
 horizontal overflow. State is never communicated by color alone.

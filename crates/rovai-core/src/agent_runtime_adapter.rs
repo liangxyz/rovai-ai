@@ -374,8 +374,8 @@ fn runtime_entrypoint_compatibility(input: &AdapterRuntimeResolutionInput<'_>) -
 #[serde(rename_all = "camelCase")]
 pub struct AdapterRuntimeProjection {
     pub protocol_version: String,
-    pub binding_compatibility_digest: String,
-    pub host_config_digest: String,
+    pub binding_compatibility_digest: Option<String>,
+    pub host_config_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -845,17 +845,21 @@ impl AgentRuntimeAdapterRegistry {
                 ),
             };
         }
+        if kind == AdapterKind::CommandCodeCli {
+            return match platform {
+                HostPlatformKey::MacosArm64
+                | HostPlatformKey::MacosX64
+                | HostPlatformKey::WindowsX64
+                | HostPlatformKey::LinuxX64 => RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                ),
+            };
+        }
         // Deferred products retain their ACP implementation and persisted identity.
-        // Cline ACP compaction and Command Code BYOK selection remain incomplete.
-        if matches!(
-            kind,
-            AdapterKind::CursorAgent | AdapterKind::ClineCli | AdapterKind::CommandCodeCli
-        ) {
-            return RuntimePlatformAdmission::not_qualified(
-                kind,
-                platform,
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-            );
+        if matches!(kind, AdapterKind::CursorAgent | AdapterKind::ClineCli) {
+            return unqualified();
         }
         if kind == AdapterKind::Pi {
             return RuntimePlatformAdmission::qualified(
@@ -1825,8 +1829,8 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
         }))?;
         Ok(AdapterRuntimeProjection {
             protocol_version,
-            binding_compatibility_digest,
-            host_config_digest,
+            binding_compatibility_digest: Some(binding_compatibility_digest),
+            host_config_digest: Some(host_config_digest),
         })
     }
 }
@@ -2592,7 +2596,7 @@ fn acp_capability_snapshot(
     };
     let permission_schema_digest =
         adapter_permission_schema_digest(adapter_kind, &permission_options)?;
-    let native_session_compatibility_key = if ready {
+    let native_session_compatibility_key = if ready && adapter_kind != AdapterKind::CommandCodeCli {
         Some(
             if matches!(
                 adapter_kind,
@@ -2816,11 +2820,10 @@ pub fn acp_model_catalog_for_adapter(
     ) && acp_runtime_model_id_from_session(session_result).is_some()
         && !models.iter().any(|model| model.is_default)
     {
-        // Native configuration can select a custom BYOK model omitted from
-        // ACP's switchable catalog. Keep the shared native-default sentinel;
-        // do not advertise that custom ID as explicitly selectable (the
-        // official set_model RPC rejects it). Actual Run model is observed
-        // from the Session independently of this picker placeholder.
+        // If the current model has no matching catalog entry, keep a native-default
+        // choice without inventing a selectable model ID. Explicit choices still
+        // come from the returned catalog, including Command Code 1.88 BYOK models.
+        // Actual Run model is observed from the Session, not this placeholder.
         models.insert(
             0,
             ModelDescriptor {
@@ -3548,8 +3551,8 @@ fn resolve_pi_runtime(
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
-        binding_compatibility_digest,
-        host_config_digest,
+        binding_compatibility_digest: Some(binding_compatibility_digest),
+        host_config_digest: Some(host_config_digest),
     })
 }
 
@@ -3582,6 +3585,13 @@ fn resolve_session_runtime(
         .find(|protocol| protocol.as_str() == required_protocol)
         .context("Runtime installation does not advertise the required protocol")?
         .clone();
+    if expected_kind == AdapterKind::CommandCodeCli {
+        return Ok(AdapterRuntimeProjection {
+            protocol_version,
+            binding_compatibility_digest: None,
+            host_config_digest: None,
+        });
+    }
     let permission_values = input
         .permissions
         .values
@@ -3634,8 +3644,8 @@ fn resolve_session_runtime(
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
-        binding_compatibility_digest,
-        host_config_digest,
+        binding_compatibility_digest: Some(binding_compatibility_digest),
+        host_config_digest: Some(host_config_digest),
     })
 }
 
@@ -3758,8 +3768,8 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
         }))?;
         Ok(AdapterRuntimeProjection {
             protocol_version,
-            binding_compatibility_digest,
-            host_config_digest,
+            binding_compatibility_digest: Some(binding_compatibility_digest),
+            host_config_digest: Some(host_config_digest),
         })
     }
 }
@@ -3830,8 +3840,8 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
         }))?;
         Ok(AdapterRuntimeProjection {
             protocol_version,
-            binding_compatibility_digest,
-            host_config_digest,
+            binding_compatibility_digest: Some(binding_compatibility_digest),
+            host_config_digest: Some(host_config_digest),
         })
     }
 }
@@ -4383,7 +4393,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             resolved.binding_compatibility_digest,
-            current_contract_digest
+            Some(current_contract_digest.clone())
         );
         assert_ne!(current_contract_digest, legacy_contract_digest);
     }

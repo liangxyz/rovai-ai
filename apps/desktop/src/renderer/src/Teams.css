@@ -1,5 +1,5 @@
-/* The Team surface shares the native member workspace and semantic theme tokens. */
-.team-workspace { --brand:var(--conversation-action); --brand-hover:var(--conversation-action-hover); --brand-contrast:var(--conversation-action-contrast); --brand-soft:var(--neutral-selected); }
+/* Portaled Team controls share the workspace action palette. */
+.team-workspace, .team-confirm-dialog, .team-choice-menu, .hub-member-menu { --brand:var(--conversation-action); --brand-hover:var(--conversation-action-hover); --brand-contrast:var(--conversation-action-contrast); --brand-ink:var(--conversation-action-ink); --brand-soft:var(--neutral-selected); }
 .team-sidebar { border-right:0; background:var(--home-surface); }
 .team-sidebar .member-sidebar-heading { min-height:56px; padding:14px 14px 10px; border-bottom:0; }
 .team-sidebar .member-sidebar-actions .team-add { display:inline-flex; align-items:center; width:auto; gap:4px; padding:4px 7px; font-size:12px; }
@@ -96,12 +96,13 @@
 .hub-member-menu { display:flex; flex-direction:column; overflow:hidden; max-height:min(500px,var(--radix-dropdown-menu-content-available-height)); }
 .hub-member-options { overflow:auto; min-height:0; overscroll-behavior:contain; }
 .hub-member-menu>.compact-menu-heading { flex-shrink:0; }
+.compact-option[aria-pressed=true] .team-member-checkbox { background:var(--conversation-action); color:var(--conversation-action-contrast); border-color:var(--conversation-action); }
 .team-member-search { display:flex; flex-shrink:0; margin:4px 6px 8px; padding:0 10px; min-height:34px; border-radius:6px; background:var(--surface-subtle); }
 .team-member-search input { width:100%; min-width:0; height:34px; border:0; background:transparent; color:var(--ink); font:inherit; font-size:12px; }
 .team-conversation-summary { display:flex; align-items:center; gap:8px; padding:9px 0 2px; color:var(--muted); font-size:12px; flex-wrap:wrap; }
-.team-general-choice { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.team-general-choice { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
 .team-general-choice>strong { flex-shrink:0; font-size:13px; font-weight:500; }
-.team-general-choice>.team-picker-trigger { width:auto; min-width:180px; max-width:70%; }
+.team-general-choice>.team-picker-trigger { width:auto; min-width:min(180px,100%); max-width:70%; }
 .team-general-custom { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; }
 @media (prefers-reduced-motion:reduce) { .team-member-row,.team-row-actions { transition:none; } }
 @media (hover:none) { .team-row-actions { opacity:1; pointer-events:auto; } .team-row-action,.team-roster-add,.team-guidance-toggle { min-height:44px; } }
@@ -125,5 +126,3 @@
 .team-memory-review-shortcut svg { width:15px; height:15px; }
 .team-memory-count { margin-left:auto; color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
 .settings-sidebar-menu button:has(>.team-memory-count) { grid-template-columns:22px minmax(0,1fr) auto; }
-.unified-sidebar .new-conversation-button { background:var(--conversation-action); color:var(--conversation-action-contrast); }
-.unified-sidebar .new-conversation-button:hover { background:var(--conversation-action-hover); }

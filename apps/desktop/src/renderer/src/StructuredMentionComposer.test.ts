@@ -113,6 +113,43 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredMentionOptions([...fullThread, outsider], '')).toHaveLength(50)
   })
 
+  it('matches names and roles separately and retains same-name and same-sound identities', () => {
+    const catalog = [
+      { agentId: 'a', displayName: '爱丽丝', teamRole: '实现者' },
+      { agentId: 'b', displayName: '爱丽丝', teamRole: '核对者' },
+      { agentId: 'c', displayName: '艾丽丝', teamRole: 'UI 设计师' }
+    ]
+    expect(structuredMentionOptions(catalog, 'aili').map(option => option.kind === 'member' && option.member.agentId))
+      .toEqual(['a', 'b', 'c'])
+    expect(structuredMentionOptions(catalog, 'uisj')).toEqual([{ kind: 'member', member: catalog[2] }])
+    expect(structuredMentionOptions([{ agentId: 'd', displayName: '张', teamRole: '设计师' }], 'zhangshe')).toEqual([])
+  })
+
+  it('keeps pinyin qualification, priority, invitation limits and mission rules', () => {
+    const member = { displayName: '爱丽丝', teamRole: '实现者' }
+    const inside = Array.from({ length: 55 }, (_, i) => ({ ...member, agentId: 'in-' + i, inThread: true }))
+    const outside = Array.from({ length: 55 }, (_, i) => ({ ...member, agentId: 'out-' + i, inThread: false }))
+    const catalog = [{ ...member, agentId: 'hidden', mentionable: false }, ...outside, ...inside]
+    const result = structuredMentionOptions(catalog, 'aili')
+    expect(result).toEqual([
+      ...inside.slice(0, 40).map(member => ({ kind: 'member', member })),
+      ...outside.slice(0, 10).map(member => ({ kind: 'member', member }))
+    ])
+    expect(structuredMentionOptions(catalog, 'aili', true)).toEqual([
+      { kind: 'back_to_camp' }, ...outside.slice(0, 49).map(member => ({ kind: 'member', member }))
+    ])
+    expect(structuredMentionOptions(catalog, 'aili', false, false)).toEqual(result)
+    expect(structuredMentionOptions(catalog, '', false, false).some(option => option.kind === 'all_members')).toBe(false)
+  })
+
+  it('keeps Skill name and description search literal', () => {
+    const skill = { ...skills[0], name: '审查', description: '设计核对' }
+    expect(structuredSkillOptions([skill], 'shencha')).toEqual([])
+    expect(structuredSkillOptions([skill], 'sheji')).toEqual([])
+    expect(structuredSkillOptions([skill], '审查')).toEqual([skill])
+    expect(structuredSkillOptions([skill], '设计')).toEqual([skill])
+  })
+
   it('renders the catalog-backed member avatar in the candidate UI', () => {
     const memberMarkup = renderToStaticMarkup(createElement(StructuredMentionOptionAvatar, {
       option: { kind: 'member', member: members[0] }
@@ -148,7 +185,8 @@ describe('StructuredMentionComposer V2', () => {
       false, undefined, 0, () => undefined, () => undefined
     ))
     const failed = render(true)
-    expect(failed).toContain('role="alert">Refresh failed. Current display shows previous candidates. Please retry.')
+    expect(failed).toContain('role="alert"')
+    expect(failed).toContain('Refresh failed. Showing previous results.')
     expect(failed).not.toContain('Some sources are temporarily unavailable')
     expect(failed).toContain('aria-label="/analyze-agent-codebase, Project Skill, linked teammate: 新洛可"')
     expect(failed).not.toContain('，')

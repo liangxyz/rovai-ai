@@ -119,10 +119,131 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
             },
         )
         .unwrap();
+        let source = service
+            .create_camp(
+                &mut database,
+                &envelope(
+                    &format!("source-{broadcast}"),
+                    None,
+                    CreateThreadCommand::for_test("/reference-project".into()),
+                ),
+            )
+            .unwrap();
+        let source_id = source.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let initial = domain_state(&database, &camp);
         let mut send = message(&camp, &["agent_2", "agent_2"], broadcast);
         // A retired Task association must not block first publication or invitations.
         send.execution.as_mut().unwrap().task_id = Some("missing-task".into());
+
+        // References never invite source members. Pending membership changes roll back
+        // with an unavailable target, while the rejection itself remains replayable.
+        for id in [&camp, &source_id] {
+            if id == &source_id {
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE camp SET activation_state='pending' WHERE id=?1",
+                        [&source_id],
+                    )
+                    .unwrap();
+            }
+            let mut invalid = send.clone();
+            invalid
+                .content
+                .segments
+                .push(crate::camp_content::ComposerSegment::Atom {
+                    atom: crate::camp_content::ComposerAtom::ThreadReference {
+                        thread_id: id.clone(),
+                        label_fallback: Some("伪造标题".into()),
+                    },
+                });
+            let command = envelope(
+                &format!("reference-rejection-{broadcast}-{id}"),
+                Some(&camp),
+                invalid,
+            );
+            let rejected = service
+                .send_user_camp_message(&mut database, &command)
+                .unwrap();
+            assert_eq!(rejected.result.code, "reference_unavailable");
+            assert_eq!(domain_state(&database, &camp), initial);
+            database
+                .connection()
+                .execute(
+                    "UPDATE camp SET activation_state='active' WHERE id=?1",
+                    [&source_id],
+                )
+                .unwrap();
+            let replay = service
+                .send_user_camp_message(&mut database, &command)
+                .unwrap();
+            assert!(replay.replayed);
+            assert_eq!(replay.result, rejected.result);
+        }
+        // A small input can expand beyond the content limit when Core captures titles.
+        // Reject inside the same transaction and replay the rejection after a rename.
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET title=?1 WHERE id=?2",
+                params!["登".repeat(80), source_id],
+            )
+            .unwrap();
+        let mut oversized = send.clone();
+        oversized
+            .content
+            .segments
+            .push(crate::camp_content::ComposerSegment::Text {
+                text: "x".repeat(650_000),
+            });
+        oversized.content.segments.extend((0..2_000).map(|_| {
+            crate::camp_content::ComposerSegment::Atom {
+                atom: crate::camp_content::ComposerAtom::ThreadReference {
+                    thread_id: source_id.clone(),
+                    label_fallback: None,
+                },
+            }
+        }));
+        let oversized_command = envelope(
+            &format!("reference-size-{broadcast}"),
+            Some(&camp),
+            oversized,
+        );
+        let rejected = service
+            .send_user_camp_message(&mut database, &oversized_command)
+            .unwrap();
+        assert_eq!(rejected.result.code, "camp_message.invalid_content");
+        assert_eq!(domain_state(&database, &camp), initial);
+        database
+            .connection()
+            .execute("UPDATE camp SET title='短标题' WHERE id=?1", [&source_id])
+            .unwrap();
+        let replay = service
+            .send_user_camp_message(&mut database, &oversized_command)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, rejected.result);
+
+        for label in ["旧标题", "伪造另一标题"] {
+            send.content
+                .segments
+                .push(crate::camp_content::ComposerSegment::Atom {
+                    atom: crate::camp_content::ComposerAtom::ThreadReference {
+                        thread_id: source_id.clone(),
+                        label_fallback: Some(label.into()),
+                    },
+                });
+        }
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET title='真实标题 [登录]' WHERE id=?1",
+                [&source_id],
+            )
+            .unwrap();
 
         // Standalone additions still cannot mutate a Pending Thread.
         let add = service
@@ -279,6 +400,49 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
             "SELECT COUNT(*) FROM event_log WHERE camp_id=?1 AND event_type='camp.member_added'",
             [&camp], |r| r.get::<_, i64>(0)
         ).unwrap(), 1);
+        assert_eq!(content.matches("真实标题 [登录]").count(), 2);
+        assert!(!content.contains("旧标题") && !content.contains("伪造"));
+        let projected = crate::camp_content::render_agent_plain_text(
+            database.connection(),
+            &serde_json::from_str::<Vec<Segment>>(&content).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            projected
+                .matches(&format!("rovai://thread/{source_id}"))
+                .count(),
+            2
+        );
+        let source_version = database
+            .connection()
+            .query_row("SELECT version FROM camp WHERE id=?1", [&source_id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let deleted = service
+            .delete_camp(
+                &mut database,
+                &envelope(
+                    &format!("delete-source-{broadcast}"),
+                    Some(&source_id),
+                    DeleteThreadCommand {
+                        camp_id: source_id.clone(),
+                        expected_version: source_version,
+                        force: false,
+                        workspace_disposition: MissionWorkspaceDisposition::Retain,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(deleted.result.code, "camp.deleted");
+        assert_eq!(
+            crate::camp_content::render_agent_plain_text(
+                database.connection(),
+                &serde_json::from_str::<Vec<Segment>>(&content).unwrap()
+            )
+            .unwrap(),
+            projected
+        );
         let committed = domain_state(&database, &camp);
         let replay = service
             .send_user_camp_message(&mut database, &command)

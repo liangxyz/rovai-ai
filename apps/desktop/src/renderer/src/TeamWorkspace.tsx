@@ -43,8 +43,13 @@ export function TeamWorkspace({ teams, agents, loading, loadError, defaultTeamId
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(base ? draftOf(base) : blank())
   const frozen = busy || pending.current !== null
   const selected = base && teams.find(team => team.id === base.id)
-  const changedElsewhere = base && (!selected || selected.version !== base.version)
-  const select = (team: Team | null): void => { baseRef.current = team; setBase(team); setDraft(team ? draftOf(team) : null); setDetail(Boolean(team)); setError(null); setSaved(false); setGuidanceOpen(false) }
+  const changedElsewhere = base && (!selected || selected.version > base.version)
+  const select = (team: Team | null): void => {
+    // A pending/stale list cannot replace a newer, confirmed save receipt.
+    const current = baseRef.current
+    if (current && team?.id === current.id && team.version < current.version) team = current
+    baseRef.current = team; setBase(team); setDraft(team ? draftOf(team) : null); setDetail(Boolean(team)); setError(null); setSaved(false); setGuidanceOpen(false)
+  }
   const create = (roster?: NewConversationDefaults): void => { baseRef.current = null; setBase(null); setDraft({ ...blank(), ...roster }); setDetail(true); setError(null); setSaved(false); setGuidanceOpen(false); requestAnimationFrame(() => nameInput.current?.focus()) }
   const change = (patch: Partial<Draft>): void => { if (!frozen) { setDraft(current => current && ({ ...current, ...patch })); setError(null); setSaved(false) } }
 
@@ -113,8 +118,8 @@ export function TeamWorkspace({ teams, agents, loading, loadError, defaultTeamId
   }
   const save = async (): Promise<boolean> => {
     if (!draft) return true
-    if (!pending.current && (!draft.name.trim() || Array.from(draft.name.trim()).length > 80 || !draft.memberAgentIds.length || !draft.memberAgentIds.includes(draft.defaultLeadAgentId) || Array.from(draft.guidance.trim()).length > 1000)) {
-      setError(uiAttribute('请填写团队名称，选择队员和队长；指引最多 1000 字。')); return false
+    if (!pending.current && (!draft.name.trim() || Array.from(draft.name.trim()).length > 80 || !draft.memberAgentIds.length || !draft.memberAgentIds.includes(draft.defaultLeadAgentId) || Array.from(draft.guidance.trim()).length > 10000)) {
+      setError(uiAttribute('请填写团队名称，选择队员和队长；指引最多 10000 字。')); return false
     }
     const result = await mutate('teams.save', draft)
     if (!result) return false
@@ -132,7 +137,7 @@ export function TeamWorkspace({ teams, agents, loading, loadError, defaultTeamId
     if (result) select(result.payload.team as unknown as Team)
   }
   const discard = (): void => select(teams.find(team => team.id === base?.id) ?? teams[0] ?? null)
-  const dialogs = <Dialog.Root open={confirm !== null} onOpenChange={open => { if (!open && !frozen) finishDecision(false) }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay"/><AppDialogContent tone={confirm === 'delete' ? 'danger' : 'neutral'}>
+  const dialogs = <Dialog.Root open={confirm !== null} onOpenChange={open => { if (!open && !frozen) finishDecision(false) }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay"/><AppDialogContent className="team-confirm-dialog" tone={confirm === 'delete' ? 'danger' : 'neutral'}>
     <AppDialogHeader title={confirm === 'delete' ? uiAttribute('删除「{0}」？', base?.name ?? '') : uiAttribute('保存团队更改？')} description={confirm === 'delete' ? (base?.id === defaultTeamId ? uiAttribute('删除后改用自定义配置，并关闭一键创建。已有对话不受影响。') : uiAttribute('已有对话不受影响。')) : uiAttribute('有尚未保存的更改。')}/>
     {error && <p className="compact-inline-error" role="alert">{error}</p>}
     <AppDialogFooter><button type="button" className="quiet-button" disabled={frozen} data-dialog-autofocus onClick={() => finishDecision(false)}>{uiAttribute('取消')}</button>
@@ -163,7 +168,7 @@ export function TeamWorkspace({ teams, agents, loading, loadError, defaultTeamId
         {changedElsewhere && <p className="team-roster-attention">{uiAttribute('团队已在其他地方更改，请重新载入。')} <button type="button" className="quiet-button" disabled={frozen} onClick={discard}>{uiAttribute('重新载入')}</button></p>}
         <div className="team-editor-content"><label className="member-editor-field"><span className="member-editor-field-label">{uiAttribute('团队名称')}</span><input ref={nameInput} value={draft.name} disabled={frozen} aria-label={uiAttribute('团队名称')} placeholder={uiAttribute('例如：日常开发')} onChange={event => change({ name: Array.from(event.target.value).slice(0, 80).join('') })}/></label>
           <section className="team-guidance-block"><header className="team-section-heading"><h2>{uiAttribute('团队指引')}{!draft.guidance.trim() && <span className="team-guidance-optional">{uiAttribute('可选')}</span>}</h2><button type="button" className="team-guidance-toggle" disabled={frozen} aria-expanded={guidanceOpen} aria-controls="team-guidance-content" onClick={() => setGuidanceOpen(!guidanceOpen)}>{guidanceOpen ? uiAttribute('收起') : draft.guidance.trim() ? uiAttribute('编辑') : uiAttribute('添加')}</button></header>
-            <div id="team-guidance-content">{guidanceOpen ? <label className="member-editor-field team-guidance-editor"><textarea ref={guidanceInput} rows={5} aria-label={uiAttribute('团队指引')} disabled={frozen} value={draft.guidance} onChange={event => change({ guidance: event.target.value })} placeholder={uiAttribute('团队共同遵循的协作方式、工作原则…')}/><span className="team-guidance-count" aria-live="polite">{Array.from(draft.guidance.trim()).length} / 1000</span></label> : draft.guidance.trim() && <p className="team-guidance-preview">{draft.guidance}</p>}</div>
+            <div id="team-guidance-content">{guidanceOpen ? <label className="member-editor-field team-guidance-editor"><textarea ref={guidanceInput} rows={5} aria-label={uiAttribute('团队指引')} disabled={frozen} value={draft.guidance} onChange={event => change({ guidance: event.target.value })} placeholder={uiAttribute('团队共同遵循的协作方式、工作原则…')}/><span className="team-guidance-count" aria-live="polite">{Array.from(draft.guidance.trim()).length} / 10000</span></label> : draft.guidance.trim() && <p className="team-guidance-preview">{draft.guidance}</p>}</div>
           </section>
           <section><header className="team-section-heading"><h2>{uiAttribute('队员')}<span className="team-member-count">{draft.memberAgentIds.length}</span></h2><TeamMemberPicker agents={agents} roster={draft} onChange={change} compact busy={frozen}/></header>
             {draft.memberAgentIds.length ? <ul className="team-member-rows">{draft.memberAgentIds.map(id => {

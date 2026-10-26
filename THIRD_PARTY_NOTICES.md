@@ -65,8 +65,8 @@ semantic differences after normalized comparison. See
 
 ## 6. JavaScript Dependencies
 
-The frozen pnpm graph contains 494 exact package instances: 149 production
-instances and 345 development-only instances. Electron Builder packages 144
+The archived pnpm source records contain 495 exact package instances: 150 production
+instances and 345 development-only instances. The bundled records cover 145
 instances in `app.asar`; the five pruned production-graph-only instances are
 recorded explicitly in `legal/manifests/javascript-binary-dependencies.json`.
 The source graph, direct/transitive classification, SPDX expressions,
@@ -74,11 +74,17 @@ license-file source, and SHA-256 values are in
 `legal/manifests/javascript-source-dependencies.json` and
 `legal/licenses/javascript/`.
 
-All 144 bundled instances have corresponding repository legal files: 143 use
+All 145 recorded bundled instances have corresponding repository legal files: 144 use
 the exact package files and one uses the curated clarification below. The
 archived records retain every matched LICENSE, COPYING, NOTICE, COPYRIGHT,
 UNLICENSE, and PATENT-family regular file rather than stopping after the first
 license text.
+
+`pinyin-pro 3.29.5` (zh-lx) supplies Chinese pinyin matching for member names
+and team roles only. Its exact MIT license is retained at
+`legal/licenses/javascript/pinyin-pro@3.29.5/LICENSE`; both JavaScript manifests
+record the license checksum. These are source records, not a fresh audit of
+unrelated dependencies introduced after the original snapshot.
 
 `react-remove-scroll-bar 2.3.8` declares MIT in its exact npm metadata and
 README but omits a license file from the tarball. Its manifest entry records

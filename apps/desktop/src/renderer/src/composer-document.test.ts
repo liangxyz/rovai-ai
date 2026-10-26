@@ -1,3 +1,4 @@
+import type { ComposerDocument } from '@contracts'
 import { describe, expect, it } from 'vitest'
 import {
   composerDocumentsEqualDirect,
@@ -218,4 +219,34 @@ describe('ComposerDocument V2', () => {
     expect(composerDocumentStatus(document, members, skills).memberAgentIds).toEqual(['agent_1', 'agent_2'])
     expect(document.segments.filter((segment) => segment.kind === 'atom')).toHaveLength(3)
   })
+})
+
+// One document owner covers identity-preserving edit/copy/recall and routing isolation.
+it('keeps reference identity through editing and clipboard without making it a recipient', () => {
+  const threadId = 'rvcamp_01k87hrb9yfay8vvr14d2pf2db'
+  const missionId = 'rvm_019abcde123470008000000000000001'
+  const document: ComposerDocument = { version: 2, segments: [
+    { kind: 'atom', atom: { type: 'thread_reference', threadId, labelFallback: '登录 [旧]' } },
+    { kind: 'text', text: '检查' },
+    { kind: 'atom', atom: { type: 'mission_reference', missionId, labelFallback: '登录\n使命' } }
+  ] }
+  expect(validateComposerDocument(document)).toBe(true)
+  const recovered = recoverComposerClipboardDocument(parseComposerClipboardDocument(JSON.stringify(document))!, [], [])
+  expect(recovered).toEqual(document)
+  expect(recovered).not.toBe(document)
+  expect(composerDocumentsEqualDirect(document, recovered)).toBe(true)
+  const segments = composerDocumentToStructuredContent(document)
+  expect(composerDocumentFromLegacyContent(segments)).toEqual(document)
+  expect(composerDocumentToPlainText(document)).toContain(`[登录 \\[旧\\]](rovai://thread/${threadId})`)
+  expect(composerDocumentToPlainText(document)).toContain(`[登录 使命](rovai://mission/${missionId})`)
+  expect(composerDocumentStatus(document, members, skills)).toMatchObject({ hasExplicitRecipient: false, memberAgentIds: [] })
+  for (const field of ['titleAtSend', 'body', 'sourceText']) {
+    const forged = structuredClone(document)
+    Object.assign((forged.segments[0] as { atom: object }).atom, { [field]: 'forged' })
+    expect(parseComposerClipboardDocument(JSON.stringify(forged))).toBeNull()
+  }
+  const changed = structuredClone(document)
+  Object.assign((changed.segments[0] as { atom: object }).atom, { labelFallback: '新标题' })
+  expect(composerDocumentsEqualDirect(document, changed)).toBe(false)
+  expect(parseComposerClipboardDocument(JSON.stringify({ ...document, version: 99 }))).toBeNull()
 })

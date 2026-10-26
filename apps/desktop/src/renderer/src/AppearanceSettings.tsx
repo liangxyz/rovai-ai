@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { AppearancePreferences, AppearanceSnapshot } from '@contracts'
-import { APPEARANCE_ZOOM_OPTIONS, DEFAULT_APPEARANCE, MAX_READING_FONT_SIZE, MIN_READING_FONT_SIZE, appearancePreferencesEqual } from '../../shared/appearance'
+import { APPEARANCE_ZOOM_OPTIONS, DEFAULT_APPEARANCE, MAX_READING_FONT_SIZE, MIN_READING_FONT_SIZE, appearancePreferencesEqual, resolveThemeId } from '../../shared/appearance'
 import { useMobileLayout } from './MobileLayout'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { THEME_OPTIONS } from './theme'
 import systemThumbnail from './assets/appearance/system.svg'
 import dayThumbnail from './assets/appearance/day.svg'
 import nightThumbnail from './assets/appearance/night.svg'
+import horizonThumbnail from './assets/appearance/horizon.svg'
+import classicRedThumbnail from './assets/appearance/classic-red.svg'
+import emberThumbnail from './assets/appearance/ember.svg'
 import './AppearanceSettings.css'
 import { UiText, uiAttribute } from './interface-language'
 
-const thumbnails = { system: systemThumbnail, day: dayThumbnail, night: nightThumbnail }
+const thumbnails = { system: systemThumbnail, day: dayThumbnail, night: nightThumbnail, horizon: horizonThumbnail, 'classic-red': classicRedThumbnail, ember: emberThumbnail }
 const previews = ['chat', 'document', 'code'] as const
 type Preview = typeof previews[number]
 const previewLabels = { chat: '会话', document: '文档', code: '代码' }
@@ -140,7 +143,8 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
     '--message-gap': draft.readingDensity === 'relaxed' ? '25px' : '19px'
   } as CSSProperties
   const zoomOptions = APPEARANCE_ZOOM_OPTIONS.includes(draft.zoomPercentage) ? APPEARANCE_ZOOM_OPTIONS : [...APPEARANCE_ZOOM_OPTIONS, draft.zoomPercentage].sort((a, b) => a - b)
-  const themeLabel = appearance.resolvedTheme === 'night' ? uiAttribute('夜间') : uiAttribute('日间')
+  const themeId = resolveThemeId(appearance.preference, appearance.resolvedTheme)
+  const themeLabel = uiAttribute(THEME_OPTIONS.find(option => option.value === themeId)!.label)
   const sourceDegraded = Boolean(appearance.degradation)
   const shortcut = platform === 'darwin' ? '⌘' : 'Ctrl'
 

@@ -6,16 +6,72 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-22
+last_updated: 2026-10-26
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Run 启动与停止展示（2026-10-26）
+
+按 User 确认的交互稿收敛为前端展示修正：启动阶段统一文案，Delivery 简化准备／排队提示，
+停止时移除有色提示与重复停止按钮，状态图标保留时间线。无 Core 字段、状态机或调度变更。
+当前规则见 [Run Process Detail Surface v56](../../contracts/run-process-detail-surface-v56.md)，
+实施与验证见[实施记录](implementation-plan.md#run-启动与停止展示2026-10-26)。
+
+## 撤回消息两分钟重新编辑（2026-10-23）
+
+按 User 确认，以客户端 localStorage 短期副本支持重新编辑，Core 保持撤回原文擦除。
+正文及显式成员 @ 可回填；已有草稿先确认替换，默认队长显示前缀不带回。刷新不续期，
+副本到期不删除已回填的普通草稿；↑↓ 保持原有本轮固定内容规则。
+合同见 [Message Reedit v1](../../contracts/message-reedit-v1.md)，范围与验证见
+[实施记录](implementation-plan.md#撤回消息两分钟重新编辑2026-10-23)。更新 Architecture、UI 和文档路由；
+无 Core schema、命令协议、模型上下文或发布版本变化。局部可逆客户端功能，无需新增 Version Decision。
+
+## 全界面分隔线快速松手（2026-10-23）
+
+按 User 确认的第二版交互稿，把可折叠分隔线统一为“到最小值停住、继续内推 64px、松手收起”，
+移除必须停留的门槛，普通调宽也使用松手的最终位置。覆盖导航、队员／团队名册、文件／执行 Sidecar、
+回复详情、定时任务、底部执行面板；MCP、原生 Skills 与工具箱共用缩放、取消和最终位置提交，保留只调宽行为。
+当前规则见 [DESIGN](../../../DESIGN.md) 与各 [UI 页面](../../ui/README.md)，
+实施与验证见[分隔线实施记录](implementation-plan.md#全界面分隔线快速松手2026-10-23)。
+不改变 Core、模型上下文、数据库 schema、偏好格式或发布版本。
+
+## 三款新增主题（2026-10-22）
+
+User 确认在独立 worktree 实施地平线、经典红与余烬，保留原有三项偏好并缩小六项主题卡片。
+新增配色与明暗模式分离，消息、输入框与焦点行为继续使用生产实现，不带入原型专属交互。
+后续按 User 反馈降低地平线的大面积暖色，执行台改用独立中性白，保留会话与侧栏的轻微暖感。
+2026-10-25 按 User 确认，将三款显示名称统一为晨雾、朝霞、绯夜；沿用原有稳定 ID、偏好和配色。
+当前规则见[主题注册](../../ui/themes/README.md)，范围、验证与分支状态见[实施记录](theme-palettes-implementation.md)。
+不改变模型上下文、Core schema 或发布版本。
+
+## 对话与使命引用（2026-10-22）
+
+按 User R6 与 sequence 16 授权实施公开 `@队员/对话/使命` 和紧凑 Skills。参考只定位来源；正式标题由
+Core 首发事务捕获，正文沿既有 projector 输出链接，无 Context/Composer 版本兼容层、schema 迁移或自动摘要。
+当前合同见 [Thread Reference v1](../../contracts/thread-reference-v1.md)，取舍见 [V1.72-D58](decisions.md#v1-72-d58)，
+进度和验证见[实施记录](thread-reference-implementation.md)。更新 Contract、Architecture、UI 和导航；发布版本与 Runtime 平台资格不变。
+
+2026-10-26 按 User sequence 30、32 确认的交互稿收敛长标题：只省略引用标题文字、保留图标/状态及正文基线，
+草稿与历史详情分别使用当前标题与发送时标题，公开 `@` 的 Tab/Shift+Tab 切换类别。
+当前规则见[结构化 Mention UI](../../ui/components/structured-mentions.md#公开引用候选)，验证继续记入同一实施记录。
+仅 Renderer 展示和交互，不修改 Core、标题生成、协议版本或数据。
+
+## Mission 接入 Team（2026-10-26）
+
+User 在 Team 设计 Thread sequence 90 确认默认主题 V2 交互并授权 worktree、PR、合入 main。
+使命新增 Team/Custom 来源，读取 General 默认值；已保存 Team 只读，Custom 保留独立成员与 Lead 草稿。
+长指引采用五行预览及同浮层全文阅读，去掉使命中修改全局 one-click 的勾选。Core 复用现有 Thread
+Team 创建事务，并入描述提及的成员，同步冻结指引；旧 Mission 不补写。协议为
+[Mission v13](../../contracts/mission-v13.md)与[Team Templates v2](../../contracts/team-templates-v2.md)，
+不改变数据库、Bootstrap 或 Runtime 版本轴。范围、测试与原 Gate 边界见
+[实施记录](mission-team-implementation.md)。既有 seam 的局部扩展，不新增 Version Decision。
 
 ## Team 管理（2026-10-18）
 
 User 在 Team 设计 Thread sequence 29 确认开启 worktree 实施。当前范围为具名团队、General 的
 Team/Custom 创建默认配置、简洁新对话选择和可选 Bootstrap 指引；旧配置不自动创建团队。
-上下文边界与确认见 [R1](model-context-change-team-guidance.md)，分支、范围和结果见
+上下文边界与确认见 [R1](model-context-change-team-guidance.md)和[长度上限 R1](model-context-change-team-guidance-limit.md)，分支、范围和结果见
 [实施记录](team-management-implementation.md)。功能已在独立分支实现，单元测试、构建与五项真实模型
 定向验证通过；通用 Gate 为 `degraded`（共有交付失败、一项耗时退化及语义证据不足），不标记为 Gate 通过。
 2026-10-22 User 在 sequence 62 明确按 V10 收口并要求 PR 合入 main、本机安装；本次整合主线
@@ -579,9 +635,12 @@ Claude 继续使用既有私有 settings 文件与子进程 env 双重覆盖，F
 Command Code 与 Cline 一样撤回 Preview，所有平台 NotQualified；设置、新手引导、队员/Skill 选择、
 安装引导和监控筛选不再展示。旧身份、配置与公开历史不删除、不迁移，隐藏不改变旧 Run 事实。
 
-Cline ACP 自动压缩仍未接通；Command ACP 自定义 BYOK 目录/切换、`acp --model` 启动选择及已测 BYOK
-MCP 实际调用仍有缺口。精确版本、通过范围与未知项见[兼容性清单](../../runtime-compatibility.md)。
+Cline ACP 自动压缩仍未接通；当时 Command 1.74/1.79 的 ACP 自定义 BYOK 目录/切换及已测 BYOK MCP
+实际调用有缺口。1.88 已有新的目录/标准选模支持与真实 MCP 调用证据，不再沿用这些旧阻塞；
+`acp --model` 仍不作为选模路径。精确版本、通过范围与未知项见[兼容性清单](../../runtime-compatibility.md)。
 这是公开范围收敛，没有更换 Runtime 或新增后备链路；下文 Preview/headless 是实施历史。
+后续 Command 在 1.88 简化完成后按 [V1.72-D60](decisions.md#v1-72-d60)重新开放 macOS 两架构 Preview；
+本节保留 2026-10-09 的实施记录，Cline 的暂缓公开继续有效。
 
 2026-10-10 合流主干内部续做请求等后续修复；190/schema 140 兼容主干与 Preview 的同号旧收据，
 保留用户历史与 ACP 身份，不改变上述隐藏范围。迁移与验证见[实施计划](implementation-plan.md#2026-10-10-两个隐藏-acp-与最新主干合流)。
@@ -1131,3 +1190,44 @@ User 进一步确认保留 App 运行期间的 Run 异常退出提醒，统一�
 不恢复短亮或逐 command 读取。具体场景与验证见下述实施记录。
 
 取舍见 [V1.72-D55](decisions.md#v1-72-d55)，实施验证见[退出提醒验收](interruption-attention-validation.md)。
+
+## 队员拼音检索（2026-10-23）
+
+公屏、Pending 草稿与使命描述中的队员名字/角色增加拼音匹配，包含普通空格容错；
+对话/使命标题及 Skill 保留原文检索，分类、身份、邀请和发送流程沿用既有机制。
+当前规则见[结构化 Mention](../../ui/components/structured-mentions.md#member-typeahead)，
+实现、分层验收及当前基线体积对照见[队员拼音检索验收](member-pinyin-search-validation.md)。
+
+
+## Command Code 原生接入简化（2026-10-24）
+
+官方 1.88.0、用户原生 HOME、官方 Mod、ACP MCP 和共享 Fleet 身份复用作为同一交付；删除配置镜像与
+摘要兼容性链。旧 Session/Binding 保留，结构简化本身不恢复公开准入。实现、复杂度对照及定向验证见
+[Command Code 简化记录](command-code-native-simplification.md)。
+
+2026-10-25 已修复配置/数据库持锁等待 Fleet、非空已生效设置重试、安装命令 replay、版本文本误拒绝及
+MCP 无关成员退役，认证展示沿共享原生错误分类。后续收口只修正旧 BYOK 注释与报告，保留原生默认模型占位。
+成员指令在每 Run 发送前交付该 Run 已冻结内容；后继 warm 无需重启即可采用新指令。直接传输验证后，
+首次/warm/cold 统一经官方 Mod 控制命令更新内存，删除 Bootstrap binding 正文文件及其读写、SHA 和文件名限制。
+控制回复沿普通 RPC 返回，不形成业务终态或用量；更新失败停止准备，不新增锁、缓存或 fallback。
+
+同日 stdio 资源跟进确认官方 1.88 从 ACP Session cwd 直接启动 MCP；默认／相同目录去掉额外 Node，
+不同目录保留原 argv 包装。隔离 `session/new`／`session/load` 的目录、参数、环境字面值与回收均通过。
+与 Codex、Cline、ZCode、Pi 及共享 ACP 的进程／文件／锁对照追加到同一实施记录；共享 MCP 投影落盘不改，
+不新增锁、池、缓存或文件种类，也不将本次控制面验证算作真实模型或跨平台资格。
+
+后续 sub2api 实模型补验通过默认/自定义 cwd stdio、HTTP、warm 及 exact cold 的四次 MCP 回执闭环；
+11 次前台请求 System 中合成 B 恰好一份，cold 保留模型并回忆首轮回执。现有报告另补接入 Checklist 的
+14 能力轴方案对照，区分当前实现、旧版本证据，以及原生提问、Skills、压缩、用量等尚未验证的子项。
+
+2026-10-25 按 User seq61 开放 macOS Apple Silicon 与 Intel，Core 两个平台采用既有 Preview 准入；
+共享产品目录恢复 Command 的设置、引导、成员/Skill 选择和监控入口，安装引导指向官方说明。
+同日 Windows x64 完成真实功能补验后也按 Preview 开放，Linux 保持 NotQualified，1.88.0 稳定版下限保持。
+Windows 实测与残余边界见[Windows Preview 开放](command-code-native-simplification.md#windows-preview-开放2026-10-25)，不新增专属检查或宣称完整资格。
+取舍见 [V1.72-D60](decisions.md#v1-72-d60)，本次回归与未实测项记录在同一简化报告。
+
+
+2026-10-25 Linux x64 随独立目标机验收开放 Command Code Preview，保持官方稳定版 ≥1.88.0。
+真实 Core/浏览器、能力、生命周期和已接受差异分别记录于
+[Linux 验收](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)；
+公开范围见 [V1.72-D61](decisions.md#v1-72-d61)，不增加 Runtime 管理机制。

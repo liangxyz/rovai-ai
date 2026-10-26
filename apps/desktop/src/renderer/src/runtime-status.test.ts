@@ -23,7 +23,7 @@ describe('Runtime user status projection', () => {
     ['installed_unverified', '可用'],
     ['checking', '正在检查…'],
     ['ready', '可用'],
-    ['authentication_required', '需要登录'],
+    ['authentication_required', '认证未通过'],
     ['needs_attention', '需要处理'],
     ['missing', '未检测到'],
     ['path_missing', '未检测到'],

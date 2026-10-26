@@ -2,8 +2,8 @@ import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { AppearancePreferences, ResolvedTheme, StructuredError, ThemePreference } from '@contracts'
-import { DEFAULT_APPEARANCE } from '../shared/appearance'
+import type { AppearancePreferences, ResolvedTheme, StructuredError, ThemeId, ThemePreference } from '@contracts'
+import { DEFAULT_APPEARANCE, THEME_MODES } from '../shared/appearance'
 import { parseAppearancePatch, isThemePreference } from '../shared/appearance'
 export { parseAppearancePatch, isThemePreference } from '../shared/appearance'
 
@@ -97,13 +97,13 @@ export async function writeThemePreference(filePath: string, preference: ThemePr
 }
 
 export function nativeThemeSource(preference: ThemePreference): 'system' | 'light' | 'dark' {
-  return preference === 'day' ? 'light' : preference === 'night' ? 'dark' : 'system'
+  return preference === 'system' ? 'system' : THEME_MODES[preference] === 'night' ? 'dark' : 'light'
 }
 
 export function resolvedTheme(shouldUseDarkColors: boolean): ResolvedTheme {
   return shouldUseDarkColors ? 'night' : 'day'
 }
 
-export function themeBackground(theme: ResolvedTheme): string {
-  return theme === 'night' ? '#0D1114' : '#F2F4F1'
+export function themeBackground(theme: ThemeId): string {
+  return { day: '#F2F4F1', night: '#0D1114', horizon: '#f1f0ec', 'classic-red': '#f1f0f1', ember: '#171717' }[theme]
 }

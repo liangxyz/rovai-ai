@@ -1,51 +1,65 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-test('Command Code required Mod binds each Session and exits before inference on invalid Bootstrap', () => {
+test('Command Mod registers before ready and replaces instructions only after valid control input', () => {
   const root = mkdtempSync(join(tmpdir(), 'rovai-command-bootstrap-'));
   const module = new URL('../../crates/rovai-core/src/command_code/bootstrap.mjs', import.meta.url).href;
-  const binding = (sessionId, bootstrap) => ({ schemaVersion: 1, sessionId, bootstrap,
-    sha256: createHash('sha256').update(bootstrap).digest('hex') });
   try {
-    mkdirSync(join(root, 'bindings'));
-    for (const [id, text] of [['session-A', '甲的 Charter'], ['session-B', '乙的 Charter'], ['long', JSON.stringify({ professionalResponsibilities: '😀\n\"'.repeat(3333) + '终' })]]) {
-      writeFileSync(join(root, 'bindings', `${id}.json`), JSON.stringify(binding(id, text)));
-    }
-    for (const [name, value] of [
-      ['wrong-id', binding('session-A', 'private')],
-      ['wrong-digest', { ...binding('wrong-digest', 'private'), sha256: 'wrong' }],
-      ['empty', binding('empty', '')],
-      ['oversize', binding('oversize', 'x'.repeat(128 * 1024 + 1))],
-    ]) writeFileSync(join(root, 'bindings', `${name}.json`), JSON.stringify(value));
-    const run = (ids, nonce) => {
+    for (const registrationFails of [false, true]) {
       rmSync(join(root, 'ready.json'), { force: true });
-      return spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
         import load from ${JSON.stringify(module)};
-        let hooks;
-        load({ hooks(value) { hooks = value; } });
-        const replies = ${JSON.stringify(ids)}.map(sessionId => hooks.appendSystemPrompt({state:{sessionId}}));
-        console.log(JSON.stringify(replies));
-        console.log('MODEL_WOULD_RUN');
+        import assert from 'node:assert/strict';
+        import { existsSync } from 'node:fs';
+        let hooks, command;
+        let active = ['read_file', 'ask_user_question', 'shell_command', 'mcp__docs__search'];
+        load({
+          addCommand(value) {
+            if (${registrationFails}) throw new Error('registration failed');
+            assert.equal(value.name, 'rovai-bootstrap');
+            command = value;
+          },
+          hooks(value) {
+            assert.ok(command);
+            assert.equal(existsSync(${JSON.stringify(join(root, 'ready.json'))}), false);
+            hooks = value;
+          },
+          getActiveTools() { return active; }, setActiveTools(value) { active = value; },
+        });
+        hooks.onSessionStart();
+        assert.deepEqual(active, ['read_file', 'shell_command', 'mcp__docs__search']);
+        const a = '甲的 Charter', b = '乙的 Charter';
+        // A→B→A proves replacement; every update returns no model prompt/message.
+        for (const text of [a, b, a, '  中文\\n"quotes" \\\\ = \${literal}  ',
+            '😀'.repeat(32768), '"'.repeat(128 * 1024)]) {
+          assert.equal(command.handler({ args: JSON.stringify(text) }), undefined);
+          assert.equal(hooks.appendSystemPrompt(), text);
+        }
+        command.handler({ args: JSON.stringify(a) });
+        for (const args of ['PRIVATE_INVALID_JSON', 'null', '42', '{}', '[]',
+            JSON.stringify(''), JSON.stringify('  '), JSON.stringify('😀'.repeat(32769))]) {
+          assert.throws(() => command.handler({ args }), { message: 'command_code_bootstrap_invalid' });
+          assert.equal(hooks.appendSystemPrompt(), a);
+        }
       `], { env: { ...process.env, ROVAI_COMMAND_CODE_BOOTSTRAP_ROOT: root,
-        ROVAI_COMMAND_CODE_BOOTSTRAP_NONCE: nonce }, encoding: 'utf8' });
-    };
-    const valid = run(['session-A', 'session-B', 'session-A'], 'nonce-ok');
-    assert.equal(valid.status, 0, valid.stderr);
-    assert.deepEqual(JSON.parse(valid.stdout.split('\n')[0]), ['甲的 Charter', '乙的 Charter', '甲的 Charter']);
-    assert.equal(JSON.parse(readFileSync(join(root, 'ready.json'), 'utf8')).nonce, 'nonce-ok');
-    const long = run(['long'], 'nonce-long');
-    assert.equal(long.status, 0, long.stderr);
-    assert.equal(JSON.parse(JSON.parse(long.stdout.split('\n')[0])[0]).professionalResponsibilities, '😀\n\"'.repeat(3333) + '终');
-    for (const id of ['missing', '../session-A', 'wrong-id', 'wrong-digest', 'empty', 'oversize']) {
-      const invalid = run([id], 'nonce-negative');
-      assert.equal(invalid.status, 78, id);
-      assert.doesNotMatch(invalid.stdout, /MODEL_WOULD_RUN|private/);
-      assert.equal(invalid.stderr, 'command_code_bootstrap_binding_invalid\n');
+        ROVAI_COMMAND_CODE_BOOTSTRAP_NONCE: 'nonce-ok' }, encoding: 'utf8' });
+      assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_INVALID_JSON|甲的 Charter/);
+      if (registrationFails) {
+        assert.notEqual(result.status, 0);
+        assert.deepEqual(readdirSync(root), []);
+      } else {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stderr, '');
+        assert.deepEqual(readdirSync(root), ['ready.json']);
+        const ready = JSON.parse(readFileSync(join(root, 'ready.json'), 'utf8'));
+        assert.equal(ready.revision, 'command-code-system-bootstrap-v2');
+        assert.equal(ready.nonce, 'nonce-ok');
+        assert.ok(ready.pid > 0);
+      }
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

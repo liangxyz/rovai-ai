@@ -43,6 +43,11 @@ describe('Runtime installation guidance', () => {
     expect(render('antigravity-app', 'macos-arm64')).toContain('前往官网下载')
     expect(runtimeInstallGuide('cursor-agent', 'macos-arm64')).toBeNull()
     expect(runtimeInstallGuide('cline-cli', 'macos-arm64')).toBeNull()
-    expect(runtimeInstallGuide('command-code-cli', 'macos-arm64')).toBeNull()
+    for (const platform of ['macos-arm64', 'macos-x64'] as const) {
+      const markup = render('command-code-cli', platform)
+      expect(markup).toContain('https://commandcode.ai/docs')
+      expect(markup).toContain('查看官方说明')
+      expect(markup).not.toContain('runtime-guide-command')
+    }
   })
 })

@@ -1646,7 +1646,7 @@ fn adapter_kind<'a>(flags: &'a Flags, key: &str) -> Result<&'a str> {
     // Deferred products remain unavailable through ordinary user automation.
     if !value
         .parse::<AdapterKind>()
-        .is_ok_and(|kind| !matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli))
+        .is_ok_and(|kind| kind != AdapterKind::ClineCli)
     {
         return Err(CliError::new(
             "automation_invalid_input",
@@ -2081,7 +2081,7 @@ mod tests {
             ])
             .unwrap();
             let result = member_runtime_set_params(&flags);
-            if matches!(kind, AdapterKind::ClineCli | AdapterKind::CommandCodeCli) {
+            if kind == AdapterKind::ClineCli {
                 let error = result.unwrap_err();
                 assert_eq!(
                     error.downcast_ref::<super::CliError>().unwrap().code,

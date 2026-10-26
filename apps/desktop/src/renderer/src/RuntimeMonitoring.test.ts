@@ -113,7 +113,7 @@ describe('RuntimeMonitoring', () => {
     expect(markup).not.toContain('Tool 耗时')
     expect(markup).not.toContain('Clean break')
     expect(markup).not.toContain('value="cline-cli"')
-    expect(markup).not.toContain('value="command-code-cli"')
+    expect(markup).toContain('value="command-code-cli"')
   })
 
   it('renders a full Usage snapshot with explicit zero and coverage', () => {

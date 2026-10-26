@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-10-21
+last_updated: 2026-10-25
 ---
 
 # App Shell 与统一侧栏
@@ -20,14 +20,14 @@ last_updated: 2026-10-21
 
 - 右边缘提供 8px 隐形命中区；悬停和拖拽时整条边界使用 `--resize-line` 浅黑色，始终为 1px。
 - 展开范围 200–420px，上限随窗口宽度收敛，为内容列尽量保留 600px。200px 保留品牌、常用入口和项目操作，长标题省略。
-- 拖到 200px 先保持最小宽度；停留至少 180ms 且继续向左越过 64px 后，以 160ms 收起到 0px。停留区松手保持 200px，折叠途中松手完成折叠；减少动态效果时省去折叠动画，保留停留。整个导航隐藏且 inert，不保留图标栏或空白列。导航组件与页面保持挂载，列表状态与草稿保留。
+- 拖到 200px 先保持最小宽度；继续向左越过 64px 即以 160ms 收起到 0px，无需松手或停留。按住反向拉回 24px 可重新展开并继续调整；未越过阈值时松手保持 200px。快速松手也按最终指针位置提交；减少动态效果时省去折叠动画。整个导航隐藏且 inert，不保留图标栏或空白列。导航组件与页面保持挂载，列表状态与草稿保留。
 - 收起后窗口左边缘保留不占布局宽度的命中区，向右拖至 200px 可展开；同一次手势可反向拖回。
 - 以下调宽与折叠入口只用于普通页面和 Windows Desktop 设置；macOS 与 Web 设置不显示分隔手柄、调宽菜单或折叠入口。
 - 顶部使用无填色的圆角小窗图标；折叠时内侧短竖线贴近左边缘，不使用箭头。macOS 位于红黄绿右侧，Windows 位于 File 左侧，均为 `no-drag`。
 - macOS 完全收起后为系统按钮和展开按钮保留顶部空间；Windows 的按钮属于独立菜单行，不进入 File/Edit/View/Window 的方向键循环。
 - 展开宽度与折叠状态保存为本机布局偏好。按钮恢复上次展开宽度；拖拽触发折叠时保留手势开始前的宽度。视口收缩只限制显示宽度。
 - 双击恢复 270px；方向键每次 10px、Shift 加速到 40px；Home/End 到最窄/最宽；Enter 折叠。向左越过最小宽度也会完全收起。
-- 右键或空格提供紧凑、默认、宽侧栏和折叠菜单，保留单次点击替代拖拽。Escape、指针取消、窗口失焦或窗口尺寸变化取消手势并恢复开始时的布局。
+- 右键或空格提供紧凑、默认、宽侧栏和折叠菜单，保留单次点击替代拖拽。Escape 恢复手势开始时的布局；指针取消、丢失捕获、窗口失焦或尺寸变化按最后观测位置结束，不回到旧宽度。拖拽派生的 click/dblclick 不触发复位，新的静止双击仍可复位。页面切换或禁用时丢弃过期手势。
 - 启动框架复用相同布局偏好；尚未允许交互或正在关闭时禁用按钮与分隔线。
 
 回归命令为 `pnpm test:navigation-shell`，使用隔离 Electron Renderer fixture，覆盖原生拖拽、折叠恢复、键盘、
@@ -322,7 +322,8 @@ macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队�
 固定 50px 的透明拖拽带，位于顶部的交互控件保留明确的 `no-drag` 点击区域。Windows 隐去包含 App 图标与
 `Rovai AI` 的系统标题文字层和系统 menu bar 呈现，只以 Renderer 投影 `File / Edit / View / Window` 顶层入口；
 入口经受限 IPC 打开既有 Electron 原生 submenu，不重建 command 或 accelerator。顶层菜单行与 Window Controls Overlay
-都使用 `--rail` 对应色并跟随 Day / Night，行高读取系统 WCO environment value 适配 DPI；侧栏顶部预留仅在 Windows
+都使用当前有效 `ThemeId` 的 `--rail` 对应色，caption 图标使用对应 `--ink`；建窗与切换均覆盖五套配色，
+`system` 跟随 Day / Night。行高读取系统 WCO environment value 适配 DPI；侧栏顶部预留仅在 Windows
 从 38px 收至 8px。Windows caption buttons、Snap Layout、Alt+Space、双击拖拽区和多屏 DPI 仍由系统拥有，Renderer
 不复制 submenu、窗口按钮或第二个 App 标题，其他页面结构和内容不因平台变化。
 
@@ -344,7 +345,7 @@ Project/Camp 行、菜单、临时提醒和设置返回均可键盘操作，Icon
 到达 25% 或 500% 后停止。已有非预设比例按调整方向进入相邻档位；低于 25% 的历史保存值继续
 显示和恢复，放大时进入 25%，缩小时保持当前值。`CommandOrControl 0` 重置为 100%。键盘调整后，
 App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，并通过 polite live region 播报同一文字。
-浮层使用双主题语义 Token，在首次训练和所有一级页面上保持同一位置与行为。
+浮层使用当前配色的语义 Token，在首次训练和所有一级页面上保持同一位置与行为。
 
 ## References
 

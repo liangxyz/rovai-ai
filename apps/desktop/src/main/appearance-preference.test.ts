@@ -23,9 +23,11 @@ afterEach(async () => {
 })
 
 describe('appearance preference', () => {
-  it('validates the three public preference values', () => {
-    expect(['system', 'day', 'night'].map(isThemePreference)).toEqual([true, true, true])
+  it('validates the six public preferences without accepting arbitrary object keys', () => {
+    expect(['system', 'day', 'night', 'horizon', 'classic-red', 'ember'].every(isThemePreference)).toBe(true)
     expect(isThemePreference('dark')).toBe(false)
+    expect(isThemePreference('toString')).toBe(false)
+    expect(isThemePreference('__proto__')).toBe(false)
     expect(isThemePreference(null)).toBe(false)
   })
 
@@ -33,10 +35,23 @@ describe('appearance preference', () => {
     expect(nativeThemeSource('system')).toBe('system')
     expect(nativeThemeSource('day')).toBe('light')
     expect(nativeThemeSource('night')).toBe('dark')
+    expect(nativeThemeSource('horizon')).toBe('light')
+    expect(nativeThemeSource('classic-red')).toBe('light')
+    expect(nativeThemeSource('ember')).toBe('dark')
     expect(resolvedTheme(false)).toBe('day')
     expect(resolvedTheme(true)).toBe('night')
     expect(themeBackground('day')).toBe('#F2F4F1')
     expect(themeBackground('night')).toBe('#0D1114')
+  })
+
+  it.each(['horizon', 'classic-red', 'ember'] as const)('restores %s with the existing reading preferences', async preference => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-appearance-'))
+    cleanup.push(directory)
+    const file = join(directory, 'appearance.json')
+    const store = new AppearancePreferencesStore(file)
+    await store.update({ chatFontSize: 18, readingDensity: 'relaxed' })
+    await writeThemePreference(file, preference)
+    expect(new AppearancePreferencesStore(file).get()).toEqual({ ...DEFAULT_APPEARANCE, preference, chatFontSize: 18, readingDensity: 'relaxed' })
   })
 
   it('persists a valid preference atomically and restores it', async () => {

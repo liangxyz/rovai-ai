@@ -3,14 +3,14 @@ document_type: architecture
 architecture: camp-composer-draft
 authority: desktop-local-public-camp-composer
 status: accepted
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Public Camp Composer
 
 公开 Camp Composer 的内容权威是客户端本机、按 Camp 隔离的轻量状态。Active 与普通一键 Pending
 都保存本机快照；Core 仅为普通 Pending 保存客户端 presence，拥有侧栏可见性与清理保护。合同见
-[Camp Composer Draft v19](../contracts/camp-composer-draft-v19.md)。Single Chat 的私有 Draft/Pending 不在本架构范围。
+[Camp Composer Draft v20](../contracts/camp-composer-draft-v20.md)。Single Chat 的私有 Draft/Pending 不在本架构范围。
 
 ## 组件边界
 
@@ -99,15 +99,41 @@ Web 复用上传回执，不调用 Electron Main。Host 接收时直写同一 Th
 
 普通弹窗的零消息 Active 不因清空而丢弃；一键 Pending 继续使用既有 presence、离开与启动清理，并补齐
 输出目录删除。首次发布后身份与路径不变。不建立新的草稿事务、发送对账或垃圾回收框架；
-精确接口与负例由 [v19](../contracts/camp-composer-draft-v19.md) 拥有。
+精确接口与负例由 [v19](../contracts/camp-composer-draft-v20.md) 拥有。
 
-## 撤回不是草稿恢复
+## 撤回与短期重新编辑
 
 发送后的本地 Principal 消息在首次目标 claim 前可以撤回。撤回操作针对已发布 CampMessage，原子取消 waiting Delivery
-并擦除受控原文；它不会把内容放回 Composer，也不是 Undo Send/草稿恢复。首次 claim 后撤回资格永久关闭。
+并擦除受控原文；撤回本身不会把内容放回 Composer。首次 claim 后撤回资格永久关闭。
 输入历史不另行监听撤回；本轮已提取内容仍可由 User 回填，下一轮依据最新消息数据，重新发送算新提交。
+
+[Message Reedit v1](../contracts/message-reedit-v1.md) 另行拥有两分钟内的客户端文字回填。
+`MessageReeditStore` 在独立 localStorage 命名空间保存有界 pending / ready 副本，统一读取校验和应用级清理；
+`MessageWithdrawal` 只适配原撤回命令与回放，将命令结果、副本写入、列表刷新分开处理。
+`ThreadWorkspace` 负责蓝色无下划线入口及已有草稿的替换确认，最终回填前再次读取有效副本。
+
+Web 的原请求 Promise 可以由回执补查完成。`ConsoleClient.requestWithSource` 将直接响应与恢复来源
+作为客户端结果元数据交给撤回适配器；补查、Core 错误后的回执核对及显式重放均使用 pending 剩余窗口。
+该元数据不进入 Core 请求、回执或持久化格式，普通 `request` 仍返回原结果值。
+撤回适配器同时在实例内保留未知请求的原命令参数，供无正文或副本保存失败后的显式重试使用；
+明确成功／拒绝才移除，不保留正文、不跨重启承诺恢复、不单独启动后台重试。
+存储通知按消息 key 分发，无变化清理不广播；入口资格仍实时读取校验，不能用通知替代有效期判定。
+
+只恢复正文与原文明示的成员 @，不携带默认队长显示前缀或撤回消息的附件／引用／回复关系。
+回填后由原有本机草稿协调器拥有，副本到期不影响草稿。Core 不保存恢复字段，不新增表、命令或上下文通路。
+每个前端实例最多一个清理定时器；其他窗口通过 storage 更新，容量与并发保证限于合同中的最佳努力边界。
 
 ## 升级
 
 Migration 163 一次性删除旧 **Core** public Composer Draft、未公开 Pending 及编辑/恢复状态，且不提供 legacy recovery UI。
 新的本机 store 不读取这些旧行。删除本地引用不删除用户源文件；已发布消息和其附件不受影响。
+
+## 对话与使命参考
+
+[Thread Reference v1](../contracts/thread-reference-v1.md) 将本机引用选择、用户目录读取和正式发布分开。
+`thread_reference` 模块拥有 live 目录、目标校验及首次标题捕获；发布网关先完成命令回放判定，再在原事务
+中捕获标题并沿既有成员语义创建消息和 Delivery。不存在另一个引用清单或背景摘要 owner。
+
+公开 `@` picker 复用成员交互，完整目录搜索与游标分页不读取来源历史。选中 Atom 的可用性批量查询，
+不会改写其身份或产生草稿 dirty。消息段是发布权威，Context/Steer/History 使用同一个现有正文 projector
+输出定位链接；源删除与 owner 删除各走自身生命周期。取舍见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。

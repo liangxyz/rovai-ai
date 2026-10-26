@@ -24,18 +24,17 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
   let scalarLength = 0
   const positions: TextPosition[] = []
   const boundaryAt = (amount: number): void => { boundary = Math.max(boundary, amount) }
-  const append = (node: Text): void => {
+  const append = (node: Text, reference: boolean): void => {
     const value = node.data.replace(/\r\n/gu, '\n')
-    if (plainBody !== undefined) {
+    if (plainBody !== undefined && !reference) {
       const at = plainBody.indexOf(value, sourceCursor)
       if (at < 0) throw new Error('quote.projection_mismatch')
-      const start = scalarLength + Array.from(plainBody.slice(sourceCursor, at)).length
-      scalarLength = start + Array.from(value).length
-      positions.push({ node, start, end: scalarLength })
+      const gap = plainBody.slice(sourceCursor, at)
+      text += gap
+      scalarLength += Array.from(gap).length
       sourceCursor = at + value.length
-      return
     }
-    if (text && boundary) {
+    if (plainBody === undefined && text && boundary) {
       const separator = '\n'.repeat(Math.max(0, boundary - (text.match(/\n*$/u)?.[0].length ?? 0)))
       text += separator; scalarLength += separator.length
     }
@@ -45,7 +44,7 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
     scalarLength += Array.from(value).length
     positions.push({ node, start, end: scalarLength })
   }
-  const walk = (node: Node): void => {
+  const walk = (node: Node, reference = false): void => {
     if (node.nodeType === Node.TEXT_NODE) {
       const parent = node.parentElement
       // react-markdown inserts formatting whitespace between HTML blocks, not readable body text.
@@ -57,10 +56,26 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
         if (layoutContainer || listBlockSeparator) return
       }
       if (plainBody === undefined && node.previousSibling instanceof Element && node.previousSibling.tagName === 'BR' && node.textContent === '\n') return
-      append(node as Text)
+      append(node as Text, reference)
       return
     }
     if (!(node instanceof Element) || node.matches(EXCLUDED)) return
+    const referenceSource = node.getAttribute('data-quote-reference-source')
+    if (plainBody !== undefined && referenceSource !== null) {
+      // Only structured references replace their URI projection with the visible title.
+      // Ordinary Text remains literal, including Markdown-looking links.
+      const at = plainBody.indexOf(referenceSource, sourceCursor)
+      if (at < 0) throw new Error('quote.projection_mismatch')
+      const gap = plainBody.slice(sourceCursor, at)
+      text += gap; scalarLength += Array.from(gap).length
+      sourceCursor = at + referenceSource.length
+      for (const child of node.childNodes) walk(child, true)
+      return
+    }
+    if (plainBody !== undefined) {
+      for (const child of node.childNodes) walk(child, reference)
+      return
+    }
     if (node.tagName === 'BR') { text += '\n'; scalarLength++; return }
     if (BLOCKS.has(node.tagName) && text) boundaryAt(2)
     for (const child of node.childNodes) walk(child)
@@ -70,7 +85,8 @@ export function projectQuoteBody(root: HTMLElement, plainBody?: string): { text:
     else if (BLOCKS.has(node.tagName) || node.tagName === 'HR') boundaryAt(2)
   }
   walk(root)
-  return { text: plainBody ?? text, positions }
+  if (plainBody !== undefined) text += plainBody.slice(sourceCursor)
+  return { text, positions }
 }
 
 function rangePoint(positions: TextPosition[], node: Node, offset: number, end: boolean): number | null {

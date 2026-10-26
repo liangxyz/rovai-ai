@@ -366,3 +366,58 @@ Web 长粘贴/通用环境/通知迁移链、首次绑定及 Single Chat 省略�
 
 完整上下文 Gate 保留之前的 **degraded**，本轮没有重跑模型评测，也不将 UI、单元或迁移验证
 写成语义 Gate 通过。用户本轮明确交付指令是此次合并与本机安装依据。
+
+## 合入后的局部状态修补（2026-10-22）
+
+基线 main `186d1cfcf0c0cfff342aa36282b35d75436613c5`，User sequence 64–65 要求核对并简单修复
+Web 无差别刷新和已保存快照降版本。两处均在生产 React 夹具复现：无关事件把一次待完成的
+团队读取扩大为 9 次；保存 v2 后放弃下一次草稿恢复了旧列表 v1。
+
+Web 沿现有 SSE/Task 标记增加 `teamsChanged`，服务端、解码、合批与 Hook 贯通；只在团队变化或
+resync 时刷新，保留请求代次和 loading。TeamWorkspace 在既有 select 入口比较同 ID 版本，
+不接受低于当前已确认 base 的列表副本；列表删除回退与待执行动作的 Team ID 保护保持原样。
+没有新增缓存、轮询、队列、模型字段或 Bootstrap 内容。
+
+验证归属沿用 Web 解码/重连单测、生产 Electron Team 创建夹具和真实 Host HTTP/SSE owner。
+React 新场景用受控 Promise 验证无关事件、定向刷新、重连、旧响应拒收，以及放弃草稿、
+点击当前行、新对话和复制保持 v2；显式载入 v3 与既有删除回退仍通过。Host seam 验证通知事件
+不附加 Team 标记，实际保存 Team 后收到定向失效，不新增 Rust 测试 owner 或数据库夹具。
+本轮不重跑模型协作，完整上下文 Gate 继续为 **degraded**。
+
+Host owner 同时对齐之前 Team 合入后的三处旧夹具预期：导入响应包含空 Team ID、可用 Custom
+不被失效通知禁用、导入完成后只读取 SQLite 而不重读损坏旧文件。这些只更新验收预期，
+不调整既有 Core 逻辑。定向 Web 47 项、生产 Electron 22 组、TypeScript 和构建通过；
+完整前端链使用 Vitest 2 workers，252 文件 / 2870 项通过、2 项既有跳过，后续 Node 357 通过、
+2 项平台跳过；Rust 默认 workspace 474 通过、1 项既有忽略。文档门禁与 Rust 格式检查通过。
+
+
+## 2026-10-25：指引上限 10000
+
+确认范围见 [长度上限 R1](model-context-change-team-guidance-limit.md)。UI 计数和中英文错误、Core Unicode
+校验统一改为 10000；Migration 214 / schema 164 原子扩宽两张表约束。原有输入格式、字节预算、冻结来源
+和补发机制不变，既有数据不重写为新指引；本轮不重新运行真实模型，完整上下文 Gate 仍为 `degraded`。
+
+验证归属：Team CRUD owner 扩展中文/emoji 的 10000/10001 边界及新 Thread 保存；现有生产 React 夹具
+验证完整输入、计数、拒绝超限且草稿保留；现有 Bootstrap 物化 owner 验证 40000 UTF-8 字节的完整投递、
+预算失败无 Manifest、同 Run 恢复一致。数据库准入 owner 增加 schema 163→164 来源与 marker 组合。
+
+新增一个 `db::teams::tests::guidance_limit_upgrade_preserves_rows_and_rolls_back`：它拥有新迁移的 DDL 回滚、
+生产打开升级、数据保留和重开边界。现有 Team CRUD fixture 已是当前 schema；Bootstrap migration owner
+拥有另一张表及 v5/v6 证据，不能覆盖这两张指引表的数据保留。新 owner 使用既有 schema-only 临时 SQLite
+fixture，无 Runtime；测试表格/纯谓词不足以验证事务 DDL、触发器和外键。新增 Rust 测试函数 1 个，未删除或禁用。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib guidance_limit_upgrade`。
+
+本轮已执行：
+
+- `pnpm typecheck`；`pnpm test` 的文档、Skills、sandbox capability 和 Vitest 路径通过（256 文件、3005 项通过、2 项跳过）。
+  最后的 Node 阶段首次发现 Product Contract Fingerprint 仍预期 schema 163；同步为 164 后，单独重跑同一 Node 阶段，358 项通过、2 项跳过。
+- `node --test --test-name-pattern='Team creation' scripts/lib/member-creation.test.mjs`：生产 React/Electron 夹具的 23 个场景通过，新增长度边界包含在其中；使用全新临时 userData，无 Core、Skill Library 或模型。
+- `cargo test -p rovai-core --features extended-tests --lib guidance_limit_upgrade`：升级、DDL 回滚、保留、重开和外键/不可变触发器通过。
+- 相同 extended-tests 命令分别运行 `templates_preserve_custom_defaults_and_freeze_thread_guidance`、`current_migration_state_admission_matrix`、
+  `database_contract_preflight_admits_current_and_rejects_future_store`、`run_bootstrap_migration_keeps_audit_and_rolls_back_its_schema_change`，全部通过。
+- `cargo test -p rovai-core --features slow-tests --lib newly_bound_session_bootstraps_on_its_current_generation`：完整长指引、预算失败和冻结恢复通过。
+- `pnpm build:desktop`、`cargo fmt --all -- --check`、`git diff --check` 通过。
+- `DOCS_BASE_REF=51da43668fa9b9e50cd94c86a29825db8666f79a pnpm docs:check:ci` 通过；初次文档检查要求的四个标准标题已补齐。
+
+`pnpm test:rust:pr`（`cargo test --workspace`）通过：477 项通过、1 项按既有原因忽略。
+本轮未执行真实模型或重新打包安装日常 App；结果不代表完整上下文 Gate 已通过。

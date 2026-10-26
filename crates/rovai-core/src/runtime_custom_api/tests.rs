@@ -163,6 +163,14 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
                 .unwrap();
         let second = runtime_startup::commit_save(&mut db, kind, prepared, 2).unwrap();
         assert!(second.configuration.environment.is_empty());
+        let replay =
+            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, second_path.clone())])
+                .unwrap();
+        assert!(
+            replay.edits.is_empty(),
+            "an already-applied target is not another edit"
+        );
+        assert!(replay.conflicts.is_empty());
         let conflict =
             runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, Value::Null)]).unwrap();
         assert_eq!(conflict.conflicts.len(), 1);

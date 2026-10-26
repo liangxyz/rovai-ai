@@ -52,7 +52,7 @@ const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   unconfigured: '未配置智能体',
   checking: '正在检查…',
   available: '可用',
-  authentication_required: '需要登录',
+  authentication_required: '认证未通过',
   not_installed: '未检测到',
   version_unsupported: '版本不支持',
   unavailable: '不可用',
@@ -105,7 +105,7 @@ export function runtimeAvailabilityPresentation(
     case 'authentication_required':
       return presentation(
         'authentication_required',
-        publicFailureDetail(availability, uiAttribute('请先完成该智能体的登录。'))
+        publicFailureDetail(availability, uiAttribute('请检查该智能体的登录状态或凭据配置。'))
       )
     case 'needs_attention':
       return {
@@ -227,7 +227,7 @@ export function memberRuntimePresentation(
 
   const blockerCodes = new Set(agent.runtimeReadiness.blockers.map((blocker) => blocker.code))
   if (blockerCodes.has('runtime_authentication_required')) {
-    return presentation('authentication_required', uiAttribute('请先完成该智能体的登录。'))
+    return presentation('authentication_required', uiAttribute('请检查该智能体的登录状态或凭据配置。'))
   }
 
   if (agent.runtimeReadiness.status === 'needs_attention') {

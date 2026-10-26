@@ -3,7 +3,7 @@ import type { ReactNode, Ref } from 'react'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { MobileBack } from './MobileLayout'
 import { useOptionalFilePreview } from './FilePreviewContext'
-import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
+import { FilePreviewExpandButton, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { FilePreviewTabs } from './FilePreviewTabs'
 import { FileFindButton } from './FilePreviewFind'
 import { UiText, uiAttribute } from './interface-language'
@@ -44,6 +44,7 @@ export function AppHeader({
   const pendingApprovals = thread?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   const previewControls = filePreview && <div className="file-preview-toggle-group">
     {filePreview.activeTab?.kind !== 'mission_activity' && filePreview.activeTab?.kind !== 'execution' && <FileFindButton />}
+    <FilePreviewExpandButton />
     <button className="file-preview-toggle" type="button" aria-label={previewVisible ? uiAttribute("收起文件预览") : uiAttribute("展开文件预览")}
       title={previewVisible ? uiAttribute("收起文件预览") : uiAttribute("展开文件预览")} aria-expanded={previewVisible} aria-controls="file-preview-pane"
       onClick={previewVisible ? filePreview.hidePane : filePreview.showPane}>

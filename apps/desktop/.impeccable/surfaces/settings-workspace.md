@@ -1,5 +1,5 @@
 ---
-version: 21
+version: 23
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -8,7 +8,7 @@ related_targets:
   - "apps/desktop/src/renderer/src/ShortcutSettings.tsx"
   - "apps/desktop/src/renderer/src/shortcut-settings.css"
   - "apps/desktop/src/renderer/src/NotificationSettings.tsx"
-  - "apps/desktop/src/renderer/src/SkillSettings.tsx"
+  - "apps/desktop/src/renderer/src/RebuiltSkillsSettings.tsx"
   - "apps/desktop/src/renderer/src/McpSettings.tsx"
   - "apps/desktop/src/renderer/src/AboutUpdatesSettings.tsx"
   - "apps/desktop/src/renderer/src/RuntimeStartupSettings.tsx"
@@ -31,11 +31,10 @@ header divider. Agent Runtime uses a centered `1040px` title/body track;
 its catalog uses one quiet surface with individually raised rows. General, Notifications, Channels,
 Diagnostics and About use open content rows and fine separators instead of nested gray containers. Skills and MCP instead use the capability library/detail composition below; other categories do not add a second navigation column or page-sized outer card.
 
-Reviewed settings controls use the existing neutral conversation-action tokens. Sidebar background stays
-unchanged, selection uses a neutral fill without a left stripe, and status/provider colors keep their meaning.
-Off switches have a white thumb. Inputs and buttons preserve keyboard behavior and text carets without
-decorative focus rings. Member Runtime configuration selects retain their current styles. MCP/Skills follow the capability composition below.
-Appearance keeps its real reading previews; only the motion demo is removed. Its zoom selector and
+Controls follow [DESIGN.md](../../../../DESIGN.md#colors), including checkboxes and Portal menus.
+Selection uses a quiet fill and neutral text without a left stripe; status/provider colors keep their meaning.
+Off switches retain a white thumb. Member Runtime configuration selects retain their dedicated tokens.
+Appearance keeps its reading previews. Its zoom selector and
 shortcuts share the Chrome desktop presets defined by the theme contract below.
 
 All categories implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery while
@@ -48,31 +47,26 @@ General owns stable startup location, world-map availability and window reset. W
 close-behavior selector (ask every time / system tray / quit); its close dialog and remembered choice share Main authority
 under [Windows Window Close v1](../../../../docs/contracts/windows-window-close-v1.md). macOS and Web expose neither this selector nor a tray. Stable choices commit immediately through the
 narrow Desktop bridge. The App does not expose or enable an OS login-start item on either supported
-platform; packaged macOS startup only makes a best-effort removal of any retired registration, while
-the first Windows release creates no Startup task or Run-key entry. General does not add hidden/background
+platform. General does not add hidden/background
 launch, default Project, recovery or update policy. Hiding an already open Windows window is separate from startup policy.
 
 The shared General page receives its preference API explicitly from either entry. Creation team, Lead and
-one-click flag come from the same Host-owned record; Desktop legacy choices are imported once. Web stores only client
+one-click flag come from the same Host-owned record. Web stores only client
 presentation preferences; window reset and Host browser-access administration remain injected Desktop
 capabilities. Web does not fall back to a native global. The separate Remote Connection menu is now the production Host-management/current-browser-connection surface;
 its [interactive review](../../../../docs/ui/host-remote-connection.md) uses the same components.
 
-New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
-remain directly visible in a four-column chooser (two columns at narrower desktop widths); only counts above
-ten collapse behind a searchable disclosure whose expanded chooser stays two-column and scrolls within 280px.
-Narrow layouts reflow the chooser to one column. The roughly 320px Lead picker shows portrait, name and role
-for the selected member and candidates. More than eight selected members enables search; the popup is height
-bounded and follows available viewport space. Invalid members stay recognizable and cannot become a new Lead.
-Keep existing invalid-default validation. The local draft/error/save row uses the shared save icon and “保存”;
-there is no duplicate saved-state message in the page header.
-The one-click creation summary shows only the saved teammate count and Lead, such as “4 位默认队员 · 队长 爱丽丝”.
-Omit “当前生效” and the currently selected project: the project follows the creation entry, independently of these saved defaults.
+New-conversation defaults follow [Team workspace](../../../../docs/ui/components/team-workspace.md):
+choose Team or Custom; Team shows a compact summary, Custom exposes teammate and Lead pickers.
+The teammate menu uses portraits, names and selection marks, with search above eight candidates.
+The roughly 320px Lead picker shows portrait, name and role; search appears above eight selected members.
+Bound menus to the available viewport. Invalid members remain recognizable and cannot become a new Lead.
+Keep draft validation and the local error/save row with the shared save icon and “保存”.
+The one-click summary shows only saved teammate count and Lead; omit duplicate saved-state text and Project.
 
-World-map availability appears in a 会话 section immediately after 新对话 and before 窗口. A new profile
-with no preferences source starts disabled. Exact schema-v4 saved values remain authoritative, while
-schema-v1–v3 preferences migrate enabled so an upgrade does not silently revoke the previously effective
-map availability. Changes commit immediately. The row does not repeat the default as a badge, add a
+World-map availability appears in a 会话 section immediately after 新对话 and before 窗口.
+Read the saved availability; a profile without preferences starts disabled. Changes commit immediately.
+The row does not repeat the default as a badge, add a
 current-effective summary or add a conversation-page preview action. Turning it off forces Camp reading
 surfaces back to the timeline and removes the entire 会话 / 地图 switcher and map route controls. Do not
 retain a disabled entry, explanatory popover or settings shortcut. Conversation find remains available
@@ -104,16 +98,17 @@ platform validation, binding and persistence semantics belong to
 
 ## 外观与提醒
 
-Appearance presents exactly “跟随系统 / 日间 / 夜间”, with resolved result and saved preference
-remaining distinguishable in the page header. The quiet theme surfaces describe Porcelain Day and
-Steel Night; switching preserves page state, focus and open overlays. Follow
+Appearance presents exactly “跟随系统 / 日间 / 夜间 / 晨雾 / 朝霞 / 绯夜”, with resolved result and saved preference
+remaining distinguishable in the page header. The five palettes share the production component tree;
+switching preserves page state, focus and open overlays. Follow
 [`themes/README.md`](../../../../docs/ui/themes/README.md).
 
 Appearance follows the reviewed three-section composition: 界面主题, 文字与阅读, 显示与动效, on a
 centered 980px track. Theme choices are whole-card native radio labels, with a 16:9 UI thumbnail,
 Chinese/English name, selection outline and check mark. Follow-system uses a diagonal day/night split
 of the same synthetic workspace; day and night show their fixed palettes independently of the selected
-page theme. Preserve keyboard arrows and the global focus treatment without an extra card focus ring.
+page theme. Keep the six cards compact: six columns on the full track, three below 900px container width,
+and two below 420px. New palette thumbnails reuse the same workspace geometry. Preserve keyboard arrows and the global focus treatment without an extra card focus ring.
 
 The reading section places compact controls beside a bounded conversation/document/code preview.
 Conversation, document and code sizes default to 13/15/14px and accept integer values from 12–24px.
@@ -131,8 +126,8 @@ Web does not reset browser-managed zoom.
 Reduced motion has exactly 跟随系统 and 始终减少; it suppresses motion in CSS, programmatic scrolling
 and the world map while preserving status and progress content. Its one-shot file-tab example can replay.
 
-Preferences apply and save immediately through Desktop Main. Loading legacy theme-only preferences
-retains the theme and supplies reading defaults; malformed source is preserved and reported as degraded.
+Preferences apply and save immediately through the owning appearance API.
+Malformed source is preserved and reported as degraded.
 Writes serialize and publish only after an atomic save succeeds. Controls retain focus during rapid edits;
 a failure retains the draft and exposes retry with honest unsaved feedback. Restore defaults resets all
 appearance preferences, including theme and native zoom, without touching other settings.
@@ -150,41 +145,21 @@ Master/category disabling retains values and filters. Save errors restore curren
 The attentive foreground Camp stays quiet for its conversation, Mission and Tasks; leaving does not replay suppressed cards.
 Mission needs-you question copy comes only from an explicit source message. Never invent a question or infer it from an @mention.
 
-Current User Mention creates one immutable Occurrence per source message. Occurrences in one CampTurn
-share a durable Episode card but remain independently acknowledged; the earliest unacknowledged
-message is the current exact action. Settings only affect Journal-qualified transient heads-up and
-never durable Episode admission, acknowledgement, clearing or the Core unread fact.
+Notification behavior and exact acknowledgements follow the
+[notification contract](../../../../docs/ui/components/notification-center.md); this brief owns settings composition only.
 
 ## Skills and MCP
 
-Follow [Capability settings](../../../../docs/ui/components/capability-settings.md): a white day surface,
-compact left library and right content/configuration pane, with the same component tree in Steel Night.
-The single 1px divider uses `--line`, with a `--muted` grip revealed on hover or drag. Keep pointer drag, keyboard adjustment and double-click reset; omit floating arrow controls.
-Skills combine search and 全部 / 已启用 / 已停用 filters, with status beside the row name and an enable
-switch in the detail header. MCP uses teammate assignment without a separate enable switch or filter.
-Add, preview, import and update confirmation stay in the right pane. Deletion uses the shared application
-confirmation dialog, initially focused on Cancel; keep failure feedback in the dialog without extra entry focus return on dismissal.
-An empty, successfully loaded MCP library shows a single-pane first-connection guide. Add/import remain single-pane until the first save; cancellation returns to the guide. A read failure has its own retry state. Add and import are peer light icon buttons in the MCP library heading. Only installed items appear in the list. Leaving an editor/import or switching MCP/Skills clears unfinished input; do not create draft placeholders or restore drafts.
+Use a compact left list and right content/configuration pane with a shared full-height 1px divider.
+Inherit global splitter appearance; keep each page's width, keyboard behavior and draft lifecycle in its contract.
 
-Skills show active `user_managed` items only; omit `system_required` Skills entirely. A source badge
-identifies Rovai only; imported Skills retain provenance without extra source badges. Read-only content defaults
-to SKILL.md and supports safe Markdown, raw text and package file navigation. Omit internal revision
-numbers from the detail heading. Use a compact filename trigger that expands an inline folder directory
-above the document; selecting a file closes it and restores trigger focus. A single file needs no chooser,
-and search appears only above ten files. Keep the toolbar and expanded directory in one sticky group, bound directory scrolling to the remaining viewport height (including 200% zoom), wrap long directory
-entries and reset navigation on Skill, Revision or import-candidate changes. Local import invokes
-the native folder chooser, then previews the inspected candidate. GitHub import uses its existing
-inspection path. The scope tab selects delivery groups using whole rows with member avatars.
-New imports and initial official Skills inherit the canonical all-groups policy; updates preserve
-saved enablement and explicit group choices. Previews never execute or authorize Skill instructions.
+- [Skills and toolbox](../../../../docs/ui/components/skills-settings.md): native read-only Skills by Runtime;
+  toolbox configuration assigns individual teammates. Do not add Library import, revision or delivery-group controls.
+- [MCP](../../../../docs/ui/components/capability-settings.md): JSON configuration, local import and teammate assignment.
+  Empty libraries use the first-connection guide; failures retain an explicit retry state.
 
-MCP accepts JSON only, with the existing digest/CAS mutation semantics. The right-side local import
-shows selectable portable candidates and folds unneeded diagnostics. Expanded unavailable entries separate
-name/source/status from the reason and wrapping field list; merge repeated reasons within the same candidate.
-Same-name import candidates show the first scanned definition with distinct Runtime badges; these badges do not claim equal content or persistent source binding. Preserve the first candidate ID and Core conflict result. Full-card selection excludes internal editing and disclosure actions. Use “查看配置 / 收起配置” and name the adopted Runtime. Same-name replacement requires an explicit “覆盖配置” or “另存为” choice. Necessary environment reference edits remain visible. Teammate assignment
-uses compact whole-card buttons with real avatars. Like Skill groups, selected choices use a light neutral fill, full border and trailing small check, without a left checkbox or border-width jump. Malformed source blocks overwrite;
-secret values stay masked and out of ordinary errors. Conflicts retain the JSON draft and require
-refresh/review before retrying. Do not display source file paths as routine configuration content.
+Keep destructive confirmation and recoverable errors in the active pane/dialog. Ordinary controls, selected marks
+and Portal content use the current theme action family; secret disclosure and conflict checks follow the MCP contract.
 
 ## 智能体与诊断
 
@@ -212,6 +187,11 @@ badge carries the result. Failed or deferred checks keep actionable feedback. Do
 attempt stages. Do not show discovery summaries (source, entrypoint kind, candidate extension, native target
 resolution or version probe outcome) in Runtime rows on any platform. Executable paths are editable in the dedicated startup settings page; fingerprint, backoff
 and audit remain inside advanced diagnostics.
+
+Catalog versions come from Core `runtimeAvailability.reportedVersion`; no Renderer fallback to an installation snapshot.
+A retained version does not mean the latest check succeeded. Do not show placeholders when the version is unknown.
+Public Runtime entries follow [Runtime Catalog Boundaries](../../../../docs/architecture/runtime-catalog-boundaries.md)
+across settings, onboarding, teammate selection and monitoring; preserve names on historical records.
 
 Before those machine states, every row consumes the Core-owned Runtime Platform Admission. On Windows,
 `not_qualified` renders “Windows 尚未验证” and `unsupported` renders “此平台不支持”; neither state has an
@@ -278,7 +258,7 @@ Coverage, clean-break and freshness semantics local to that page.
 
 About & Updates belongs to the Support group and uses a borderless `880px` reading track. Product identity
 and the installed version share the top row with one primary action; a single status line follows, adding
-a reason for failures or installation. Keep the 34px mark, compact 19px product name and neutral actions.
+a reason for failures or installation. Keep the 34px mark, compact 19px product name and shared theme actions.
 Release notes follow immediately, with explicit version numbers in the keyboard-accessible tabs (or one
 version label without a candidate), publication date and 13px prose. Do not repeat the release title below
 the version selector. Check history follows the notes, collapsed initially with fixed-width fact labels.
@@ -345,7 +325,7 @@ refresh or chevron icon, and the settings gear as consistent columns. Settings r
 and missing Runtimes admitted on the current platform. Preserve actual installation/login guide content.
 
 The startup page reuses the 1040px content track and an at-most-800px form. Show Runtime identity, program
-path with native picker and restore-auto action, the inline check result, then environment rows. Environment values start masked and have reveal/delete controls. Keep errors
+path with native picker and restore-auto action, the inline check result, then the common-environment JSON editor below. Keep errors
 actionable and local; no empty-state explanation, top-right unsaved badge or repeated “next launch”/
 “does not change system variables” small print.
 
@@ -366,15 +346,13 @@ dialog remain available when another settings category hides the form; cancel ke
 
 ### Local startup settings only
 
-Claude Code and Codex no longer expose the native connection editor. Remove official/API mode selection,
-login status, address, Key, Claude model mappings and the custom Codex model list. Keep program path,
-explicit checks, fully visible environment values and the existing save/discard row. Do not add replacement help,
-a disabled entry or an alternative connection editor. Existing native files remain unchanged.
+Claude Code and Codex expose program path, explicit checks, common environment values and save/discard.
+Do not add native login/API connection editors, model mappings or replacements for removed fields.
+Native login/install guides remain in the Runtime catalog; existing native files stay untouched.
 
 Save ends from its local receipt and shows “已保存” in the shared member-editor footer status slot: muted text
 on the left, with save/discard actions on the right. Do not reuse the green Runtime check-result style. It does not call parent reloads, native observation or
-runtime checks. Preserve failed drafts and field conflict recovery. Native login/install guides remain in
-the Runtime catalog. Behavior is owned by [Runtime Launch v52](../../../../docs/contracts/runtime-launch-and-verification-v52.md).
+runtime checks. Preserve failed drafts and field conflict recovery. Behavior is owned by [Runtime Launch v52](../../../../docs/contracts/runtime-launch-and-verification-v52.md).
 
 ## 通用环境变量
 

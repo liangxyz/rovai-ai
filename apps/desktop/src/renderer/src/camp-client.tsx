@@ -3,6 +3,8 @@ import { uiAttribute } from './interface-language'
 import { createContext, useContext, type ReactNode } from 'react'
 import type { RovaiApi } from '@contracts'
 import { desktopThreadClient } from './desktop-camp-client'
+import type { WithdrawalRequest } from './message-reedit-store'
+import type { WithdrawalResult } from './message-withdrawal'
 
 /** Dependencies of the existing Thread UI, not a public HTTP operation allowlist.
  * Remote adapters must authorize each operation and resource at the Host boundary.
@@ -20,6 +22,10 @@ export type ThreadClient = Pick<RovaiApi,
     }>
   }
   editingRecovery?: EditingRecovery
+  /** Stable local profile/Host/Owner scope; absence disables withdrawn-text persistence. */
+  reeditScope?: string
+  /** Web may resolve the original Promise through receipt lookup; preserve that provenance. */
+  withdrawMessage?: (request: WithdrawalRequest) => Promise<WithdrawalResult>
   /** Explicit resource/platform dependencies of the shared management pages. */
   exportMonitoring: (filter: import('@contracts').MonitoringFilter) => Promise<{ exported: boolean; path?: string }>
   revealMonitoringExport: RovaiApi['revealMonitoringExport'] | null

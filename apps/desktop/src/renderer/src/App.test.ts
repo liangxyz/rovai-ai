@@ -139,7 +139,7 @@ import {
   executionDisclosureOpenAfterActivity,
   executionDisclosureIsLiveOpen,
   executionDeliveryQueueBatches,
-  executionQueueBatches,
+  executionDeliveryQueuePresentation,
   executionRunInputMessageIds,
   executionMessageSummary,
   executionWorkspaceEntrySelection,
@@ -4098,6 +4098,19 @@ describe('task event projections', () => {
       runs: [],
       waitingDeliveries: [{ id: 'delivery-waiting-1' }]
     }])
+    const queueProcess = { agentId: 'agent_2', runs: [], waitingDeliveries: [waitingDelivery] }
+    expect(executionDeliveryQueuePresentation(queueProcess)).toMatchObject({ label: '准备中…', blocked: false })
+    const previousRun = { ...snapshot.agentRuns[0], agentId: 'agent_2' }
+    expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [previousRun] }))
+      .toMatchObject({ label: '排队中', detail: '等待上一轮完成' })
+    const cleanupRun = { ...previousRun, status: 'cancelled' as const, cancelRequestedAt: '2020-01-01T00:00:00Z', cancelAcknowledgedAt: null }
+    expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [cleanupRun] }))
+      .toMatchObject({ label: '排队中', detail: '等待上次执行清理完成' })
+    expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [{ ...cleanupRun, cancelAcknowledgedAt: '2020-01-01T00:00:01Z' }] }))
+      .toMatchObject({ label: '准备中…', blocked: false })
+    // Overview / private history cannot supply another member's queue copy.
+    expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [{ ...previousRun, agentId: 'other' }, { ...previousRun, invocationKind: 'single_chat' }] }))
+      .toMatchObject({ label: '准备中…', blocked: false })
     expect(executionDeliveryQueueBatches([secondWaitingDelivery, waitingDelivery])).toMatchObject([{
       agentId: 'agent_2',
       messageIds: ['message-waiting-1', 'message-waiting-2']
@@ -4164,17 +4177,6 @@ describe('task event projections', () => {
     expect(executionEmptyStateShouldRender(0, 0, true)).toBe(true)
     expect(executionEmptyStateShouldRender(0, 1, true)).toBe(false)
     expect(executionEmptyStateShouldRender(0, 0, false)).toBe(false)
-    expect(executionQueueBatches([
-      submittedSecondRun,
-      { ...submittedSecondRun, id: 'run-submitted-third', threadTurnId: 'turn-submitted-later', createdAt: '2026-07-28T06:01:00Z' },
-      submittedFirstRun
-    ]).map((batch) => ({
-      agentId: batch.agentId,
-      runIds: batch.runs.map((run) => run.id)
-    }))).toEqual([
-      { agentId: 'agent_2', runIds: ['run-submitted-third', 'run-submitted-second'] },
-      { agentId: 'agent_3', runIds: ['run-submitted-first'] }
-    ])
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
     expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })
@@ -4312,7 +4314,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
     expect(markup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"/)
     expect(markup).toContain('处理中 1')
-    expect(queuedMarkup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"[\s\S]*待处理 1/)
+    expect(queuedMarkup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"[\s\S]*启动中 1/)
     expect(waitingQueueMarkup).toContain('data-delivery-queue-agent-id="agent_2"')
     expect(waitingQueueMarkup).toContain('aria-label="查看排队消息的 2 条输入"')
     expect(waitingQueueMarkup).toContain('d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 17l10 5 10-5"')
@@ -4320,7 +4322,7 @@ describe('task event projections', () => {
     expect(waitingQueueMarkup).toMatch(
       /<h3 class="execution-run-heading"><button class="execution-run-toggle"[\s\S]*?<\/button><\/h3><button class="execution-batch-count"/
     )
-    expect(waitingOverHistoryMarkup).toContain('aria-label="打开沐瓦的执行过程，排队中"')
+    expect(waitingOverHistoryMarkup).toContain('aria-label="打开沐瓦的执行过程，准备中…"')
     expect(batchedRunMarkup).toContain('aria-label="查看本次执行的 2 条输入"')
     expect(batchedRunMarkup).toContain('class="execution-batch-count"')
     expect(failedReceiptMarkup).not.toContain('未完成 · 1')
@@ -4574,10 +4576,10 @@ describe('task event projections', () => {
       onCancelAgentRun: async () => undefined,
       stopping: false
     }))
-    expect(cancellingMarkup).toContain('正在提交停止请求')
+    expect(cancellingMarkup).toContain('正在停止…')
+    expect(cancellingMarkup).not.toContain('process-action cancelling')
     expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
-    expect(cancellingMarkup).toMatch(/aria-label="终止沐瓦的本次执行"[^>]*disabled/)
-    expect(cancellingMarkup).toContain('<rect x="5" y="5" width="14" height="14" rx="1.5" fill="currentColor" stroke="none"></rect>')
+    expect(cancellingMarkup).not.toContain('aria-label="终止沐瓦的本次执行"')
     expect(cancellingMarkup).not.toContain('aria-label="停止当前运行"')
     expect(cancellingMarkup).not.toContain('class="composer-primary-action is-stop"')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
@@ -5446,8 +5448,11 @@ describe('task event projections', () => {
 
   it('explains context blockers and A2A delivery without relying on color', () => {
     expect(agentRunPresentation({ status: 'failed', waitReason: null, terminalReasonCode: 'adapter_installation_disabled' })).toEqual({ label: '所选 Runtime 已停用', tone: 'danger' })
-    expect(agentRunPresentation({ status: 'running', waitReason: 'runtime_initializing' })).toEqual({ label: '正在初始化 Runtime', tone: 'info' })
-    expect(agentRunStateTag({ status: 'running', waitReason: 'runtime_initializing' })).toEqual({ tag: 'STARTING', tone: 'brand' })
+    expect(agentRunPresentation({ status: 'queued', waitReason: null })).toEqual({ label: '启动中…', tone: 'neutral' })
+    expect(agentRunPresentation({ status: 'queued', waitReason: null }, false, true)).toEqual({ label: '执行中', tone: 'info' })
+    expect(agentRunStateTag({ status: 'queued', waitReason: null })).toEqual({ tag: 'STARTING', tone: 'neutral' })
+    expect(agentRunPresentation({ status: 'running', waitReason: 'runtime_initializing' })).toEqual({ label: '启动中…', tone: 'neutral' })
+    expect(agentRunStateTag({ status: 'running', waitReason: 'runtime_initializing' })).toEqual({ tag: 'STARTING', tone: 'neutral' })
     expect(agentRunPresentation({ status: 'waiting', waitReason: 'delivery_unknown' })).toEqual({
       label: '投递待确认',
       tone: 'danger'
@@ -6463,7 +6468,7 @@ describe('task event projections', () => {
     const queuedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run: { ...run, status: 'queued', startedAt: null }, threadId: 'camp-live-tail', focused: true
     }))
-    expect(queuedMarkup).toContain('<span>连接中</span>')
+    expect(queuedMarkup).toContain('<span>启动中…</span>')
     expect(queuedMarkup).not.toMatch(/等待开始|正在处理|工作了|处理过程 ·/)
     const backgroundMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run, progress: { items: [settledTool] }, threadId: 'camp-live-tail'
@@ -7930,7 +7935,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'grok-build', 'deepseek-harness', 'zcode-app', 'antigravity-app', 'pi'])
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi'])
     expect(markup).toContain('member-runtime-picker')
     expect(markup).toContain('aria-label="智能体类型，暂不配置"')
     expect(markup).toContain('aria-haspopup="menu"')
@@ -8154,13 +8159,13 @@ describe('task event projections', () => {
     expect(markup).toContain('MiniMax Code')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
-    expect(markup).not.toContain('Command Code')
+    expect(markup).toContain('Command Code')
     expect(markup).not.toContain('待支持')
     expect(markup).not.toContain('尚未开放')
     expect(markup).toContain(`当前平台：${platformLabel}`)
     expect(markup).toContain('可用')
     expect(markup).toContain('正在检查…')
-    expect(markup).toContain('需要登录')
+    expect(markup).toContain('认证未通过')
     expect(markup).toContain('Claude Code 返回错误')
     expect(markup).toContain('Claude Code 尚未登录')
     expect(markup).toContain('请先在终端完成 Claude Code 登录。')
@@ -8417,9 +8422,9 @@ function runtimeAdmissionRows(
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
-    const effectiveStatus = ['cursor-agent', 'cline-cli', 'command-code-cli'].includes(runtimeKind) && status === 'qualified'
-        ? 'not_qualified'
-        : status
+    const effectiveStatus = status === 'qualified' && ['cursor-agent', 'cline-cli', 'command-code-cli'].includes(runtimeKind)
+      ? runtimeKind === 'command-code-cli' ? 'preview' : 'not_qualified'
+      : status
     return {
       runtimeKind,
       platform,

@@ -1,3 +1,4 @@
+import { isReferenceSegment, projectReference } from './thread-reference'
 import type { StructuredThreadMessageContent } from '@contracts'
 
 const CLIPBOARD_ATTRIBUTE = 'data-rovai-structured-camp-message-v1'
@@ -118,6 +119,7 @@ export function createStructuredMessageClipboardData(
   if (!content?.some((segment) => segment.kind !== 'text')) return null
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   const privateContent: PrivateClipboardSegment[] = content.map((segment) => {
+    if (isReferenceSegment(segment)) return { kind: 'text', text: projectReference(segment) }
     if (segment.kind === 'text') return segment
     if (segment.kind === 'all_members_mention') {
       return { kind: 'all_members_mention', fallbackText: '@所有队员' }

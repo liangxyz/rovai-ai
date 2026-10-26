@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-10
+last_updated: 2026-10-25
 ---
 
 # Managed Runtime Process v2
@@ -32,6 +32,10 @@ runtime compatibility / execution ownership identity
 
 接口返回 `ManagedProcess`，其可观察能力限于 stdio、PID/OS identity、wait、graceful request、bounded tree
 termination 与 reap result。调用方不接触 Job/process-group handle，也不自行 attach、break away 或枚举后代。
+
+Runtime 上报 PID 的归属核验也由此边界拥有。Windows 只以本次受管 Job handle 查询仍存活的成员，
+兼容 command shim 与原生子进程的不同 PID；未知、无权查询、已退出或其他 Job 的进程均不通过。
+其他平台继续核对受管根 PID。调用方不通过全局进程枚举、名称或仅有父 PID 关系替代这一证据。
 
 Managed Process 直接启动捕获的 application 与结构化 argv，不配置 User Automation protected tree，
 不增加 Rovai 自有文件访问沙箱。Runtime 原生权限与沙箱由对应 Runtime 控制。

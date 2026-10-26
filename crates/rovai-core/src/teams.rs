@@ -13,7 +13,7 @@ use crate::{
     db::Database,
 };
 
-pub const MAX_GUIDANCE_CHARS: usize = 1_000;
+pub const MAX_GUIDANCE_CHARS: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

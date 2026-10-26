@@ -12,6 +12,7 @@ const requiredTokens = [
   '--surface-subtle',
   '--surface-muted',
   '--surface-selected',
+  '--scrollbar-thumb',
   '--workspace-surface-subtle',
   '--workspace-surface-raised',
   '--workspace-surface-hover',
@@ -24,6 +25,7 @@ const requiredTokens = [
   '--workspace-faint',
   '--conversation-surface',
   '--conversation-action',
+  '--conversation-action-ink',
   '--conversation-action-hover',
   '--conversation-action-contrast',
   '--conversation-control-line',
@@ -35,9 +37,11 @@ const requiredTokens = [
   '--mission-unread-ink',
   '--file-update-marker',
   '--execution-running-surface',
+  '--execution-surface',
   '--inspector-surface',
   '--conversation-inspector-line',
   '--home-surface',
+  '--settings-choice-selected-surface',
   '--ink',
   '--muted',
   '--faint',
@@ -140,6 +144,8 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--ink', '--surface'],
     ['--muted', '--surface'],
     ['--faint', '--surface'],
+    ['--ink', '--settings-choice-selected-surface'],
+    ['--muted', '--settings-choice-selected-surface'],
     ['--dialog-field-label', '--surface-raised'],
     ['--ink', '--new-camp-picker-surface'],
     ['--faint', '--new-camp-picker-surface'],
@@ -147,10 +153,12 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--ink', '--execution-running-surface'],
     ['--muted', '--execution-running-surface'],
     ['--info', '--execution-running-surface'],
+    ['--ink', '--execution-surface'],
+    ['--muted', '--execution-surface'],
     ['--brand-contrast', '--brand'],
     ['--conversation-action-contrast', '--conversation-action'],
     ['--conversation-action-contrast', '--conversation-action-hover'],
-    ['--conversation-action', '--surface-selected'],
+    ['--conversation-action-ink', '--surface-selected'],
     ['--mission-unread-ink', '--home-surface'],
     ['--success', '--success-soft'],
     ['--attention', '--attention-soft'],
@@ -389,7 +397,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(gutterSize - (thumbInset * 2)).toBe(8)
     expect(css).toMatch(/\*::-webkit-scrollbar\s*\{[^}]*width: var\(--scrollbar-gutter-size\)[^}]*height: var\(--scrollbar-gutter-size\)[^}]*background: transparent/)
     expect(css).toMatch(/\*::-webkit-scrollbar-track,\s*\*::-webkit-scrollbar-corner\s*\{[^}]*background: transparent/)
-    expect(css).toMatch(/\*::-webkit-scrollbar-thumb\s*\{[^}]*border: var\(--scrollbar-thumb-inset\) solid transparent[^}]*border-radius: 999px[^}]*background: var\(--surface-selected\)/)
+    expect(css).toMatch(/\*::-webkit-scrollbar-thumb\s*\{[^}]*border: var\(--scrollbar-thumb-inset\) solid transparent[^}]*border-radius: 999px[^}]*background: var\(--scrollbar-thumb\)/)
     expect(css).not.toContain('scrollbar-width: thin')
     expect(css).toContain('.file-preview-tab-strip::-webkit-scrollbar { display: none; }')
     expect(css).toContain('.run-pulse-inspector .run-pulse-list::-webkit-scrollbar { display: none; }')
@@ -636,7 +644,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   })
 
   it('keeps raw color literals inside the canonical token block', () => {
-    const componentCss = css.replace(/:root(?:\[data-theme="night"\])?\s*\{[\s\S]*?\n\}/g, '')
+    const componentCss = css.replace(/:root(?:\[data-theme(?:-id)?="[a-z-]+"\])?\s*\{[\s\S]*?\n\}/g, '')
 
     expect(componentCss).not.toMatch(/#[0-9a-f]{3,8}\b/i)
     expect(componentCss).not.toMatch(/\brgba?\(/i)
@@ -658,5 +666,21 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
       '--radix-popover-content-available-height'
     ])
     expect([...used].filter((token) => !declared.has(token) && !runtimeOwned.has(token))).toEqual([])
+  })
+})
+
+
+describe.each(['horizon', 'classic-red', 'ember'])('%s palette', theme => {
+  const tokens = tokenBlock(`:root[data-theme-id="${theme}"]`)
+  it('covers the existing semantic token contract and uses production message surfaces', () => {
+    for (const name of requiredTokens) expect(tokens[name], name).toBeTruthy()
+    expect(tokens['--conversation-user-message-line']).toBe(tokens['--conversation-user-message-surface'])
+  })
+  it('keeps text, identity and semantic labels readable', () => {
+    expectTextContrast(tokens)
+    expect(contrast(tokens['--ink'], tokens['--conversation-user-message-surface'])).toBeGreaterThanOrEqual(4.5)
+    for (const [line, surface] of [['--conversation-control-line', '--input'], ['--new-camp-picker-line-strong', '--new-camp-picker-surface']]) {
+      expect(contrast(tokens[line], tokens[surface]), `${line} on ${surface}`).toBeGreaterThanOrEqual(3)
+    }
   })
 })

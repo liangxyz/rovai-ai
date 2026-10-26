@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-10-20
+last_updated: 2026-10-25
 ---
 
 # Porcelain Day
@@ -13,7 +13,7 @@ last_updated: 2026-10-20
 
 - `theme_id`: `porcelain-day`
 - Display name: `Porcelain Day`
-- Runtime value: `ResolvedTheme = "day"`
+- Runtime mapping: `ThemeId = "day"`, `ResolvedTheme = "day"`
 
 ## Mode
 
@@ -21,13 +21,14 @@ Light. `color-scheme: light`.
 
 ## Design intent
 
-冷瓷灰 Canvas、近白纸面和低饱和 Steel 构成适合长时间协作的安静工作台。Steel 只用于
-品牌、结构和稳定选择；语义状态、身份与证据保留各自颜色系统。
+冷瓷灰 Canvas、近白纸面与低饱和 Steel 品牌色。普通操作使用深色动作 Token，选中区域保持安静。
 
 ## Surface hierarchy
 
 `canvas → rail/surface → raised/input` 形成主要层级。会话、Inspector 与 Quick Chat 主区使用
 独立语义 surface token，以便结构清楚而不依赖阴影。普通列表与消息保持平面。
+
+控件、品牌、状态、身份和 Memory 的色彩职责继承 [DESIGN.md](../../../DESIGN.md#colors)。
 
 ## Complete semantic token assignments
 
@@ -41,6 +42,7 @@ Light. `color-scheme: light`.
 | `--surface-subtle` | `#f0f2f4` |
 | `--surface-muted` | `#e7eaed` |
 | `--surface-selected` | `#e9ecee` |
+| `--scrollbar-thumb` | `#e9ecee` |
 | `--surface-hover` | `#e8eaea` |
 | `--surface-sunken` | `#e4e8eb` |
 | `--workspace-surface-subtle` | `#f4f5f4` |
@@ -61,6 +63,7 @@ Light. `color-scheme: light`.
 | `--inspector-surface` | `#ffffff` |
 | `--conversation-inspector-line` | `#c7cfd6` |
 | `--home-surface` | `#ffffff` |
+| `--settings-choice-selected-surface` | `#ffffff` |
 | `--topbar` | `#fbfbfa` |
 | `--input` | `#ffffff` |
 | `--ink` | `#171b20` |
@@ -94,9 +97,6 @@ Light. `color-scheme: light`.
 | `--monitoring-output` | `#657f9b` |
 | `--monitoring-read` | `#698273` |
 | `--monitoring-write` | `#997b4d` |
-
-Reviewed settings locally alias brand actions to the existing neutral conversation-action tokens.
-MCP/Skills retain their current control tokens; diagnostic/status colors remain semantic.
 
 ### Brand, mention and supporting accents
 
@@ -194,11 +194,11 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 
 | Token | Value | Token | Value |
 |---|---:|---|---:|
-| `--attachment-web` | `#8a5f35` | `--attachment-code` | `#476b85` |
-| `--attachment-notes` | `#626b72` | `--attachment-pdf` | `#9a4f49` |
-| `--attachment-word` | `#3f6991` | `--attachment-sheet` | `#3f7559` |
-| `--attachment-slide` | `#956b38` | `--attachment-image` | `#74628f` |
-| `--attachment-archive` | `#7d6840` | `--attachment-generic` | `#616a73` |
+| `--attachment-web` | `#a65f4a` | `--attachment-code` | `#39777a` |
+| `--attachment-notes` | `#5f6678` | `--attachment-pdf` | `#9a4b46` |
+| `--attachment-word` | `#4e6ea8` | `--attachment-sheet` | `#3e775c` |
+| `--attachment-slide` | `#9a6a32` | `--attachment-image` | `#74628f` |
+| `--attachment-archive` | `#8c6146` | `--attachment-generic` | `#616a73` |
 
 ### Evidence and diff
 
@@ -267,32 +267,23 @@ higher contrast preferences use the stronger control line and ink. Import MCP so
 
 ## Brand, semantic, identity, and evidence color rules
 
-- New Conversation workspace, member and Lead controls share the dialog field tokens and
-  standard input surface. Optional naming uses the same quiet form treatment.
-- `attention` is for pending user action or approval; warm `ember` is decorative and cannot replace it.
-- `danger` is for stop, permanent deletion, sidebar removal, forgetting and confirmed failure—not ordinary disabled state.
-- Stable IDs map to `--identity-1..8`; identity color never signals state or permission.
-- Evidence never inherits brand gradients, identity fills or portraits.
-- Narrative inline code uses the borderless `--inline-code-canvas`; Shell command results use
-  `--shell-result-canvas`; fenced code uses the bounded `--code-block-canvas` with its evidence
-  border, while other evidence surfaces continue to use `--evidence-canvas`.
-- Camp message prose, Runtime process copy in the bottom and Inspector execution surfaces, and
-  Markdown file previews use the dedicated `--conversation-inline-code-canvas`,
-  `--conversation-code-block-canvas` and `--conversation-code-line` Mist Gray layer. Release notes,
-  Tool results and other SafeMarkdown surfaces keep the shared defaults.
-- Public user and Agent message bodies share the Mist Gray
-  `--conversation-user-message-surface` and matching `--conversation-user-message-line`, retaining a 1px border
-  allocation. Single Chat user bubbles share these tokens; private Agent narrative remains transparent.
+Inherit [DESIGN.md](../../../DESIGN.md#colors). Inline code, Shell results and fenced evidence use their
+respective code tokens. Conversation prose, process copy and Markdown files use the dedicated
+`--conversation-inline-code-canvas`, `--conversation-code-block-canvas` and `--conversation-code-line` layer;
+release notes and Tool results keep shared SafeMarkdown defaults.
+Public user/Agent messages and Single Chat user bubbles share `--conversation-user-message-surface`
+and its matching 1px border allocation; private Agent narrative stays transparent.
 
 ## Contrast requirements
 
-Normal text must meet 4.5:1; focus, control boundaries and non-text state indicators must meet 3:1.
+Normal text must meet 4.5:1; control boundaries and non-text state indicators must meet 3:1.
+Focus behavior follows the [accessibility baseline](../qa/accessibility.md).
 State cannot rely on color alone. Identity colors are tested on the production surfaces where they appear.
 
 ## Prohibited substitutions
 
 Do not replace Steel with status colors, collapse eight identities to one Steel mark, use `--line` as the
-sole control boundary, or restore the historical Arctic Dawn/Meridian palette.
+sole control boundary, or add theme-specific component behavior.
 
 ## Implementation source
 
@@ -303,5 +294,3 @@ source. This document is a reviewable contract, not a second CSS source.
 
 Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
 `1040×700`, `1440×920`, `2560×1440`, keyboard focus, 200% zoom and reduced motion.
-
-Neutral workspace selection/hover tokens apply to teammate roster, Memory, Automation and jump search. Memory uses the achromatic `--memory-*` surface, input and text family, with the same neutral primary-action hierarchy. Add/revise actions use Memory ink on canvas (inverted at night); other workspaces reuse the conversation action family for neutral actions; Runtime configuration dropdowns retain their existing tokens; the shared sidebar retains the production theme on the Memory route. Memory neutral overrides are scoped to content, notices and dialog portals, never the global navigation. Focus tokens do not require an extra outline, halo or focused input border.

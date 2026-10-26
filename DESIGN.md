@@ -1,16 +1,6 @@
 ---
 name: Rovai AI
 description: A quiet, evidence-first desktop workspace for human and agent collaboration.
-colors:
-  steel-day: "#526f88"
-  steel-night: "#7897ae"
-  porcelain-canvas: "#eceeef"
-  porcelain-surface: "#fbfbfa"
-  graphite-canvas: "#0d1114"
-  graphite-surface: "#151a1e"
-  ink-day: "#171b20"
-  ink-night: "#e7ecef"
-  ember-rendezvous: "#d3a45f"
 typography:
   body:
     fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif'
@@ -35,181 +25,107 @@ spacing:
 
 ## Overview
 
-**Creative North Star: “Porcelain Day / Steel Night.”**
+Use compact desktop controls, open reading surfaces, aligned rows and restrained decoration.
+All registered palettes share one component tree, interaction model and state matrix.
+Use [UI routing](docs/ui/README.md) for component contracts, surface briefs and verification.
 
-Rovai AI is a dense but calm desktop workspace: porcelain and graphite surfaces provide quiet
-structure while evidence, responsibility and user decisions remain easy to inspect. Porcelain Day
-and Steel Night are two implementations of the same visual world and the same component tree—not
-separate products.
+### Brand mark
 
-The interface favors open reading planes, aligned rows and restrained Steel accents. It does not
-use decoration to soften or obscure commands, diffs, approvals, errors or uncertain recovery.
-
-**Key characteristics:**
-
-- neutral surfaces with low-frequency Steel structure;
-- compact desktop density and stable information hierarchy;
-- identity, status, evidence and brand colors kept semantically separate;
-- one shared component and state matrix across both themes.
-
-## Brand Mark
-
-The canonical Rovai mark is a four-point star held above a curved horizon. The star means direction;
-the horizon means a shared world and a common plane for collaboration. Their deliberate gap keeps
-both ideas legible at Dock and rail sizes. Both shapes remain present in production brand lockups—the
-four-point star alone is not the Rovai brand mark.
-
-The theme-independent App icon uses a deep charcoal carrier that descends from `#2b2b2c` through
-`#1a1a1b` to `#0c0c0d`, a Steel horizon (`#7897ae`) and a Porcelain star (`#e7ecef`), with no outline
-around the carrier. Its star-to-horizon gap remains pure negative space: the App icon does not
-include a rendezvous point. Compact in-app marks omit the carrier, render the separated
-star-and-horizon geometry in `--rail-logo`, and place an Ember rendezvous point (`--ember`) at the
-center of the horizon. Day and Night keep one silhouette while using their own contrast-safe Steel
-and Ember values. The rendezvous point is brand geometry and never indicates status, identity,
-approval or evidence.
+- Preserve the separated four-point star and curved horizon; reuse the production assets.
+- The App icon uses its fixed charcoal carrier, Steel horizon and Porcelain star, without a rendezvous point.
+- In-app marks omit the carrier and use `--rail-logo` with the `--ember` rendezvous point.
+- Brand geometry and colors do not express status, selection, identity or approval.
 
 ## Colors
 
-The canonical values live in [Porcelain Day](docs/ui/themes/porcelain-day.md) and
-[Steel Night](docs/ui/themes/steel-night.md). Components consume semantic CSS variables; they do
-not own theme-specific colors.
+Complete palettes and mode mappings belong to the [theme registry](docs/ui/themes/README.md);
+production values live in [theme.css](packages/ui/src/theme.css). Use semantic variables; do not
+add component-level theme colors, automatic inversion or theme-specific markup.
 
-### Named rules
+| UI role | Token / rule |
+|---|---|
+| Solid primary action | `--conversation-action`, `--conversation-action-hover`, `--conversation-action-contrast` |
+| Action text and selected control marks on a surface | `--conversation-action-ink`; ordinary labels use `--ink` |
+| Checked checkbox, radio, switch and range accent | Current theme action family; never the OS default accent, `--brand`, `--workspace-steel` or `--focus` |
+| Navigation and row selection | The surface's selection/hover tokens; neutral readable text, no colored left stripe |
+| Brand | `--brand` / `--brand-*`, `--rail-logo`, `--ember`; only for an explicitly assigned brand role |
+| Semantic state | Dedicated success, attention, danger and info tokens plus text, icon or shape |
+| Identity | Eight stable `--identity-*` tokens; never state or selection |
+| Evidence and Diff | Dedicated evidence, code and diff tokens; preserve signs and line numbers |
+| Scrollbar | `--scrollbar-thumb`; preserve the documented Memory/Automation override |
 
-**The Token-Only Theme Rule.** Components use semantic tokens and must not add theme-specific hex
-values or `theme === "night"` color branches.
-
-**The Identity Is Not Status Rule.** Stable identity colors distinguish a person, Skill or MCP
-server; they never mean running, healthy, approved, dangerous or selected.
-
-**The Evidence Stays Neutral Rule.** Commands, paths, tool output, JSON and diffs use evidence
-tokens. Brand washes, portraits and identity fills do not enter evidence surfaces.
-
-**The Same Surface Rule.** Every production theme covers the same pages, controls, capabilities and
-states. `system` is a preference resolver, not a third theme.
+- Apply the same control rules inside Portal-mounted menus, dialogs and sheets. Do not depend on a page-local alias reaching a Portal.
+- Action colors follow the selected palette; do not describe them as always black, white or neutral.
+- Memory content, notices and dialogs use the achromatic `--memory-*` family, including local actions. Its shared navigation keeps the selected App theme.
+- Preserve dedicated component tokens for reading surfaces, links, search matches and Runtime configuration; do not replace them with a generic accent.
 
 ## Typography
 
-The body stack is the platform-native sans-serif stack declared in `packages/ui/src/theme.css`; no downloadable
-font is required. Monospace is reserved for commands, paths, timestamps, stable IDs, short status
-values and evidence.
-
-- Body copy is normally 12.5–13px with 1.6–1.7 line height.
-- Secondary text is not smaller than 10.5px. Smaller type is limited to short metadata that still
-  meets contrast requirements.
-- Narrative prose is bounded at `76ch`; code, tables and other artifacts may grow to `930px`; the
-  shared wide conversation track remains `1040px`, while Composer reaches `1440px` at viewports
-  `>= 1800px`. Independent Markdown previews adapt to their container: a wide preview permits
-  a `1120px` artifact track and `930px` ordinary prose, while narrow previews retain `780px`.
-- Weight, size, placement and whitespace establish hierarchy before color does.
+- Use the production system sans-serif stack; add no downloaded font.
+- Body text is normally 12.5–13px with 1.6–1.7 line height; secondary copy is at least 10.5px.
+  Smaller type is limited to short, contrast-safe metadata.
+- Use monospace for commands, paths, timestamps, IDs and evidence.
+- Establish hierarchy with size, weight, spacing and alignment before color.
+- Follow the [conversation](docs/ui/components/conversation-workspace.md) and
+  [file preview](docs/ui/components/file-preview.md) contracts for prose/artifact widths and reading preferences.
 
 ## Layout
 
-The desktop shell uses a default 270px navigation rail, a 50px top row (38px for Thread) and a flexible content column.
-macOS and Web settings use a fixed 270px rail without collapse, resize or history controls.
-macOS preserves an inherited collapsed rail with an expand button. Web settings always expand their categories
-and remove the native drag spacer above the brand; leaving settings restores the ordinary-page layout. Ordinary pages show back/forward
-beside the sidebar toggle while expanded, and only the expand button while collapsed.
-The global rail resizes from 200px to 420px within the window. Dragging to 200px pauses at the minimum; after a 180ms dwell, another 64px inward folds it
-to 0px over 160ms. Releasing at the stop keeps 200px. The window-chrome toggle also collapses
-it completely, without an icon strip. Restore through the toggle,
-keyboard, or a drag from the left edge; retain the previous expanded width and mounted page state.
-The minimum supported window is `1040×700`; reference checks also cover `1440×920` and
-`2560×1440`, 200% zoom and reduced motion.
-
-Spacing follows the existing `4 / 8 / 12 / 16 / 20 / 24 / 32px` rhythm. Content stays aligned to
-stable axes. Ordinary conversation prose and the message copy affordance share a content track;
-Composer uses an independent centered track, with its route rail and input box kept equal-width and
-coaxial. Wide artifacts may expand without moving narrative text. The whole app must not acquire a
-horizontal scrollbar.
+- Desktop: default 270px navigation, 50px top row (38px in Thread), flexible content.
+  Navigation sizing, collapse and platform-specific settings layout follow
+  [App Shell](docs/ui/components/app-shell-navigation.md#调宽与完全折叠).
+- Use the `4 / 8 / 12 / 16 / 20 / 24 / 32px` spacing rhythm and stable alignment axes.
+- Keep narrative text aligned; wide artifacts may expand independently. Composer and its route rail share one centered track.
+- Avoid page-level horizontal scrolling. Desktop checks cover `1040×700`, `1440×920`, `2560×1440` and 200% zoom.
+- Mobile reflows the same data and actions; use the [Mobile contract](docs/ui/host-web-mobile.md) for sheets, navigation and touch controls.
 
 ## Elevation & Depth
 
-Depth is tonal and structural by default. Canvas, surface, raised surface, selection and strong
-divider tokens describe most hierarchy. Ordinary cards, messages, lists and the Inspector have no
-shadow.
-
-The sole general floating elevation is `--shadow-float`: `0 18px 56px rgba(38, 45, 58, 0.14)` in
-Day and `0 22px 64px rgba(0, 0, 0, 0.42)` in Night. Menus and dialogs alias that token. Use it only
-for genuine overlays such as Dialogs, Popovers and fixed approval surfaces.
-
-**The Quiet Structure Rule.** Prefer surface levels, dividers and selection rails over nested cards
-and ambient shadows.
+- Establish depth with canvas, surface, raised surface and dividers.
+- Ordinary messages, lists, cards and Inspector content have no shadow.
+- Use `--shadow-float` and its aliases only for actual overlays, menus, dialogs and floating approval surfaces.
+- Prefer open sections and separators; use a card only for a bounded object, decision or independent state.
 
 ## Shapes
 
-Controls use compact 5–8px radii, work surfaces typically use 9–11px and dialogs use 12–13px.
-Pills are reserved for terse status, filters and identity metadata; they do not wrap paragraphs.
-Circular shapes are reserved for portraits, small status dots and bounded icon controls.
-
-Borders are semantic: `--line` separates, `--line-strong` establishes structure and
-`--control-line` makes interactive boundaries perceivable. Dialog fields use the paired
-`--dialog-field-line` and `--dialog-field-line-hover` tokens with a clear input surface, visible label
-without extra focus outlines or halos; higher contrast preferences restore the stronger control boundary.
+- Controls: 5–8px radius; work surfaces: 9–11px; dialogs: 12–13px.
+- Pills are for short statuses, filters and identity metadata; circles are for portraits, small status dots and bounded icon controls.
+- Use `--line` for separators, `--line-strong` for structure and `--control-line` for interactive boundaries.
+- Dialog fields use `--dialog-field-line` / `--dialog-field-line-hover`; higher-contrast modes retain a visible control boundary.
 
 ## Components
 
-- **Buttons:** compact, direct and text-first. Primary actions use Steel by default. Conversation send, conversation/project renaming, new-conversation dialog creation, task creation and member creation/invitation use
-  the neutral `--conversation-action` family, as do Web connection recovery, first-run onboarding, teammate Runtime permission switches, Host workspace confirmation, teammate save, Memory, Automation and MCP/Skills actions. Teammate saves and avatar crop sliders use the neutral primary action; workspace creation entries use light tonal buttons, except the Memory add/revise pair, which uses the neutral primary action. Home creation uses a quiet tonal entry; danger marks destructive actions and sidebar removal. Active buttons move down 1px; disabled controls retain legible content at
-  reduced opacity. Floating return-to-latest and Thread panel collapse controls keep their hit area stationary while pressed;
-  their face uses a tonal change for feedback. Mission creation/start buttons also keep their position
-  when pressed; their primary actions use the neutral `--conversation-action` family.
-  Conversation teammate selection and saving the default team use the same neutral action family for checked controls.
-- **Inputs:** use the raised/input surface and a perceivable control boundary. DOM focus supports typing, IME and keyboard navigation without extra outlines, halos or focus-only border changes. Search inputs do not add a focus underline.
-- **Navigation:** rows and selection surfaces establish location. Selected conversation and teammate rows omit
-  the left rail and use neutral text. Memory uses the achromatic `--memory-*` family for its workspace, notices and dialogs; Automation uses `--neutral-selected` and `--neutral-hover`; the shared sidebar keeps its production theme on the Memory route, including logo and navigation colors. Memory neutral overrides stay inside the content and dialog surfaces. Hover is supplementary;
-  selected state and actions remain understandable from text, icons and placement.
-- **Resizable boundaries:** navigation, member roster, file preview, MCP/Skills, Automation and execution-panel splitters
-  share a single `1px` line. Hover and dragging change the entire boundary to neutral `--resize-line`,
-  without a short grip or increased thickness. Invisible hit areas remain wider. Preserve keyboard resizing,
-  cancellation and reset. Collapsible panes share the 180ms minimum stop, 64px continuation and 160ms
-  fold; reduced motion skips the fold animation while retaining the intentional stop. Release before
-  folding keeps the minimum; release during a fold finishes it. Settings lists and Diff file trees
-  retain their minimum widths, and the Mission drawer retains its own full-expansion gesture. Collapse icons use an unfilled rounded window with an inner line near the corresponding
-  edge when collapsed; the navigation control sits right of macOS traffic lights or left of Windows File.
-- **Containers:** prefer one open surface with dividers over card walls. A card is justified only
-  when it represents a bounded object, decision or independent state.
-- **Dialogs and Popovers:** one raised neutral surface with a 1px structural boundary and no colored
-  top stripe. Use a single title, regular-weight muted labels and light 1px field borders. Keep common
-  fields visible; disclose optional detail without losing drafts or validation. Footers contain actions
-  and only necessary status. Destructive dialog actions use `--danger-soft` with `--danger` text. The standalone
-  Mission Worktree cleanup action is a narrow product-specific exception: it uses the neutral conversation
-  action while its concise dialog states the exact Worktree/branch scope.
-  Preserve identity avatars and functional context icons. Closing menus or dialogs does not automatically refocus an entry button; retain input positioning, focus trapping and keyboard navigation.
-  The member avatar picker/crop dialog is a scoped exception: its confirmed interaction returns focus to the actual avatar entry after closing, without scrolling or adding focus decoration.
-  Runtime configuration dropdown bodies remain unchanged.
-- **Evidence:** uses the dedicated evidence and diff tokens, monospaced type where appropriate, and
-  structural `+`/`-`, line numbers or labels in addition to color.
-- **Code:** shared SafeMarkdown surfaces use a quiet inline canvas with `0 2px` padding and a `3px`
-  radius; fenced code uses the matching block canvas with an evidence border. Thread message prose,
-  Runtime process copy in both execution placements and Markdown file previews share the
-  component-owned Mist Gray treatment. Release notes and other SafeMarkdown surfaces retain the
-  quiet shared defaults; other bounded evidence surfaces keep the stronger evidence canvas.
-- **Identity:** portraits and eight stable identity tokens are a narrow exception to the neutral
-  workspace. Identity treatments do not spread into background decoration.
+- **Buttons:** primary actions use the action family; secondary and workspace creation entries use quiet tonal surfaces.
+  Destructive actions use `--danger-soft` and `--danger`. Mission Worktree cleanup keeps its documented ordinary action treatment.
+  Preserve existing pressed behavior; fixed-position controls must not shift their hit area. Disabled labels remain legible.
+- **Inputs and selection:** use the input surface and visible labels. Apply the Colors table to checked and disabled states.
+  Keep DOM focus, caret, IME and keyboard navigation without extra focus rings, glow, focus-only borders or search underlines.
+- **Navigation:** retain selected state independently of hover. Selected conversation and teammate rows use a quiet surface and neutral text, without a left stripe.
+- **Splitters:** use one 1px boundary; hover/drag changes it to `--resize-line` without thickening or a short grip.
+  Preserve wide hit areas, keyboard resizing, reset, cancellation and final-pointer coordinates under zoom.
+  Collapsible panes stop at minimum width; dragging another 64px folds immediately during the gesture over 160ms.
+  Reverse 24px to reopen within the same gesture; reduced motion skips animation.
+  Escape restores the prior layout; pointer interruption, blur and container resize settle the last position.
+  Scope changes discard stale gestures; a drag-generated click never resets width.
+  Keep each surface's dimensions and persistence in its component contract or brief.
+- **Preview expansion:** file, execution and activity use the shared 28px header control and 15px two-corner glyph.
+  Expansion hides the conversation flush to navigation; restore with the same control or Escape. Preserve mounted content, drafts and reading positions.
+- **Dialogs and Popovers:** one raised surface, 1px boundary, single title, muted regular-weight labels and no colored top stripe.
+  Keep common fields visible; optional disclosure preserves drafts and validation. Footers contain actions and necessary status only.
+  Preserve modal focus trapping and Esc; use the surface's documented focus return, otherwise suppress automatic trigger refocus.
+- **Messages and code:** retain production bubble geometry, spacing and same-color bubble borders.
+  Use shared SafeMarkdown and the dedicated conversation code tokens; release notes retain shared defaults.
+- **Identity:** preserve portraits and stable identity markers; do not spread identity colors into surrounding surfaces.
 
-Rovai-specific interaction contracts are indexed in
-[UI components](docs/ui/components/README.md); page-local composition belongs in
-`apps/desktop/.impeccable/surfaces/`.
+Page composition belongs in [surface briefs](docs/ui/README.md#页面局部-brief); complex interactions belong in
+[component contracts](docs/ui/components/README.md). Do not duplicate their state machines here.
 
 ## Do's and Don'ts
 
-### Do
-
-- **Do** keep the two themes on one component tree and one state matrix.
-- **Do** preserve readable evidence, uncertainty and the next user action.
-- **Do** combine state color with text, icon, shape or stable position.
-- **Do** use the established product terms “队员”, “记忆”, “智能体” and “快速对话”. “智能体” labels the selectable coding-agent product; “队员” labels its long-lived team identity.
-- **Do** implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery states for
-  primary surfaces.
-
-### Don't
-
-- **Don't** reintroduce Meridian, the historical Arctic Dawn palette or automatic color inversion.
-- **Don't** create role-colored message bubbles, card walls, gradients, glow, particles or global
-  `transition: all`.
-- **Don't** use Steel as a substitute for success, attention, danger, evidence or identity.
-- **Don't** invent progress, approval options, Runtime capability or recovery certainty that the
-  authoritative read model does not provide.
-- **Don't** introduce a new UI framework, CSS-in-JS layer, font, icon system, animation library or
-  state manager for an incremental Renderer change.
+- **Do** cover Loading, Empty, Partial, Error, Disabled, Submitting and Recovery with real read-model facts.
+- **Do** preserve drafts, selection, scroll and focus on failures and theme changes.
+- **Do** keep labels direct; show explanations only when needed to choose, resolve a problem or understand an unavailable action.
+- **Do** use the established terms 队员、记忆、智能体、快速对话.
+- **Don't** add decorative gradients, glow, particles, role-colored message bubbles, card walls or global `transition: all`.
+- **Don't** invent progress, approvals, capabilities or recovery certainty.
+- **Don't** introduce a new UI framework, CSS-in-JS layer, font, icon system, animation library or state manager for an incremental change.

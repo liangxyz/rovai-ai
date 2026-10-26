@@ -243,7 +243,7 @@ button.mission-tag { cursor: pointer; }
 .mission-worktree-cleanup-dialog p { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
 .mission-delete-workspace-option { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--ink); font-size: 12px; cursor: pointer; }
 .mission-delete-workspace-option:has(input:disabled) { color: var(--faint); cursor: default; }
-.mission-delete-workspace-option input { accent-color: var(--brand); }
+.mission-delete-workspace-option input { accent-color: var(--conversation-action); }
 .mission-inline-help { position: relative; display: inline-grid; width: 17px; height: 17px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); font-size: 10px; line-height: 1; cursor: help; }
 .mission-inline-help::after { position: absolute; z-index: 460; bottom: calc(100% + 7px); left: 50%; display: none; width: max-content; max-width: 280px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); content: attr(data-tooltip); font-size: 11px; line-height: 1.55; transform: translateX(-50%); }
 .mission-inline-help:is(:hover,:focus-visible)::after { display: block; }
@@ -769,11 +769,11 @@ html.diff-resizing .mission-diff-file-list,html.diff-resizing .mission-diff-read
 .rename-route { display: flex; max-width: min(620px,80vw); align-items: center; gap: 8px; margin-top: 4px; }
 .rename-route code { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 10.5px; }
 .mobile-files-toggle { display: none; }
-:is(#mission-detail-tree,#mission-modal-tree) { scrollbar-color: var(--surface-selected) transparent; }
+:is(#mission-detail-tree,#mission-modal-tree) { scrollbar-color: var(--scrollbar-thumb) transparent; }
 @supports selector(::-webkit-scrollbar) { :is(#mission-detail-tree,#mission-modal-tree) { scrollbar-color: auto; } }
 :is(#mission-detail-tree,#mission-modal-tree)::-webkit-scrollbar { width: 12px; height: 0; background: transparent; }
 :is(#mission-detail-tree,#mission-modal-tree)::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-:is(#mission-detail-tree,#mission-modal-tree)::-webkit-scrollbar-thumb { min-height: 44px; border: 2px solid transparent; border-radius: 999px; background: var(--surface-selected); background-clip: padding-box; box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--ink) 6%,transparent); }
+:is(#mission-detail-tree,#mission-modal-tree)::-webkit-scrollbar-thumb { min-height: 44px; border: 2px solid transparent; border-radius: 999px; background: var(--scrollbar-thumb); background-clip: padding-box; box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--ink) 6%,transparent); }
 @media (max-width: 760px) {
   .mission-diff-dialog > .compact-header { gap: 12px; }
   .diff-dialog-summary { flex-direction: column; align-items: flex-end; gap: 8px; }
@@ -935,3 +935,86 @@ button.mission-avatars.is-card-roster:hover .member-avatar { filter: brightness(
 .mission-member-profile { width: min(392px, calc(100vw - 32px)); z-index: 320; padding: 0; overflow: hidden; }
 .mission-member-profile .mention-profile-media { min-height: 180px; }
 .mission-member-profile .mention-profile-copy { padding: 16px; }
+
+/* Mission creation: saved Team source and read-only guidance. */
+.mission-team-trigger { max-width: min(100%, 260px); }
+.mission-team-trigger .mission-editor-team-summary { gap: 6px; }
+.mission-team-trigger .dialog-glyph { width: 12px; height: 12px; flex: 0 0 12px; }
+.mission-team-chip-name { max-width: 106px; overflow: hidden; text-overflow: ellipsis; }
+.mission-team-picker { width: 360px; max-width: calc(100vw - 32px); max-height: min(440px, var(--radix-popover-content-available-height)); }
+.mission-team-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 10px; flex: 0 0 auto; }
+.mission-team-heading > div { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.mission-team-heading strong { font-size: 13px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mission-team-heading small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.mission-team-heading > button { display: flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 7px; color: var(--muted); border: 0; border-radius: 5px; background: transparent; white-space: nowrap; font: inherit; font-size: 11px; cursor: pointer; }
+.mission-team-heading > button:hover { color: var(--ink); background: var(--surface-hover); }
+.mission-team-heading > button .dialog-glyph { width: 12px; height: 12px; }
+.mission-team-readonly-roster { flex: 1 1 auto; min-height: 60px; max-height: 240px; }
+.mission-team-member-readonly { display: flex; align-items: center; gap: 9px; min-height: 47px; padding: 7px 8px; }
+.mission-team-member-readonly > .member-avatar { --member-avatar-size: 29px !important; }
+.mission-team-member-readonly > span:nth-child(2) { min-width: 0; flex: 1; }
+.mission-team-member-readonly strong { display: block; color: var(--ink); font-size: 12px; font-weight: 500; }
+.mission-team-member-readonly small { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mission-team-lead-label { color: var(--muted); padding: 2px 7px; border-radius: 4px; background: var(--neutral-selected); font-size: 10.5px; }
+.mission-team-picker-footer > span { color: var(--muted); font-size: 11px; }
+.mission-team-guidance { flex: 0 0 auto; min-height: 34px; padding: 2px 6px; border-top: 1px solid var(--line); margin-top: 5px; }
+.mission-team-guidance-toggle { display: flex; align-items: center; gap: 7px; min-height: 32px; width: 100%; padding: 4px 2px; border: 0; color: var(--muted); background: transparent; cursor: pointer; text-align: left; font: inherit; font-size: 11.5px; }
+.mission-team-guidance-toggle > svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+.mission-team-guidance-toggle > span:last-child { margin-left: auto; }
+.mission-team-guidance-toggle .dialog-glyph { width: 13px; height: 13px; transition: transform 120ms ease; }
+.mission-team-guidance-toggle .is-expanded .dialog-glyph { transform: rotate(180deg); }
+.mission-team-guidance-text { margin: 3px 0 6px; padding: 10px 11px; border-radius: 6px; color: var(--ink); background: var(--surface-muted); font-size: 12px; line-height: 1.75; }
+.mission-team-guidance-preview-text { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; max-height: 105px; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mission-team-guidance-full-link { display: flex; align-items: center; gap: 5px; margin: 6px 0 -3px; padding: 3px 0; color: var(--ink); border: 0; border-radius: 3px; background: transparent; font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+.mission-team-guidance-full-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.mission-team-guidance-full-link > svg { width: 13px; height: 13px; transform: rotate(180deg); }
+.mission-team-picker.mission-team-guidance-reader { width: 520px; height: min(560px, var(--radix-popover-content-available-height)); max-height: min(560px, calc(100dvh - 24px)); padding: 7px; }
+.mission-team-reader-heading { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 3px 5px 10px; border-bottom: 1px solid var(--line); }
+.mission-team-reader-heading > div { min-width: 0; }
+.mission-team-reader-heading strong { font-size: 13px; font-weight: 600; }
+.mission-team-reader-heading small { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+.mission-team-reader-body { flex: 1 1 auto; min-height: 0; padding: 15px 17px 18px; overflow: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); font-size: 13px; line-height: 1.85; user-select: text; outline: none; }
+.mission-team-source-heading { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; margin: 0 3px 7px; }
+.mission-team-source-heading strong { color: var(--ink); font-size: 12px; font-weight: 550; }
+.mission-team-back { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.mission-team-back > svg { width: 15px; height: 15px; }
+.mission-team-back:hover { background: var(--surface-hover); color: var(--ink); }
+.mission-team-source-list { overflow: auto; min-height: 0; overscroll-behavior: contain; }
+.mission-team-source-option { display: flex; width: 100%; min-height: 54px; align-items: center; gap: 10px; border: 0; background: transparent; color: var(--ink); padding: 8px 10px; text-align: left; cursor: pointer; }
+.mission-team-source-option > span:not(.mission-team-avatar) { flex: 1; min-width: 0; }
+.mission-team-source-option > svg:first-child { width: 28px; height: 28px; min-width: 28px; flex: 0 0 28px; padding: 5px; border: 1px solid var(--line); border-radius: 6px; fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.mission-team-source-option > .dialog-glyph:last-child { width: 14px; height: 14px; margin-left: auto; flex: 0 0 14px; color: var(--conversation-action-ink); }
+.mission-team-source-option strong { font-size: 12px; font-weight: 500; display: block; }
+.mission-team-source-option small { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-team-source-option:hover:not(:disabled),.mission-team-source-option:focus-visible { background: var(--surface-hover); }
+.mission-team-source-option[aria-pressed=true] { background: var(--neutral-selected); }
+.mission-team-source-option:disabled { opacity: .55; cursor: not-allowed; }
+.compact-option.mission-team-source-option > .mission-team-avatar { flex: 0 0 28px; }
+.mission-team-avatar .member-avatar { --member-avatar-size: 28px !important; }
+.mission-team-list-error { padding: 10px 8px 14px; color: var(--muted); font-size: 12px; }
+.mission-team-list-error p { margin: 0 0 8px; }
+.mission-team-error { margin: 0 8px 8px; color: var(--danger); font-size: 11.5px; line-height: 1.6; }
+.mission-team-picker .mission-picker-search:focus-within { border-bottom-color: var(--line); }
+.mission-team-picker button:focus-visible { background: var(--surface-hover); }
+.mission-team-picker .mission-editor-lead-choice:disabled { opacity: .45; }
+@media(max-width:767px), (max-width:1039px) and (max-height:560px) and (pointer:coarse) {
+ .mission-team-picker { max-width: calc(100vw - 24px); max-height: min(530px, var(--radix-popover-content-available-height)); }
+ .mission-team-heading { min-height: 44px; padding-block: 3px 6px; }
+ .mission-team-heading > button,.mission-team-back { min-height: 44px; min-width: 44px; }
+ .mission-team-member-readonly,.mission-editor-team-row { min-height: 54px; }
+ .mission-team-picker .mission-editor-team-member,.mission-team-picker .mission-editor-lead-choice { min-height: 44px; }
+ .mission-team-source-option { min-height: 60px; }
+ .mission-team-guidance-toggle { min-height: 44px; }
+ .mission-team-guidance-full-link { min-height: 44px; margin-block: 3px -7px; }
+ .mission-team-picker-footer .compact-primary { min-height: 44px; min-width: 68px; }
+ .mission-team-picker .mission-editor-team-list { max-height: 250px; }
+}
+@media(max-width:1039px) and (max-height:560px) and (pointer:coarse) {
+ [data-radix-popper-content-wrapper]:has(> .mission-team-picker) { position: fixed !important; top: 12px !important; left: 50% !important; transform: translateX(-50%) !important; }
+ .mission-team-picker { max-height: calc(100dvh - 24px); height: calc(100dvh - 24px); }
+ .mission-team-guidance-preview-text { -webkit-line-clamp: 2; max-height: 42px; }
+ .mission-team-picker.mission-team-guidance-reader { height: calc(100dvh - 24px); }
+}
+@media(prefers-reduced-motion:reduce) { .mission-team-guidance-toggle .dialog-glyph { transition: none; } }
+
+.mission-team-picker button:focus-visible { outline: 1px solid var(--ink); outline-offset: -2px; }

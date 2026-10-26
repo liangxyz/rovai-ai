@@ -1,4 +1,16 @@
-import type { AppearancePreferences, ThemePreference } from '@contracts'
+import type { AppearancePreferences, ResolvedTheme, ThemeId, ThemePreference } from '@contracts'
+
+export const THEME_MODES: Readonly<Record<ThemeId, ResolvedTheme>> = Object.freeze({
+  day: 'day', night: 'night', horizon: 'day', 'classic-red': 'day', ember: 'night'
+})
+
+export function resolveThemeId(preference: ThemePreference, systemTheme: ResolvedTheme): ThemeId {
+  return preference === 'system' ? systemTheme : preference
+}
+
+export function resolveThemeMode(preference: ThemePreference, systemTheme: ResolvedTheme): ResolvedTheme {
+  return THEME_MODES[resolveThemeId(preference, systemTheme)]
+}
 
 export const DEFAULT_APPEARANCE: Readonly<AppearancePreferences> = Object.freeze({
   preference: 'system',
@@ -28,7 +40,7 @@ export const MIN_PAGE_ZOOM_PERCENTAGE = 10
 export const MAX_PAGE_ZOOM_PERCENTAGE = 500
 
 export function isThemePreference(value: unknown): value is ThemePreference {
-  return value === 'system' || value === 'day' || value === 'night'
+  return value === 'system' || (typeof value === 'string' && Object.hasOwn(THEME_MODES, value))
 }
 
 export function parseAppearancePatch(value: unknown): Partial<AppearancePreferences> {

@@ -139,8 +139,9 @@ while IFS= read -r ignored; do :; done
             &external_mcp_servers,
             "sha256:mcp",
             &attachment_root,
-            "sha256:compatibility",
+            &Some("sha256:compatibility".to_owned()),
             None,
+            |runtime| std::future::ready(Ok(runtime)),
         )
         .await
         .unwrap();
@@ -183,8 +184,9 @@ while IFS= read -r ignored; do :; done
             &external_mcp_servers,
             "sha256:mcp",
             &attachment_root,
-            "sha256:compatibility",
+            &Some("sha256:compatibility".to_owned()),
             None,
+            |runtime| std::future::ready(Ok(runtime)),
         )
         .await
         .unwrap();

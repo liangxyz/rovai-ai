@@ -3,13 +3,13 @@ document_type: ui-platform-contract
 authority: renderer-windows-interaction-delta
 status: accepted
 source_version: v1.05
-last_updated: 2026-10-02
+last_updated: 2026-10-25
 ---
 
 # Windows Interaction Delta
 
 本文只拥有 Rovai AI 在 Windows x64 上相对现有 macOS 产品界面的交互差异。Windows 不是第二套产品：
-Renderer 继续使用同一组件树、信息架构、Porcelain Day / Steel Night Token、领域动作和持久状态。平台差异由
+Renderer 继续使用同一组件树、信息架构、主题 Token、领域动作和持久状态。平台差异由
 只读 `HostPlatformKey` 投影到展示层，不复制业务状态机，也不允许 Renderer 自行推断安全或 Runtime 准入。
 
 生产实现状态由代码、自动化和真实 Windows 证据决定；本文 `accepted` 不表示 Windows UI 已完成。原
@@ -20,7 +20,7 @@ Windows chrome，也不能成为第三份组件、文案或状态真源。
 
 - App Shell 使用默认 270px、可调宽且可完全收起的 rail、50px App 顶行及同一 Project / Camp / Quick Chat 导航；
 - 设置分类、队员工作区、Camp 工作区、Memory、Diagnostics、Onboarding 和 Planned Shutdown 不增删一级入口；
-- Day / Night 是同一生产组件的两套 Token；`system` 只改变解析结果，不改变内容或能力；
+- 五套配色使用同一生产组件；`system` 只解析为 Day / Night，不改变内容或能力；
 - Core command、Draft、selection、focus return、version check、Recovery 和未保存 Runtime 草稿保护保持同义；
 - Runtime 平台准入、机器可用性与 Settings Preview 是三个正交事实，任何一个都不得借另一个的视觉状态表达。
 
@@ -58,8 +58,9 @@ Windows `BrowserWindow` 保留系统 frame，但以 `titleBarStyle: hidden` 隐�
 按钮使用无填色的圆角小窗图标，收起状态内侧竖线贴近左边缘。macOS 对照位置为系统红黄绿右侧。
 完整行为见[App Shell 调宽与完全折叠](components/app-shell-navigation.md#调宽与完全折叠)。
 
-顶层菜单行与 Window Controls Overlay 的 Day / Night 背景都使用 `--rail` 对应颜色，图标使用对应 `--ink`，
-主题切换时同步更新。高度读取 WCO CSS environment value，不写死覆盖值，继续采用系统默认值适配多屏 DPI。
+顶层菜单行与 Window Controls Overlay 使用当前有效 `ThemeId` 的 `--rail` 背景和 `--ink` 图标色，
+覆盖日间、夜间、晨雾、朝霞与绯夜；`system` 解析为日间或夜间。建窗与主题切换使用同一配色解析，
+不能只传递 `ResolvedTheme` 明暗模式。高度读取 WCO CSS environment value，不写死覆盖值，继续采用系统默认值适配多屏 DPI。
 隐藏标题文字层后，Windows 复用既有 `.topbar`、
 `.window-drag-strip` 与 `.unified-sidebar-drag` 受控拖拽区；既有按钮继续保持 `no-drag`。
 

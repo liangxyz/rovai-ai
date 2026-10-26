@@ -1,3 +1,4 @@
+import { isReferenceAtom, referenceIdentity } from './thread-reference'
 import type { ComposerAtom } from '@contracts'
 import {
   $applyNodeReplacement,
@@ -31,9 +32,11 @@ export type SerializedComposerAtomNode = SerializedLexicalNode & {
 }
 
 const atomTypeState = createState('atomType', {
-  parse: (value) => value === 'member' || value === 'all_members' || value === 'skill'
-    ? value
-    : 'member'
+  parse: (value): ComposerAtomType => {
+    if (value === undefined) return 'member'
+    if (value === 'member' || value === 'all_members' || value === 'skill' || value === 'thread_reference' || value === 'mission_reference') return value
+    throw new Error('Unknown Composer Atom type')
+  }
 })
 const referenceIdState = createState('referenceId', {
   parse: (value) => typeof value === 'string' && value.length > 0 ? value : null
@@ -170,6 +173,8 @@ export class ComposerAtomNode extends DecoratorNode<null> {
       }
     }
     const labelFallback = this.getFallbackLabel()
+    if (atomType === 'thread_reference') return { type: atomType, threadId: this.getReferenceId() ?? '', ...(labelFallback ? { labelFallback } : {}) }
+    if (atomType === 'mission_reference') return { type: atomType, missionId: this.getReferenceId() ?? '', ...(labelFallback ? { labelFallback } : {}) }
     return labelFallback
       ? { type: 'member', agentId: this.getReferenceId() ?? '', labelFallback }
       : { type: 'member', agentId: this.getReferenceId() ?? '' }
@@ -182,7 +187,7 @@ function updateComposerAtomDOM(
   editor: LexicalEditor
 ): void {
   const atom = node.getAtom()
-  const fallback = atom.type === 'member'
+  const fallback = isReferenceAtom(atom) ? atom.labelFallback ?? referenceIdentity(atom).id : atom.type === 'member'
     ? `@${atom.labelFallback ?? '不可用队员'}`
     : atom.type === 'all_members'
       ? '@所有队员'
@@ -193,12 +198,22 @@ function updateComposerAtomDOM(
     interactive: false,
     ariaLabel: fallback
   }
-  dom.textContent = presentation.label
+  if (isReferenceAtom(atom)) {
+    let label = dom.querySelector<HTMLElement>(':scope > .reference-token-label')
+    if (!label) {
+      label = dom.ownerDocument.createElement('span')
+      label.className = 'reference-token-label'
+      dom.replaceChildren(label)
+    }
+    if (label.textContent !== presentation.label) label.textContent = presentation.label
+  } else {
+    dom.textContent = presentation.label
+  }
   dom.contentEditable = 'false'
   dom.spellcheck = false
   dom.className = [
     'structured-mention-token',
-    atom.type === 'member'
+    isReferenceAtom(atom) ? `thread-reference${atom.type === 'mission_reference' ? ' mission-reference' : ''}` : atom.type === 'member'
       ? 'member-mention'
       : atom.type === 'all_members'
         ? 'all-members-mention'
@@ -207,12 +222,12 @@ function updateComposerAtomDOM(
     presentation.availability === 'unavailable' ? 'is-unavailable' : ''
   ].filter(Boolean).join(' ')
   dom.dataset.composerAtom = atom.type
-  dom.dataset.tokenKind = atom.type === 'member'
+  dom.dataset.tokenKind = isReferenceAtom(atom) ? atom.type : atom.type === 'member'
     ? 'member_mention'
     : atom.type === 'all_members'
       ? 'all_members_mention'
       : 'skill_mention'
-  dom.dataset.referenceId = atom.type === 'all_members'
+  dom.dataset.referenceId = isReferenceAtom(atom) ? referenceIdentity(atom).id : atom.type === 'all_members'
     ? ''
     : atom.type === 'member'
       ? atom.agentId
@@ -234,9 +249,9 @@ function updateComposerAtomDOM(
 export function $createComposerAtomNode(atom: ComposerAtom): ComposerAtomNode {
   const node = $applyNodeReplacement(new ComposerAtomNode())
     .setAtomType(atom.type)
-    .setReferenceId(atom.type === 'member' ? atom.agentId : atom.type === 'skill' ? atom.skillId : null)
+    .setReferenceId(isReferenceAtom(atom) ? referenceIdentity(atom).id : atom.type === 'member' ? atom.agentId : atom.type === 'skill' ? atom.skillId : null)
     .setNameAtSend(atom.type === 'skill' ? atom.nameAtSend : null)
-    .setFallbackLabel(atom.type === 'member' ? atom.labelFallback ?? '' : atom.type === 'skill' ? atom.nameAtSend : '所有队员')
+    .setFallbackLabel(isReferenceAtom(atom) ? atom.labelFallback ?? '' : atom.type === 'member' ? atom.labelFallback ?? '' : atom.type === 'skill' ? atom.nameAtSend : '所有队员')
   return node
 }
 

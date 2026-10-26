@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { AgentProfile, CheckoutState, MissionActivity, MissionChangedFile, MissionDelivery as Delivery, MissionFileDiff, MissionRecord, MissionWorkspaceChangesView } from '@contracts'
 import { useThreadClient } from './camp-client'
@@ -9,6 +9,7 @@ import { readErrorMessage } from './error-message'
 import { missionDate } from './MissionBoard'
 import { useFilePreview } from './FilePreviewContext'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
+import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
 import { NavigationIcon } from './NavigationIcon'
 import { DialogControlIcon } from './AppDialog'
 import { writeClipboardText } from './clipboard'
@@ -512,7 +513,7 @@ function MissionDiff({files, selected, baseSha, snapshotReady, snapshotEpoch, ca
   const [query, setQuery] = useState(''), [expanded, setExpanded] = useState<Set<string>>(() => new Set(missionTreeDirectoryPaths(missionFileTree(files)))), [mobileFilesOpen, setMobileFilesOpen] = useState(false), [copyStatus, setCopyStatus] = useState('')
   const requestGeneration = useRef(0)
   const contentRef = useRef<HTMLDivElement>(null), mobileToggleRef = useRef<HTMLButtonElement>(null), layoutRef = useRef<HTMLDivElement>(null), separatorRef = useRef<HTMLDivElement>(null)
-  const widthRef = useRef(280), preferredWidth = useRef<number | null>(null), drag = useRef<{ id: number; startX: number; lastX: number; width: number; previous: number | null; scale: number } | null>(null)
+  const widthRef = useRef(280), preferredWidth = useRef<number | null>(null)
   const [treeWidth, setTreeWidth] = useState(280), [splitBounds, setSplitBounds] = useState({ min: 200, max: 600, total: 0 }), [resizing, setResizing] = useState(false)
   const selectedFile = files.find(file => file.id === selected) ?? files[0]
   const cached = cache.get(selected)
@@ -544,34 +545,34 @@ function MissionDiff({files, selected, baseSha, snapshotReady, snapshotEpoch, ca
     const next = Math.round(Math.min(max, Math.max(min, requested ?? defaultWidth())))
     widthRef.current = next; setTreeWidth(next); setSplitBounds({ min, max, total })
   }, [])
+  const splitter = useCollapsibleSplitter({
+    size: treeWidth, readSize: () => widthRef.current, collapsed: false,
+    minimum: splitBounds.min, maximum: splitBounds.max, direction: 1,
+    scale: () => splitterScale(layoutRef.current),
+    capture: () => ({ width: widthRef.current, preferred: preferredWidth.current }),
+    onPreview: applyWidth,
+    onCommit: width => { preferredWidth.current = width; applyWidth(width) },
+    onCancel: before => { preferredWidth.current = before.preferred; applyWidth(before.width) },
+    onActiveChange: active => {
+      document.documentElement.classList.toggle('diff-resizing', active)
+      setResizing(active)
+    }
+  })
   useEffect(() => {
-    applyWidth()
-    const observer = typeof ResizeObserver === 'undefined' || !layoutRef.current ? null : new ResizeObserver(() => applyWidth())
+    let available = -1
+    const measure = (): void => {
+      const next = layoutRef.current?.clientWidth ?? 0
+      if (available === next) return
+      splitter.finish()
+      available = next
+      applyWidth()
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' || !layoutRef.current ? null : new ResizeObserver(measure)
     if (observer && layoutRef.current) observer.observe(layoutRef.current)
-    const resize = () => applyWidth()
-    window.addEventListener('resize', resize)
-    return () => { observer?.disconnect(); window.removeEventListener('resize', resize); document.documentElement.classList.remove('diff-resizing') }
-  }, [applyWidth])
-  const finishResize = useCallback((cancel: boolean) => {
-    const current = drag.current
-    if (!current) return
-    drag.current = null
-    preferredWidth.current = cancel ? current.previous : widthRef.current
-    if (separatorRef.current?.hasPointerCapture(current.id)) separatorRef.current.releasePointerCapture(current.id)
-    document.documentElement.classList.remove('diff-resizing'); setResizing(false); applyWidth(preferredWidth.current)
-  }, [applyWidth])
-  useEffect(() => {
-    const keydown = (event: globalThis.KeyboardEvent) => { if (drag.current && event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); finishResize(true) } }
-    const blur = () => finishResize(true)
-    document.addEventListener('keydown', keydown, true); window.addEventListener('blur', blur)
-    return () => { document.removeEventListener('keydown', keydown, true); window.removeEventListener('blur', blur) }
-  }, [finishResize])
-  const moveResize = (clientX: number): void => {
-    const current = drag.current
-    if (!current) return
-    current.lastX = clientX
-    applyWidth(current.width + (clientX - current.startX) / current.scale)
-  }
+    window.addEventListener('resize', measure)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); document.documentElement.classList.remove('diff-resizing') }
+  }, [applyWidth, splitter.finish])
   const selectFile = (fileId: string): void => {
     onSelect(fileId)
     if (window.matchMedia('(max-width: 580px)').matches) {
@@ -591,13 +592,12 @@ function MissionDiff({files, selected, baseSha, snapshotReady, snapshotEpoch, ca
     const copied = await writeClipboardText(selectedFile.path).catch(() => false)
     setCopyStatus(copied ?uiAttribute("已复制相对路径") :uiAttribute("复制失败，请手动选择路径"))
   }
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content ref={contentRef} className="compact-dialog mission-diff-dialog" aria-describedby={undefined} onOpenAutoFocus={event => { event.preventDefault(); focusInitial() }} onCloseAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => { if (drag.current) { event.preventDefault(); finishResize(true) } }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content ref={contentRef} className="compact-dialog mission-diff-dialog" aria-describedby={undefined} onOpenAutoFocus={event => { event.preventDefault(); focusInitial() }} onCloseAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => { if (splitter.active) { event.preventDefault(); splitter.cancel() } }}>
     <header className="compact-header"><div className="diff-dialog-heading"><Dialog.Title><UiText zh={"累计文件变更"} /></Dialog.Title><div className="diff-dialog-baseline" aria-label={uiAttribute("固定基准与当前使命工作区比较")}><code title={baseSha ?? undefined}>{baseSha?.slice(0, 12) ?? uiAttribute("基准不可用")}</code><svg className="mission-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg><span><UiText zh={"当前使命工作区"} /></span></div></div><div className="diff-dialog-summary"><span>{files.length}<UiText zh={" 个文件"} /></span><span className="mission-diff-counts" aria-label={uiAttribute("合计增加 {0} 行，减少 {1} 行", String(additions), String(deletions))}><span>+{additions}</span><span>−{deletions}</span></span></div><Dialog.Close asChild><button className="compact-close" type="button" aria-label={uiAttribute("关闭累计文件变更")} title={uiAttribute("关闭")}><DialogControlIcon name="close"/></button></Dialog.Close></header>
     <div className="compact-body"><div className="mission-diff-read-state" role="status"><span>{refreshing ? uiAttribute("正在刷新变更…") : stale ? uiAttribute("工作区可能已变化，当前显示上次读取的结果") : uiAttribute("读取于 {0}", missionReadTime(readAt))}</span><button type="button" disabled={refreshing} onClick={onRefresh}><UiText zh={"刷新变更"} /></button></div><button ref={mobileToggleRef} type="button" className="mobile-files-toggle" aria-expanded={mobileFilesOpen} aria-controls="mission-modal-file-navigation" onClick={() => setMobileFilesOpen(value => !value)}><NavigationIcon name="folder-open"/><span><UiText zh={"变更文件 "} />{files.length}</span><Icon name="chevron"/></button>
       <div ref={layoutRef} className="mission-diff-layout" style={{ '--diff-tree-width': `${treeWidth}px` } as CSSProperties}><nav id="mission-modal-file-navigation" className={`mission-diff-file-list${mobileFilesOpen ? ' is-mobile-open' : ''}`} aria-label={uiAttribute("变更文件")}><div className="modal-tree-heading"><span><UiText zh={"变更文件"} /></span><small>{files.length}</small><button className="mission-icon-button" type="button" aria-label={expanded.size ? uiAttribute("折叠全部目录") : uiAttribute("展开全部目录")} title={expanded.size ? uiAttribute("折叠全部目录") : uiAttribute("展开全部目录")} disabled={Boolean(query.trim())} onClick={() => setExpanded(expanded.size ? new Set() : new Set(missionTreeDirectoryPaths(missionFileTree(files))))}><TreeFoldIcon expanded={expanded.size > 0}/></button></div><MissionFileTree files={files} selected={selected} query={query} expanded={expanded} scope="modal" onQueryChange={setQuery} onExpandedChange={setExpanded} onSelect={fileId => selectFile(fileId)}/></nav>
         <div ref={separatorRef} className={`diff-resize-handle${resizing ? ' is-resizing' : ''}`} role="separator" tabIndex={0} aria-label={uiAttribute("调整变更文件树宽度")} aria-orientation="vertical" aria-controls="mission-modal-file-navigation mission-diff-reading" aria-valuemin={splitBounds.min} aria-valuemax={splitBounds.max} aria-valuenow={treeWidth} aria-valuetext={uiAttribute("文件树 {0} 像素，内容 {1} 像素", String(treeWidth), String(Math.max(0, splitBounds.total - treeWidth - 1)))} title={uiAttribute("拖动调整 · 双击恢复默认宽度 · 方向键调整")}
-          onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => { if (event.button !== 0 || !event.isPrimary || drag.current || !layoutRef.current) return; event.preventDefault(); const bounds = layoutRef.current.getBoundingClientRect(); drag.current = { id: event.pointerId, startX: event.clientX, lastX: event.clientX, width: widthRef.current, previous: preferredWidth.current, scale: bounds.width / layoutRef.current.clientWidth || 1 }; event.currentTarget.setPointerCapture(event.pointerId); document.documentElement.classList.add('diff-resizing'); setResizing(true) }}
-          onPointerMove={event => { if (drag.current?.id === event.pointerId) moveResize(event.clientX) }} onPointerUp={event => { if (drag.current?.id === event.pointerId) { moveResize(event.clientX); finishResize(false) } }} onPointerCancel={() => finishResize(true)} onLostPointerCapture={() => { if (drag.current) finishResize(true) }} onDoubleClick={() => { if (drag.current) finishResize(true); preferredWidth.current = null; applyWidth(null) }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return; event.preventDefault(); if (drag.current) finishResize(true); const step = event.shiftKey ? 80 : 24; preferredWidth.current = event.key === 'Home' ? null : Math.max(splitBounds.min, Math.min(splitBounds.max, treeWidth + (event.key === 'ArrowRight' ? step : -step))); applyWidth(preferredWidth.current) }}><span className="diff-splitter-tip" aria-hidden="true"><UiText zh={"文件树 "} />{treeWidth}<UiText zh={"px · 内容 "} />{Math.max(0, splitBounds.total - treeWidth - 1)}px</span><span className="sr-only"><UiText zh={"左右方向键调整 24px，Shift 加速；Home 或双击恢复默认宽度；拖动时 Escape 取消。"} /></span></div>
+          {...splitter.handlers} onDoubleClick={() => { splitter.cancel(); preferredWidth.current = null; applyWidth(null) }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return; event.preventDefault(); splitter.cancel(); const step = event.shiftKey ? 80 : 24; preferredWidth.current = event.key === 'Home' ? null : Math.max(splitBounds.min, Math.min(splitBounds.max, treeWidth + (event.key === 'ArrowRight' ? step : -step))); applyWidth(preferredWidth.current) }}><span className="diff-splitter-tip" aria-hidden="true"><UiText zh={"文件树 "} />{treeWidth}<UiText zh={"px · 内容 "} />{Math.max(0, splitBounds.total - treeWidth - 1)}px</span><span className="sr-only"><UiText zh={"左右方向键调整 24px，Shift 加速；Home 或双击恢复默认宽度；拖动时 Escape 取消。"} /></span></div>
         <section id="mission-diff-reading" className="mission-diff-reading" aria-label={uiAttribute("文件差异")}><header><MissionFileIcon file={selectedFile}/><div className="diff-title-wrap"><strong>{selectedFile.path}</strong>{selectedFile.oldPath && <small><span>{selectedFile.oldPath}</span><svg className="mission-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg><span>{selectedFile.path.split('/').at(-1)}</span></small>}</div><div className="diff-header-stats"><DiffCount file={selectedFile}/></div><button className="mission-icon-button header-copy" type="button" aria-label={uiAttribute("复制文件相对路径")} title={uiAttribute("复制相对路径")} onClick={() => void copyPath()}><svg className="mission-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></button></header>
           {error ? <div className="mission-diff-error" role="alert"><p>{error}</p><button className="compact-cancel" disabled={refreshing} onClick={activeFailure?.kind === 'stale' ? onRefresh : () => setRetry(value => value + 1)}>{activeFailure?.kind === 'stale' ? uiAttribute("刷新变更") : uiAttribute("重试")}</button></div> : !diff ? <p className="mission-diff-state" role="status">{snapshotReady ? uiAttribute("正在读取文件差异…") : uiAttribute("正在更新文件清单…")}</p> : diff.file.binary ? <div className="diff-code-scroll"><div className="diff-empty-content"><MissionFileIcon file={diff.file}/><strong><UiText zh={"二进制文件"} /></strong><p><UiText zh={"没有可展示的文本行差异。"} /></p></div></div> : diff.hunks.length ? <div className="diff-code-scroll" tabIndex={0} aria-label={uiAttribute("差异内容，可滚动")}><div className="mission-diff-code" role="table" aria-label={uiAttribute("{0} 的差异行", String(diff.file.path))}>{diff.hunks.map((hunk, index) => <div key={index} role="rowgroup"><div className="mission-diff-hunk" role="row">@@ −{hunk.oldStart} +{hunk.newStart} @@</div>{hunk.lines.map((line, lineIndex) => <div className={`mission-diff-line is-${line.kind}`} role="row" key={lineIndex}><span role="cell" className="mission-line-number">{line.oldLine ?? ''}</span><span role="cell" className="mission-line-number">{line.newLine ?? ''}</span><code role="cell"><span aria-hidden="true">{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ' '}</span>{line.text}</code></div>)}</div>)}</div></div> : <div className="diff-code-scroll"><div className="diff-empty-content"><strong><UiText zh={"没有文本行差异"} /></strong>{diff.file.oldPath && <div className="rename-route"><code>{diff.file.oldPath}</code><span aria-hidden="true">→</span><code>{diff.file.path}</code></div>}</div></div>}
         </section>

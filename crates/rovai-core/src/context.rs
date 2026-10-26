@@ -8812,6 +8812,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: crate::mission::CreateMissionCommand {
+                        team: None,
                         description_content: None,
                         title: "Context identity".to_string(),
                         description: "Use the internal Mission ID in new context.".to_string(),
@@ -13595,7 +13596,16 @@ mod slow_tests {
     #[test]
     fn newly_bound_session_bootstraps_on_its_current_generation() {
         let mut fixture = fixture();
-        fixture.database.connection().execute("INSERT INTO thread_team_bootstrap(camp_id,guidance) VALUES(?1,'固定指引：先验证，再交付。')", [&fixture.camp_id]).unwrap();
+        // Max-length Unicode guidance consumes its full 40000 UTF-8 bytes.
+        let guidance = "🌸".repeat(10000);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "INSERT INTO thread_team_bootstrap(camp_id,guidance) VALUES(?1,?2)",
+                params![fixture.camp_id, guidance],
+            )
+            .unwrap();
         // Worst JSON expansion: each valid scalar becomes six serialized bytes.
         let long_responsibilities = "\0".repeat(10_000);
         fixture
@@ -13611,6 +13621,28 @@ mod slow_tests {
 
         let store = ManagedBlobStore::new(&fixture.directory);
         freeze_fixture_claim(&mut fixture);
+        let error = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                    max_payload_bytes: guidance.len(),
+                },
+            )
+            .unwrap_err();
+        assert!(error.downcast_ref::<ContextPayloadTooLarge>().is_some());
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM context_manifest", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
         let materialized = ContextService
             .materialize(
                 &mut fixture.database,
@@ -13629,7 +13661,11 @@ mod slow_tests {
         assert!(
             prepared
                 .runtime_payload
-                .contains("[TEAM_GUIDANCE]\n固定指引：先验证，再交付。\n[/TEAM_GUIDANCE]")
+                .contains(&format!("[TEAM_GUIDANCE]\n{guidance}\n[/TEAM_GUIDANCE]"))
+        );
+        assert_eq!(
+            prepared.runtime_payload.matches("[TEAM_GUIDANCE]").count(),
+            1
         );
         assert!(!prepared.rendered_payload.contains("TEAM_GUIDANCE"));
         assert!(
@@ -16019,9 +16055,10 @@ mod slow_tests {
                             execution.runtime.installation_id.clone(),
                         ),
                         previous_native_session_id: Some("generation-one".to_string()),
-                        previous_binding_compatibility_digest: Some(
-                            execution.runtime.binding_compatibility_digest.clone(),
-                        ),
+                        previous_binding_compatibility_digest: execution
+                            .runtime
+                            .binding_compatibility_digest
+                            .clone(),
                         proposed_binding_id: None,
                         adapter_installation_id: execution.runtime.installation_id.clone(),
                         native_session_id: "generation-two".to_string(),

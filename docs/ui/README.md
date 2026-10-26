@@ -4,144 +4,68 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-10-17
+last_updated: 2026-10-25
 ---
 
 # Rovai AI UI 规范
 
-本文件是 Renderer UI/UX 的稳定路由，不保存版本流水账。开始 UI 工作时先读根目录
-[`DESIGN.md`](../../DESIGN.md)，再按目标读取主题、复杂组件、surface brief、QA 与相关领域合同。
-
-## 当前视觉系统
-
-Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主题。它们共享组件树、功能和
-状态矩阵；`system` 跟随当前宿主 OS 的应用主题解析策略。全局排版、空间、形状、深度、色彩职责和基础组件
-规则由 [`DESIGN.md`](../../DESIGN.md) 统一拥有。
-
-通用弹窗采用单标题、浅色常规字重标签和 1px 浅色表单框，移除顶部彩线与重复页脚说明。
-低频信息折叠后仍保留草稿、验证与错误恢复；危险操作采用淡红底与红字。具体规则见
-[`DESIGN.md` 的 Components](../../DESIGN.md#components)与对应 surface brief。
+先读根目录 [DESIGN.md](../../DESIGN.md)，再按目标读取以下最小文档集。
+五套配色共享组件、交互和状态；全局规则不在页面文档中重复。
 
 ## 主题
 
-- [主题注册、首屏解析与新增流程](themes/README.md)
-- [Porcelain Day 完整 Token 合同](themes/porcelain-day.md)
-- [Steel Night 完整 Token 合同](themes/steel-night.md)
+- [主题注册、偏好解析与新增流程](themes/README.md)
+- [Porcelain Day](themes/porcelain-day.md)、[Steel Night](themes/steel-night.md)
+- [晨雾](themes/horizon.md)、[朝霞](themes/classic-red.md)、[绯夜](themes/ember.md)
 - [新主题模板](themes/_template.md)
 
-完整色值只在主题文档和生产 Token block 中维护。组件不得添加主题专属十六进制或按主题分叉
-业务结构。
+完整色值归主题合同与生产 Token block；组件使用语义 Token，不按主题分叉业务结构。
 
 ## 复杂组件
 
-[复杂组件索引](components/README.md)路由以下稳定呈现合同：Bootstrap Shell、App Shell/统一侧栏、Thread 会话工作区、
-首次训练、结构化 Mention 与 Composer Atom、队员身份与图像、渠道设置，以及会话区附件拖放。Task、AgentRun、A2A、Recovery、权限、
-持久化和事务语义仍须读取相关 ADR/Contract，不能从 UI 文档反向推导。
-
-Thread 内显式 Markdown 文件链接、共享资源图标、独立文件阅读、共享顶栏、文件 Tabs、路径行、Viewer、更新反馈与响应式替换由
-[Thread 文件预览区](components/file-preview.md)拥有稳定呈现边界。
-
-定时任务的一级入口、模板、自动保存、状态和结果会话入口由
-[Automation 工作区](components/automation-workspace.md)拥有稳定呈现边界。
-
-Runtime 终态文件行与会话中的每 Run 文件变化卡片由
-[Thread 会话工作区](components/conversation-workspace.md#runtime-终态文件变更与-agentrun-文件变化)拥有稳定呈现边界。
-
-当前 Skills 原生只读页、工具箱逐队员配置和会话 `/` 候选见 [Skills、工具箱与会话选择](components/skills-settings.md)。MCP 的列表/详情、导入和编辑见 [Capability settings](components/capability-settings.md)；其中旧 Skills Library 描述仅作历史解释。
-
-使命板、抽屉与完整会话、交付和活动见[使命板](components/mission-board.md)。当前发布显示一级菜单入口，
-以右侧蓝点提示存在未读 Agent 回复的使命；Mobile WebUI 在主抽屉中提供使命板入口。
-
-Team 的独立入口、名册行操作、通用默认配置和新对话选择见 [Team 工作区](components/team-workspace.md)。
-
-## Web 与 Mobile
-
-- [Web 连接恢复](host-web-connection-recovery.md)：统一全屏断线遮罩、原提交恢复入口和键盘边界。
-- [设置 · 远程连接交互稿](host-remote-connection.md)：正式设置菜单及同组件交互稿，含本机管理、地址发现、令牌重复读取与浏览器连接状态。
-- [Desktop/Web 宽屏对照稿](host-web-parity.md)：阶段 1–3 当前收敛入口，行为差异表、生产组件 fixture 与实际验收边界。
-- [Mobile WebUI](host-web-mobile.md)：已接入实际 Web 入口，复用正式业务页面；底部导航、右侧统一状态槽、连续 Run、六种计划与手机日期/时间面板。
-  Server 提供检查、下载与安装重启，Desktop 托管只读版本说明；macOS Chrome 自动验收与实体手机待验项目分别记录。
-
-Desktop 的[快捷键设置](components/shortcut-settings.md)管理窗口内动作、键盘和侧键绑定，以及公屏/单聊发送组合。
-
-## 平台差异
-
-- [Windows Interaction Delta](windows-interaction-delta.md)
-- [Windows Interaction Delta v1.05 历史 HTML 评审稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/windows-interaction-delta/index.html)
-
-平台文档只拥有 window chrome、快捷键/文案、系统主题、文件系统反馈和平台准入等展示差异，不创建第二套
-产品结构。v1.05 HTML 保留当时的评审上下文，不代表当前 Windows chrome，也不是生产组件、验收证据或领域状态真源。
-
-普通用户通过 `rovai app thread open` 请求导航时，Desktop Main 必须先验证 Thread，再复用现有 window 恢复与
-Thread activation 路径；Renderer 不接收 automation credential、socket、任意 route 或本地路径，也不建立第二套
-视觉 surface。字段和错误由 [User Automation v6](../contracts/user-automation-v6.md)拥有。
+从[组件索引](components/README.md)读取目标合同：App Shell、会话、文件预览、Team、使命、
+Automation、队员、设置能力、Mention、提醒、渠道与首次训练。
+基础 Button、Input、Dialog、Popover 直接遵循 `DESIGN.md`。
 
 ## 页面局部 Brief
-
-Renderer 目标由 Impeccable 解析为 `apps/desktop` project root，因此受审查的局部策略位于
-`apps/desktop/.impeccable/surfaces/`：
 
 - [队员工作区](../../apps/desktop/.impeccable/surfaces/member-workspace.md)
 - [记忆工作区](../../apps/desktop/.impeccable/surfaces/memory-workspace.md)
 - [设置工作区](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [运行监控](../../apps/desktop/.impeccable/surfaces/runtime-monitoring.md)
-- [创建新对话 Dialog](../../apps/desktop/.impeccable/surfaces/new-conversation-dialog.md)
+- [新对话 Dialog](../../apps/desktop/.impeccable/surfaces/new-conversation-dialog.md)
 
-brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全局设计、主题、ADR、Contract 或当前
-版本范围。没有匹配 brief 时直接读取目标组件、测试和现有合同，不要创建空占位。
+Brief 只补充页面信息优先级、构图与局部约束。没有匹配 brief 时读取现有组件与测试，不创建空占位。
 
-## QA 与验收
+## Web、Mobile 与平台
 
-- [双主题覆盖矩阵](qa/theme-matrix.md)
+- [Web 连接恢复](host-web-connection-recovery.md)
+- [远程连接设置](host-remote-connection.md)
+- [Desktop/Web 对照与验收](host-web-parity.md)
+- [Mobile WebUI](host-web-mobile.md)
+- [Windows 展示与交互差异](windows-interaction-delta.md)
+
+平台规则只拥有窗口、输入、系统主题和本机能力差异，不建立另一套产品结构。
+
+## QA 与工作流
+
+- [全部配色覆盖矩阵](qa/theme-matrix.md)
 - [无障碍基线](qa/accessibility.md)
-- [桌面 UI 验收流程](../development/ui-acceptance.md)
+- [桌面 UI 验收](../development/ui-acceptance.md)
+- [Coding Agent UI 与设计文档工作流](../development/coding-agent-impeccable-ui-workflow.md)
 
-文档状态不等于实现完成。当前范围与证据从[唯一 current 版本](../versions/README.md)进入；当前用户
-注意力、Notification Episode 与类型化动作的当前实现证据见
-[v0.71 实施计划](../versions/v0.71/implementation-plan.md)。生产事实仍由代码、Migration、测试和
-可复现真实 App 验收证明。
+修改 UI 后按[最小验证矩阵](../development/local-workflow.md#最小验证矩阵)执行检查。
+原型按[本地原型规则](../README.md#本地原型)保存；不能替代生产组件验收。
 
 ## 权威边界
 
-1. Architecture 和 Contract 决定领域、安全、持久化、Runtime 与可执行语义；Version Decisions 只解释理由。
-2. 当前版本文档决定本版本范围、进度和验收结论。
-3. `DESIGN.md` 决定跨页面视觉系统；主题文档决定完整 Token；组件文档决定复杂呈现合同；
-   surface brief 决定单一页面局部策略。
-4. 生产代码与测试证明当前实现，不能静默覆盖已确认设计；设计文档也不能伪造实现完成。
-5. 发现冲突时报告“文档—实现漂移”，指出双方、权威类型、缺失证据与本任务权限。
+- Architecture / Contract 拥有领域、权限、持久化、Runtime 与恢复语义；从[当前决定路由](../decisions/CURRENT.md)进入。
+- [当前版本](../versions/README.md)拥有范围、进度和实施证据；Version Decisions 保存决定理由。
+- `DESIGN.md` 拥有全局设计；主题合同拥有完整 Token；组件合同拥有复杂交互；brief 拥有局部构图。
+- 代码与测试证明实现。发现文档—实现漂移时指出双方与本次修复范围；`accepted` 不代表已完成验收。
 
-## Coding Agent 工作规则
+## Runtime 平台路由
 
-- 保持 established visual world；除非用户明确要求重新设计，不进入 replacement-world 流程。
-- 先读目标组件、`styles.css`、相关测试和本索引路由的最小文档集。
-- Impeccable 是可选的 Provider 本地工具，不是仓库真源；安装/手动模式见
-  [Coding Agent Impeccable 与 UI 文档工作流](../development/coding-agent-impeccable-ui-workflow.md)。
-- 共享色值只扩展语义 Token；不引入新的 UI 框架、CSS-in-JS、字体、图标库、动画库或状态管理库。
-- 变化后运行目标 Typecheck/Renderer 测试、构建和版本要求的真实 App 视觉/键盘验收。
-
-原型素材按[本地原型规则](../README.md#本地原型)保留在 Git 忽略目录；当前 UI 合同须独立说明实现和验收要求。
-
-## 历史设计
-
-“Arctic Dawn”可在历史版本和原型中作为当时的设计名称保留，但不再是当前文件或路由。
-历史会话事件样例已移入
-[prototype archive](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/archive/arctic-dawn/README.md)，明确不具有生产权威。理解版本演进请从
-[版本索引](../versions/README.md)进入；历史文档不能覆盖本索引或当前生产事实。
-
-## Runtime 安装与执行状态
-
-设置页入口存在显示“可用”，不附带执行验证说明；检查成功只更新状态，不追加成功提示行。
-检查失败保留具体原因与处理入口。队员信息、名册入口和配置区正常时不显示常驻可用性标签或验证说明；
-智能体名称保留，配置区可显示已知版本，未配置、检查中及需要处理的问题按需提示。不暗示认证或协议已验证。
-正在启动的 Run 显示“正在初始化 Runtime”，配置及启动失败显示具体可操作原因，修复后正常重试。
-Fast 直接保存三态偏好，运行时传递原生参数；页面、浮层及切换不启动资格检查。
-设置目录与队员配置的版本均来自 Core 的 `runtimeAvailability.reportedVersion`；同一程序的已知版本
-可在未重读或读取失败时保留，Renderer 不自行回退安装快照。身份变化后的未知版本不显示副文案，
-保留版本不表示本次检查成功。版本边界见 [Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md)。
-行为由 [Runtime Launch v48](../contracts/runtime-launch-and-verification-v48.md)与
-[Camp Member Fast v3](../contracts/camp-member-fast-v3.md)拥有。
-
-
-Cline 与 Command Code 暂缓公开：设置、新手引导、队员/Skill 选择、安装引导和监控筛选均不提供新入口。
-既有配置、历史 Run 和用量标签保持可读，不用隐藏策略改写历史名称。Renderer 共用可见产品目录，
-Core 沿共享平台准入处理未公开 Runtime；范围与未完成项见[Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)。
+Runtime 入口消费 Core 的[平台准入](../contracts/runtime-platform-admission-v2.md)与[产品范围](../architecture/runtime-catalog-boundaries.md)。
+Command Code 在 macOS Apple Silicon、Intel、Windows x64 与 Linux x64 沿现有 Preview 开放；
+设置、引导、队员选择和 CLI 使用同一准入。正常状态不增加实验标签，检查详情保留完整资格记录未齐备的说明。

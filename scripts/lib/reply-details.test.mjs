@@ -10,7 +10,7 @@ import electron from 'electron'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 
-test('reply detail navigation reveals and retains the original after layout and history loading', { timeout: 120_000 }, async t => {
+async function runReplyDetails(t, splittersOnly = false) {
   if (!admitElectronIntegrationTest(t)) return
   const root = await mkdtemp(join(tmpdir(), 'rovai-reply-details-'))
   const out = process.env.ROVAI_REPLY_UI_OUTPUT ?? join(root, 'screenshots')
@@ -34,10 +34,12 @@ test('reply detail navigation reveals and retains the original after layout and 
       '--remote-debugging-port=0', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])] })
     await b.send('Emulation.setFocusEmulationEnabled', { enabled: true })
     const click = selector => b.click(`document.querySelector(${JSON.stringify(selector)})`)
+    let scenarioNumber = 0
     const open = async ({ width = 1440, loaded = false, full = false, reduced = false, scrollAfterOpen = false, wrapped = false, grouped = false }) => {
       await b.send('Emulation.setDeviceMetricsOverride', { width, height: 920, deviceScaleFactor: 1, mobile: false })
-      await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + '?pure=1' })
-      await b.wait('!!window.__presence && !!document.querySelector("[contenteditable=true]")')
+      const search = `?pure=1&scenario=${++scenarioNumber}`
+      await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + search })
+      await b.wait(`location.search === ${JSON.stringify(search)} && !!window.__presence && !!document.querySelector("[contenteditable=true]")`)
       await b.evaluate(`__presence.showReplyCase(true, ${loaded}, ${wrapped}, ${grouped}); document.documentElement.dataset.motionPreference = '${reduced ? 'reduce' : 'full'}'`)
       await b.wait('!!document.querySelector("[data-message-id=long-120]")')
       await click('[contenteditable=true]')
@@ -56,6 +58,41 @@ test('reply detail navigation reveals and retains the original after layout and 
         await pause(300)
       }
       return draft
+    }
+    if (splittersOnly) {
+      const splitterDraft = await open({ loaded: true })
+      const replyGeometry = () => b.evaluate(`(() => {
+        const h = document.querySelector('.reply-detail-resize'), r = h.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + 80), width: Number(h.getAttribute('aria-valuenow')) };
+      })()`)
+      const replyMouse = (type, point) => b.send('Input.dispatchMouseEvent', { type, x: point.x, y: point.y,
+        button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 })
+      let replyStart = await replyGeometry()
+      await replyMouse('mousePressed', replyStart)
+      await replyMouse('mouseReleased', { ...replyStart, x: replyStart.x + replyStart.width - 390 })
+      await b.wait('document.querySelector(".reply-detail-resize").getAttribute("aria-valuenow") === "390"')
+      replyStart = await replyGeometry()
+      await replyMouse('mousePressed', replyStart)
+      await replyMouse('mouseMoved', { ...replyStart, x: replyStart.x + replyStart.width - 280 })
+      await b.wait('document.querySelector(".reply-detail-resize")?.dataset.foldState === "collapsed"')
+      assert.equal((await replyGeometry()).width, 0, 'Further travel folds the detail while held')
+      await b.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await b.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+      await replyMouse('mouseReleased', replyStart)
+      assert.equal((await replyGeometry()).width, 390, 'Escape restores the previous reply width')
+      replyStart = await replyGeometry()
+      await replyMouse('mousePressed', replyStart)
+      await replyMouse('mouseReleased', { ...replyStart, x: replyStart.x + replyStart.width - 280 })
+      await b.wait('!document.querySelector(".reply-detail-panel")')
+      assert.equal(await b.evaluate('document.querySelector("[contenteditable=true]").textContent'), splitterDraft,
+        'Fast release closes the reply pane without changing the conversation draft')
+      await click('[data-message-id=long-120] .reply-parent-quote')
+      await b.wait('!!document.querySelector(".reply-detail-panel")')
+      assert.equal((await replyGeometry()).width, 390, 'Reopening keeps the useful width, not the zero-width fold frame')
+      await click('[aria-label="关闭回复详情"]')
+      results.push({ name: 'reply minimum, cancellation and final-coordinate release' })
+      console.log(JSON.stringify({ result: 'passed', scenarios: results.map(r => r.name) }))
+      return
     }
     for (const scenario of [
       { width: 1920, full: false }, { width: 1440, full: true }, { width: 1040, full: false }
@@ -111,6 +148,7 @@ test('reply detail navigation reveals and retains the original after layout and 
       { name: 'loaded-compact', loaded: true, width: 1040 }, { name: 'history-compact', width: 1040 },
       { name: 'reduced-motion', loaded: true, reduced: true }
     ]) {
+      t.diagnostic('Reply scenario: ' + scenario.name)
       const expectedDraft = await open(scenario)
       const messageId = scenario.target ?? 'reply-a'
       await click(`[data-reply-message-id="${messageId}"] [aria-label="回到原文"]`)
@@ -175,4 +213,7 @@ test('reply detail navigation reveals and retains the original after layout and 
     await b?.close()
     await rm(root, { recursive: true, force: true })
   }
-})
+}
+
+test('reply splitter folds while held and preserves width on reopen', { timeout: 60_000 }, t => runReplyDetails(t, true))
+test('reply detail navigation reveals and retains the original after layout and history loading', { timeout: 120_000 }, t => runReplyDetails(t))

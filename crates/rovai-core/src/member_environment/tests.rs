@@ -360,6 +360,46 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
         .unwrap();
     assert!(current_for_launch(database.connection(), a, AdapterKind::Pi).is_err());
     assert!(current_for_launch(database.connection(), MUWA_AGENT_ID, AdapterKind::Pi).is_ok());
+
+    // Explicit writes report actual value/inheritance changes. Whitespace and
+    // key order must not retire a Command Host; this is not a launch-time scan.
+    for (revision, (text, inherit_common, changed)) in [
+        ("{}", None, false),
+        (r#"{"B":"2","A":"1"}"#, None, true),
+        ("{\n  \"A\": \"1\", \"B\": \"2\"\n}", None, false),
+        (r#"{"A":"1","B":"2"}"#, Some(true), false),
+        (r#"{"A":"1","B":"2"}"#, Some(false), true),
+        (r#"{"B":"2","A":"1"}"#, None, false),
+        (r#"{"A":"changed","B":"2"}"#, None, true),
+        ("{}", None, true),
+        ("{ }", None, false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let prepare_edit = || {
+            prepare(
+                database.connection(),
+                a,
+                AdapterKind::CommandCodeCli,
+                &ModelSelection::RuntimeDefault,
+                EnvironmentEdit {
+                    expected_revision: revision as i64,
+                    json: text.into(),
+                    inherit_common,
+                },
+            )
+            .unwrap()
+        };
+        let prepared = prepare_edit();
+        assert_eq!(prepared.changed, changed, "revision {revision}");
+        prepared.commit(database.connection()).unwrap();
+        assert_eq!(
+            prepare_edit().changed,
+            changed,
+            "replay keeps the original mutation fact"
+        );
+    }
     std::fs::remove_file(root.join("member-environment/key")).unwrap();
     assert!(current_for_launch(database.connection(), a, AdapterKind::Pi).is_err());
     drop(database);

@@ -4,13 +4,22 @@ contract: runtime-file-change-observation
 version: v9
 status: accepted
 source_version: v1.72
-last_updated: 2026-10-19
+last_updated: 2026-10-25
 ---
 
 # Runtime File Change Observation v9
 
 继承 [v8](runtime-file-change-observation-v8.md) 的 Runtime 准入、归约、授权和展示规则。
 本版增加成功 Send 输入文件的 Run 卡片排除，Evidence 文件操作和公开卡片 wire schema 保持。
+
+## Command Code 原生文件事件
+
+官方 1.88 ACP 的初始 Diff 是提案。Adapter 在同 ToolCall 成功终态后才发布内容：普通单次
+`edit_file` 的 old/new 为 reported mutation 片段；空 old_string 且原生结果精确为
+`Created <输入同路径> (<new_string 行数> line[s])` 才以完整 new_string 发布 full-before-after/add。
+此固定原生回执只在文件不存在时产生，不将一般工具输出或模型正文解释为创建证明。
+`write_file` 的 created 文案也用于已有空文件，故它的 oldText:null 不证明新增；此类写入与不明确的
+多处替换只保留操作。失败、取消、提案不形成已发生 Diff。不补读磁盘、Git 或原生历史。
 
 ## 成功发送输入文件排除
 

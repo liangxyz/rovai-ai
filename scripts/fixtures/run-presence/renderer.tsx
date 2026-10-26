@@ -7,7 +7,8 @@ import { createDesktopNavigation } from '../../../apps/desktop/src/renderer/src/
 import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/AppHeader'
 import { AppearanceSettings } from '../../../apps/desktop/src/renderer/src/AppearanceSettings'
-import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
+import { DEFAULT_APPEARANCE, isThemePreference, resolveThemeMode } from '../../../apps/desktop/src/shared/appearance'
+import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
 import type { AgentProfile, AppearancePreferences, AppearanceSnapshot } from '@contracts'
 import { ThreadWorkspace, campConversationTimeline } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
@@ -52,12 +53,17 @@ function Glyph({ kind }: { kind: string }) {
 function Workbench() {
   const state = useSyncExternalStore(model.subscribe, model.get)
   useEffect(() => { if (params.has('replies')) model.showReplyCase(params.get('replies') === 'long') }, [])
-  const [theme, setTheme] = useState(params.get('theme') === 'night' ? 'night' : 'day')
   const [proposal, setProposal] = useState(params.get('baseline') !== '1')
   const [controls, setControls] = useState(params.get('pure') !== '1')
   const [info, setInfo] = useState(false)
   const [settings, setSettings] = useState(false)
-  const [appearance, setAppearance] = useState<AppearanceSnapshot>({ ...DEFAULT_APPEARANCE, resolvedTheme: theme as 'day' | 'night' })
+  const [appearance, setAppearance] = useState<AppearanceSnapshot>(() => {
+    const value = params.get('theme')
+    const preference = isThemePreference(value) ? value : 'day'
+    return { ...DEFAULT_APPEARANCE, preference, resolvedTheme: resolveThemeMode(preference, matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day') }
+  })
+  const theme = appearance.resolvedTheme
+  const setTheme = (value: 'day' | 'night') => setAppearance(current => ({ ...current, preference: value, resolvedTheme: value }))
   const [inspector, setInspector] = useState<any>(null)
   const [detailHost, setDetailHost] = useState<HTMLElement | null>(null)
   const [placement, setPlacement] = useState<any>('inspector')
@@ -79,12 +85,11 @@ function Workbench() {
     return nav
   }, [])
   const changeAppearance = async (preferences: AppearancePreferences): Promise<AppearanceSnapshot> => {
-    const next = { ...preferences, resolvedTheme: theme as 'day' | 'night' }
+    const next = { ...preferences, resolvedTheme: resolveThemeMode(preferences.preference, matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day') }
     setAppearance(next)
     return next
   }
-  useEffect(() => { document.documentElement.dataset.motionPreference = appearance.motionPreference }, [appearance.motionPreference])
-  useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
+  useEffect(() => { applyAppearanceSnapshot(document.documentElement, appearance) }, [appearance])
   useEffect(() => { document.documentElement.dataset.presence = proposal ? 'proposal' : 'baseline' }, [proposal])
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.altKey && e.key.toLowerCase() === 'd') { e.preventDefault(); setControls(x => !x) } }
@@ -118,7 +123,7 @@ function Workbench() {
         return { allMessagesPresent: s.messages.every((m: any) => ids.includes(m.id)),
           messagesInOrder: positions.every((n, i) => !i || n > positions[i - 1]), uniqueMessages: ids.length === new Set(ids).size,
           slotsAreNotMessages: !document.querySelector('.conversation-run-presence[data-message-id]'),
-          noQueuedPlaceholders: slots.every((x: any) => x.status !== 'queued'),
+          queuedRunsAreStarting: rows.every(e => e.dataset.presenceState !== 'queued' || e.querySelector('.run-presence-preview')?.textContent === '启动中…'),
           noCompletedRows: slots.every((x: any) => !['succeeded','cancelled'].includes(x.status)),
           uniqueRuns: rows.length === new Set(rows.map(e => e.dataset.presenceRun)).size,
           anchoredOrder: JSON.stringify(actualOrder) === JSON.stringify(expectedOrder),
@@ -176,6 +181,10 @@ function Workbench() {
         <div className="prototype-steps" aria-label="演示阶段">{sequence.steps.map((step, i) => <button type="button" key={i}
           aria-current={state.stage === i ? 'step' : undefined} data-demo-step={i} title={sequence.descriptions[i]}
           onClick={() => model.setStage(i)}>{step}</button>)}</div>
+        {params.has('start-stop') && <div className="prototype-steps">
+          <button onClick={() => model.showStartupStatus('runtime_initializing')}>初始化阶段</button>
+          <label><input type="checkbox" onChange={event => { model.controls.holdStop = event.target.checked }} />保持停止提交</label>
+        </div>}
         {params.has('replies') && <div className="prototype-steps">
           <button onClick={() => model.showReplyCase()}>重置回复</button>
           <button onClick={() => model.showReplyCase(true)}>长回复链</button>
@@ -213,4 +222,5 @@ function Workbench() {
     </FilePreviewProvider></CurrentUserProfileContext.Provider>
   </ThreadClientProvider></MobileLayoutProvider>
 }
+if (params.get('startup') === 'queued') model.showStartupStatus(null, false, 'queued')
 createRoot(document.getElementById('root')!).render(<Workbench />)

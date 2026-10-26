@@ -618,6 +618,7 @@ fn user_roots(
         AdapterKind::ZcodeApp => paths.push(home.join(".zcode/skills")),
         AdapterKind::CommandCodeCli => {
             paths.push(home.join(".commandcode/skills"));
+            paths.push(agents);
         }
         AdapterKind::ClineCli => {
             paths.push(
@@ -677,7 +678,7 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
         AdapterKind::GrokBuild => &[".grok/skills"],
         AdapterKind::DeepseekHarness => &[".dsh/skills", ".agents/skills"],
         AdapterKind::ClineCli => &[".cline/skills", ".agents/skills", ".clinerules/skills"],
-        AdapterKind::CommandCodeCli => &[".commandcode/skills"],
+        AdapterKind::CommandCodeCli => &[".commandcode/skills", ".agents/skills"],
         AdapterKind::ZcodeApp => &[".zcode/skills"],
         AdapterKind::AntigravityApp => &[".agents/skills", ".agent/skills"],
     };
@@ -931,6 +932,49 @@ mod tests {
                 assert!(scan.skills.iter().all(|skill| skill.source_scope == "user"));
             }
         }
+        let project = fixture.join("project");
+        for (root, name) in [
+            (home.join(".commandcode/skills"), "command-user"),
+            (project.join(".commandcode/skills"), "command-project"),
+            (project.join(".agents/skills"), "project-shared"),
+        ] {
+            let directory = root.join(name);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: Native source\n---\n"),
+            )
+            .unwrap();
+        }
+        let configuration = RuntimeStartupConfiguration {
+            environment: vec![RuntimeEnvironmentVariable {
+                name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
+                value: home.to_string_lossy().into_owned(),
+            }],
+            ..RuntimeStartupConfiguration::default()
+        };
+        let scan = NativeSkillDiscovery::default()
+            .discover(
+                AdapterKind::CommandCodeCli,
+                Some(&project),
+                false,
+                false,
+                &configuration,
+            )
+            .unwrap();
+        assert!(scan.errors.is_empty());
+        assert_eq!(
+            scan.skills
+                .iter()
+                .map(|skill| (skill.name.as_str(), skill.source_scope.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("command-project", "project"),
+                ("command-user", "user"),
+                ("project-shared", "project"),
+                ("shared", "user")
+            ]
+        );
         fs::remove_dir_all(fixture).unwrap();
     }
 

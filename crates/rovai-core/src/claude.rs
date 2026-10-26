@@ -2926,12 +2926,19 @@ mod tests {
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
             runtime: FrozenAgentRuntimeConfig {
                 environment: cfg!(windows).then(|| {
+                    let overlay: BTreeMap<String, String> = BTreeMap::from([(
+                        "claude_code_disable_background_tasks".into(),
+                        "0".into(),
+                    )]);
+                    let mut values =
+                        rovai_core::runtime_discovery::capture_host_runtime_environment();
+                    for (name, value) in &overlay {
+                        values.retain(|key, _| !key.eq_ignore_ascii_case(name));
+                        values.insert(name.clone(), value.clone());
+                    }
                     rovai_core::member_environment::LaunchEnvironment {
-                        values: None,
-                        overlay: Some(BTreeMap::from([(
-                            "claude_code_disable_background_tasks".into(),
-                            "0".into(),
-                        )])),
+                        values: Some(values),
+                        overlay: Some(overlay),
                     }
                 }),
                 custom_api: None,
@@ -2960,8 +2967,8 @@ mod tests {
                 native_session_compatibility_key: Some(
                     "claude-code-cli:stream-json-v1".to_string(),
                 ),
-                binding_compatibility_digest: "binding".to_string(),
-                host_config_digest: "host".to_string(),
+                binding_compatibility_digest: Some("binding".to_string()),
+                host_config_digest: Some("host".to_string()),
                 config_digest: "config".to_string(),
             },
             prompt: "test input".to_string(),

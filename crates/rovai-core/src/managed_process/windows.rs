@@ -30,7 +30,7 @@ use windows_sys::Win32::{
     },
     System::{
         JobObjects::{
-            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
             QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
@@ -41,16 +41,14 @@ use windows_sys::Win32::{
             DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
             GetProcessTimes, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
             OpenProcess, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-            PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, STARTF_USESTDHANDLES,
-            STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+            PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
         },
     },
 };
 
 #[cfg(test)]
-use windows_sys::Win32::{
-    Foundation::ERROR_INVALID_PARAMETER, System::Threading::PROCESS_SYNCHRONIZE,
-};
+use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
 use super::{
     ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcessLaunchSpec,
@@ -220,8 +218,10 @@ impl WindowsManagedProcess {
         }
         drop(command_shim_lock);
 
-        let process = owned_handle(process_information.hProcess, "managed_process.spawn_failed")?;
-        let thread = owned_handle(process_information.hThread, "managed_process.spawn_failed")?;
+        // Successful CreateProcessW returns two valid owned handles. Transfer
+        // them infallibly: no error may discard a running, atomically assigned Job.
+        let process = unsafe { OwnedHandle::from_raw_handle(process_information.hProcess) };
+        let thread = unsafe { OwnedHandle::from_raw_handle(process_information.hThread) };
         drop(thread);
         drop(child_stdin);
         drop(child_stdout);
@@ -245,6 +245,38 @@ impl WindowsManagedProcess {
 
     pub(super) fn job_name(&self) -> &str {
         &self.job_name
+    }
+
+    pub(super) fn owns_process_id(&self, pid: u32) -> bool {
+        if pid == 0 {
+            return false;
+        }
+        let raw = unsafe {
+            // SAFETY: only query/synchronize access is requested, without
+            // inheritance; the resulting handle is immediately owned.
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
+        let Ok(process) = owned_handle(raw, "managed_process.process_query_failed") else {
+            return false;
+        };
+        if process_has_exited(&process).unwrap_or(true) {
+            return false;
+        }
+        let mut belongs_to_job = 0;
+        let queried = unsafe {
+            // SAFETY: both handles are owned and the output remains valid.
+            // Use this launch's Job, never the process's ambient parent Job.
+            IsProcessInJob(
+                raw_handle(&process),
+                raw_handle(&self.job),
+                &mut belongs_to_job,
+            )
+        };
+        queried != 0 && belongs_to_job != 0
     }
 
     pub(super) fn take_stdin(&mut self) -> Option<ManagedChildStdin> {

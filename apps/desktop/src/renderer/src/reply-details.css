@@ -1,5 +1,5 @@
 .camp-workspace.reply-detail-open > .workspace-grid {
-  grid-template-columns: minmax(0, 1fr) minmax(360px, min(var(--reply-detail-width, 466px), 58%));
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(var(--reply-detail-width, 466px), 58%));
 }
 .reply-detail-panel {
   position: relative; display: flex; flex-direction: column; grid-column: 2; grid-row: 1 / 3;

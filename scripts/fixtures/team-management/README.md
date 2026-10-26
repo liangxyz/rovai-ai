@@ -11,7 +11,8 @@ General settings and New conversation components, with an in-memory Core API.
 It neither starts Electron/Core/Runtime nor reads daily application data.
 
 The default library contains teams of 4, 6 and 12 members. Use `?empty` for the
-empty state, `?lang=en` for English, and `?theme=night` for the night theme;
+empty state, `?lang=en` for English, and `?theme=night` for the night theme
+(`day`, `horizon`, `classic-red` and `ember` are also supported);
 query parameters can be combined. Reloading resets all fixture changes.
 
 Review creation, duplication, deletion, unsaved changes, member selection and

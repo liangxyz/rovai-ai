@@ -858,7 +858,7 @@ mod tests {
             conversation_version: 1,
             adapter_installation_id: "installation".to_string(),
             native_session_id: None,
-            binding_compatibility_digest: "digest".to_string(),
+            binding_compatibility_digest: Some("digest".to_string()),
             binding_replaced: false,
         }
     }

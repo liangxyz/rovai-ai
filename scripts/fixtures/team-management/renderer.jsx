@@ -15,10 +15,13 @@ import { GeneralSettings } from '../../../apps/desktop/src/renderer/src/GeneralS
 import { MobileLayoutProvider, useMobileViewport } from '../../../apps/desktop/src/renderer/src/MobileLayout'
 import { initializeInterfaceLanguage, uiAttribute } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
+import { THEME_MODES } from '../../../apps/desktop/src/shared/appearance'
 
 const query = new URLSearchParams(location.search)
 initializeInterfaceLanguage({ ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguagePreference: query.get('lang') === 'en' ? 'en' : 'zh-CN', interfaceLanguage: query.get('lang') === 'en' ? 'en' : 'zh-CN' })
-document.documentElement.dataset.theme = query.get('theme') ?? 'day'
+const themeId = Object.hasOwn(THEME_MODES, query.get('theme')) ? query.get('theme') : 'day'
+document.documentElement.dataset.theme = THEME_MODES[themeId]
+document.documentElement.dataset.themeId = themeId
 document.documentElement.dataset.rovaiPlatform = 'darwin'
 const original = initialMembers()
 const agents = [...original, ...Array.from({length: 8}, (_, index) => ({...clone(original[index % original.length]), agentId: `extra-${index}`, displayName: ['小满','阿栖','北斗','星野','松果','小禾','麦芽','晚枫'][index], teamRole: ['交互设计','前端开发','架构设计','代码审查','自动化测试','文案设计','性能优化','发布验证'][index], avatarRef: null, memberOrder: index + 4}))]

@@ -63,12 +63,18 @@ struct RuntimeReuseScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum HostReusePolicy {
+    ConfigurationDigest(String),
+    NativeBinding { execution_root: PathBuf },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RuntimeCompatibilityKey {
     reuse_scope: RuntimeReuseScope,
     invalidation_camp_id: Option<String>,
     invalidation_agent_id: Option<String>,
     residency_bucket: String,
-    pub runtime_compatibility_digest: String,
+    policy: HostReusePolicy,
 }
 
 impl RuntimeCompatibilityKey {
@@ -98,13 +104,32 @@ impl RuntimeCompatibilityKey {
             invalidation_camp_id: Some(camp_id),
             invalidation_agent_id: Some(agent_id.clone()),
             residency_bucket: agent_id,
-            runtime_compatibility_digest: runtime_compatibility_digest.into(),
+            policy: HostReusePolicy::ConfigurationDigest(runtime_compatibility_digest.into()),
         }
     }
 
-    fn is_process_compatible_with(&self, candidate: &Self) -> bool {
-        self.reuse_scope == candidate.reuse_scope
-            && self.runtime_compatibility_digest == candidate.runtime_compatibility_digest
+    /// Explicit identity policy: a missing or failed digest never enables reuse.
+    pub(crate) fn native_binding(
+        camp_id: &str,
+        agent_id: &str,
+        binding_id: &str,
+        execution_root: PathBuf,
+    ) -> Self {
+        Self {
+            reuse_scope: RuntimeReuseScope {
+                camp_id: camp_id.to_owned(),
+                agent_id: agent_id.to_owned(),
+                session_id: Some(binding_id.to_owned()),
+            },
+            invalidation_camp_id: Some(camp_id.to_owned()),
+            invalidation_agent_id: Some(agent_id.to_owned()),
+            residency_bucket: agent_id.to_owned(),
+            policy: HostReusePolicy::NativeBinding { execution_root },
+        }
+    }
+
+    pub(crate) fn is_process_compatible_with(&self, candidate: &Self) -> bool {
+        self.reuse_scope == candidate.reuse_scope && self.policy == candidate.policy
     }
 
     fn belongs_to_camp(&self, camp_id: &str) -> bool {
@@ -2154,8 +2179,7 @@ impl AgentRuntimeFleetManager {
                 .filter(|(_, entry)| {
                     entry.adapter_kind == adapter_kind
                         && entry.compatibility.reuse_scope == compatibility.reuse_scope
-                        && entry.compatibility.runtime_compatibility_digest
-                            != compatibility.runtime_compatibility_digest
+                        && entry.compatibility.policy != compatibility.policy
                 })
                 .map(|(process_id, entry)| (process_id.clone(), entry.state))
                 .collect::<Vec<_>>();
@@ -2196,6 +2220,22 @@ impl AgentRuntimeFleetManager {
     pub(crate) async fn invalidate_adapter(&self, adapter_kind: AdapterKind) {
         self.invalidate_matching(|entry| entry.adapter_kind == adapter_kind)
             .await;
+    }
+
+    pub(crate) async fn invalidate_adapter_members(
+        &self,
+        adapter_kind: AdapterKind,
+        agent_ids: &BTreeSet<String>,
+    ) {
+        self.invalidate_matching(|entry| {
+            entry.adapter_kind == adapter_kind
+                && entry
+                    .compatibility
+                    .invalidation_agent_id
+                    .as_ref()
+                    .is_some_and(|id| agent_ids.contains(id))
+        })
+        .await;
     }
 
     async fn invalidate_matching(&self, predicate: impl Fn(&ProcessEntry) -> bool) {
@@ -3272,7 +3312,8 @@ mod tests {
                 .await
                 .unwrap();
             assert!(camp_a.host.is_healthy());
-            changed.compatibility.runtime_compatibility_digest = "digest-2".to_string();
+            changed.compatibility.policy =
+                HostReusePolicy::ConfigurationDigest("digest-2".to_string());
             fleet
                 .retire_incompatible_hosts(changed.adapter_kind, &changed.compatibility)
                 .await
@@ -3292,7 +3333,8 @@ mod tests {
                 .await
                 .unwrap();
             let mut next = changed.clone();
-            next.compatibility.runtime_compatibility_digest = "digest-3".to_string();
+            next.compatibility.policy =
+                HostReusePolicy::ConfigurationDigest("digest-3".to_string());
             let retirement = {
                 let fleet = fleet.clone();
                 tokio::spawn(async move {
@@ -3305,7 +3347,8 @@ mod tests {
                 let retirement_is_waiting_for_release =
                     fleet.state.lock().await.processes.values().any(|entry| {
                         entry.adapter_kind == adapter_kind
-                            && entry.compatibility.runtime_compatibility_digest == "digest-2"
+                            && entry.compatibility.policy
+                                == HostReusePolicy::ConfigurationDigest("digest-2".to_owned())
                             && entry.retire_after_run
                             && entry.retirement.is_some()
                     });
@@ -3353,7 +3396,8 @@ mod tests {
             .await
             .unwrap();
         let mut replacement = active;
-        replacement.compatibility.runtime_compatibility_digest = "digest-2".to_string();
+        replacement.compatibility.policy =
+            HostReusePolicy::ConfigurationDigest("digest-2".to_string());
         let retirement = {
             let fleet = fleet.clone();
             tokio::spawn(async move {
@@ -3481,79 +3525,86 @@ mod tests {
 
     #[tokio::test]
     async fn member_sessions_reuse_only_within_their_camp_and_current_session() {
-        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
-        let request =
-            |run: &str, camp: &str, agent: &str, session: &str, digest: &str| FleetAcquireRequest {
-                agent_run_id: run.into(),
-                execution_epoch: 1,
-                adapter_kind: AdapterKind::Pi,
-                compatibility: RuntimeCompatibilityKey::member_session(
-                    camp,
-                    agent,
-                    Some(session),
-                    digest,
-                ),
-            };
-        // Same owner/session stays warm; same workspace/config never permits another owner.
-        for (run, camp, agent, session, digest, expected) in [
-            ("a1", "camp-a", "agent-a", "session-a", "cwd-a", "host-a"),
-            ("a2", "camp-a", "agent-a", "session-a", "cwd-a", "host-a"),
-            ("b1", "camp-a", "agent-b", "session-a", "cwd-a", "host-b"),
-            ("c1", "camp-b", "agent-a", "session-a", "cwd-a", "host-c"),
-            (
-                "reset",
-                "camp-a",
-                "agent-a",
-                "session-reset",
-                "cwd-a",
-                "host-reset",
-            ),
-            (
-                "cwd",
-                "camp-a",
-                "agent-a",
-                "session-reset",
-                "cwd-b",
-                "host-cwd",
-            ),
-        ] {
-            let lease = fleet
-                .acquire(
-                    request(run, camp, agent, session, digest),
-                    move || async move {
-                        assert_ne!(run, "a2", "same session must use the existing process");
-                        Ok(fake_host(expected))
+        for kind in [AdapterKind::Pi, AdapterKind::CommandCodeCli] {
+            let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
+            let request = |run: &str, camp: &str, agent: &str, session: &str, digest: &str| {
+                FleetAcquireRequest {
+                    agent_run_id: run.into(),
+                    execution_epoch: 1,
+                    adapter_kind: kind,
+                    compatibility: if kind == AdapterKind::CommandCodeCli {
+                        RuntimeCompatibilityKey::native_binding(
+                            camp,
+                            agent,
+                            session,
+                            PathBuf::from(digest),
+                        )
+                    } else {
+                        RuntimeCompatibilityKey::member_session(camp, agent, Some(session), digest)
                     },
+                }
+            };
+            // Same owner/session stays warm; same workspace/config never permits another owner.
+            for (run, camp, agent, session, digest, expected) in [
+                ("a1", "camp-a", "agent-a", "session-a", "cwd-a", "host-a"),
+                ("a2", "camp-a", "agent-a", "session-a", "cwd-a", "host-a"),
+                ("b1", "camp-a", "agent-b", "session-a", "cwd-a", "host-b"),
+                ("c1", "camp-b", "agent-a", "session-a", "cwd-a", "host-c"),
+                (
+                    "reset",
+                    "camp-a",
+                    "agent-a",
+                    "session-reset",
+                    "cwd-a",
+                    "host-reset",
+                ),
+                (
+                    "cwd",
+                    "camp-a",
+                    "agent-a",
+                    "session-reset",
+                    "cwd-b",
+                    "host-cwd",
+                ),
+            ] {
+                let lease = fleet
+                    .acquire(
+                        request(run, camp, agent, session, digest),
+                        move || async move {
+                            assert_ne!(run, "a2", "same session must use the existing process");
+                            Ok(fake_host(expected))
+                        },
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(lease.host.process_id(), expected);
+                fleet
+                    .release(run, 1, FleetReleaseDisposition::Reusable)
+                    .await;
+            }
+            fleet.invalidate_camp("camp-a").await;
+            let surviving = fleet
+                .acquire(
+                    request("c2", "camp-b", "agent-a", "session-a", "cwd-a"),
+                    || async { panic!("another Camp remains warm") },
                 )
                 .await
                 .unwrap();
-            assert_eq!(lease.host.process_id(), expected);
+            assert_eq!(surviving.host.process_id(), "host-c");
             fleet
-                .release(run, 1, FleetReleaseDisposition::Reusable)
+                .release("c2", 1, FleetReleaseDisposition::Reusable)
                 .await;
+            fleet.invalidate_member("agent-a").await;
+            let replaced = fleet
+                .acquire(
+                    request("c3", "camp-b", "agent-a", "session-a", "cwd-a"),
+                    || async { Ok(fake_host("replacement")) },
+                )
+                .await
+                .unwrap();
+            assert_eq!(replaced.host.process_id(), "replacement");
+            fleet.shutdown_all().await;
         }
-        fleet.invalidate_camp("camp-a").await;
-        let surviving = fleet
-            .acquire(
-                request("c2", "camp-b", "agent-a", "session-a", "cwd-a"),
-                || async { panic!("another Camp remains warm") },
-            )
-            .await
-            .unwrap();
-        assert_eq!(surviving.host.process_id(), "host-c");
-        fleet
-            .release("c2", 1, FleetReleaseDisposition::Reusable)
-            .await;
-        fleet.invalidate_member("agent-a").await;
-        let replaced = fleet
-            .acquire(
-                request("c3", "camp-b", "agent-a", "session-a", "cwd-a"),
-                || async { Ok(fake_host("replacement")) },
-            )
-            .await
-            .unwrap();
-        assert_eq!(replaced.host.process_id(), "replacement");
-        fleet.shutdown_all().await;
     }
 
     #[tokio::test]

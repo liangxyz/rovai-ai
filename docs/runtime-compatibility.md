@@ -1,10 +1,29 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-20
+last_updated: 2026-10-26
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-26 Copilot ACP 启动参数兼容
+
+Rovai 的生产 ACP 启动与健康检查统一移除 `--no-remote`、`--no-remote-export`，
+ACP reconciliation 实验脚本同步；不按版本分支，不添加 `--sync-session` 或注入 `/remote off`。
+保留 `--acp --stdio --no-auto-update --no-color --log-level error`，权限参数仍由原有策略决定。
+
+macOS arm64 官方 npm 二进制 `@github/copilot-darwin-arm64` 的 **1.0.102 / 1.0.103**
+在独立 Home、cache、workspace 与日志目录下，使用上述生产参数均完成 ACP v1 `initialize`，
+关闭 stdin 后正常退出。未读取日常凭据、创建模型会话或调用真实 LLM。
+1.0.103 单独携带任一旧开关都会在初始化前拒绝启动；1.0.102 不接受新 `--sync-session=off`。
+
+这两个版本官方分发的 `cli-main.js` 中，ACP 分支先返回，后续交互/Prompt 远程导出初始化不执行；
+ACP `buildBootOptions` 也不传递 remote/export/sync 开关。因此本次只删除 ACP 路径的无效传参，
+不改变用户的 Copilot 配置，也不宣称所有模式均关闭历史同步。Prompt 模式的 MCP Smoke 不属于该路径。
+参数与权限的版本无关性扩展既有 `health::tests::additive_acp_launch_shapes_match_the_verified_cli_contracts`
+owner，不新增 Rust 测试函数；真实二进制验证只覆盖本次启动兼容，不扩大模型或平台资格。
+官方语义见 [CLI 命令参考](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
+及 [ACP 启动方式](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server)。
 
 ## 2026-10-20 ZCode 与 OpenCode V2 原生问卷禁用
 
@@ -166,6 +185,19 @@ Claude 新会话的保存指引随关闭消失；旧会话恢复仍可能保留�
 完整方法、MCP/Windows 结果与未验证项见[验收记录](research/native-auto-memory/verification-2026-10-10.md)。
 固定产品策略见[当前架构边界](architecture/runtime-catalog-boundaries.md#受管执行的原生自动记忆)，不增加版本或配置读取门禁。
 
+## 2026-10-24 Command Code 1.88.0
+
+当前实现改为原生 HOME、官方 `--mod`、标准 ACP MCP 与共享 Fleet 的 Native Binding 身份策略。
+上游已支持自定义 BYOK 目录与标准显式选模，旧 1.74/1.79 的该项缺口不再代表 1.88。
+本轮真实 sub2api/gpt-6-sol 的 ACP stdio/HTTP 工具调用与随机回执闭环通过；System Bootstrap 由官方 Mod
+交付。原生同名优先、cwd、env/header 字面量及缺失恢复 ID 的实测见[简化记录](versions/v1.72/command-code-native-simplification.md)。
+用户原生配置与历史由 CLI 拥有；真实模型证据未覆盖完整 App/平台资格。
+2026-10-25 按 User seq61 开放 macOS arm64 与 x64，采用既有 Preview 准入，保留 1.88.0 稳定版下限；
+同日 Windows x64 与 Linux x64 分别经独立实测后采用 Preview；Linux 的实际范围见
+[Linux 验收](research/command-code-runtime/linux-acceptance-2026-10-25.md)。Windows 的实测和原生 MCP 路径／
+参数、拒绝后无公开最终回复等边界见[实施记录](versions/v1.72/command-code-native-simplification.md#windows-preview-开放2026-10-25)。本次开放没有新增 Intel 或子代理实测结论。
+以下带日期的旧结果作为历史证据保留。
+
 ## 2026-10-09 Cline / Command Code 暂缓公开（User 105）
 
 两者保留官方 ACP Client/Host/Fleet 接线及原生身份、配置、历史数据，但全部平台为 NotQualified，
@@ -281,9 +313,11 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十八种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
+当前 closed `AdapterKind` 包含十九种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
-Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。Cline 与 Command Code 均暂不公开，所有平台 NotQualified。identity 不代表 First-Class。
+MiniMax Code、Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。Cline 暂不公开，
+所有平台 NotQualified；Command Code 在 macOS arm64/x64、Windows x64 与 Linux x64 以 Preview 开放。
+identity 或 Preview 均不代表 First-Class。
 Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
 Kimi 或 Grok 的平台结论。

@@ -13,7 +13,7 @@ export function executionPhaseFeedback(
   if (hasFinal || executionHasActiveCompaction(items)) return null
   if (status === 'running' && runtimePhase === 'thinking') return runtimeThinkingTitleText(runtimeThinkingTitle) ?? uiAttribute('思考中')
   if (items.some((item) => item.kind === 'narration' || item.kind === 'plan' || item.kind === 'tool')) return null
-  if (status === 'queued') return uiAttribute('连接中')
+  if (status === 'queued') return uiAttribute('启动中…')
   if (status === 'running') return uiAttribute('执行中')
   return null
 }

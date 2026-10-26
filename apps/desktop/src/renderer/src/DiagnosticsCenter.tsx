@@ -558,7 +558,7 @@ export function diagnosticCheckDetail(check: DiagnosticCheck): string {
 }
 
 function runtimeReason(code: string): string {
-  if (code === 'runtime_authentication_required') return uiAttribute("最近一次可用性证据表明需要登录。")
+  if (code === 'runtime_authentication_required') return uiAttribute("认证未通过，请检查登录状态或凭据配置。")
   if (code === 'runtime_missing') return uiAttribute("当前未找到已选择的智能体。")
   if (code === 'runtime_incompatible') return uiAttribute("已安装版本不在支持范围内。")
   if (code === 'runtime_path_missing') return uiAttribute("已配置的可执行入口不再存在。")

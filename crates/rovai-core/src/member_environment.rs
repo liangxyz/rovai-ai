@@ -41,6 +41,7 @@ pub struct EnvironmentUpdateReceipt {
 
 pub struct PreparedEnvironment {
     pub receipt: EnvironmentUpdateReceipt,
+    pub changed: bool,
     ciphertext: Vec<u8>,
     inherit_common: bool,
     member_id: String,
@@ -395,13 +396,9 @@ pub fn prepare(
         "Invalid member environment revision"
     );
     let previous = read_version(connection, member, kind, edit.expected_revision)?;
-    let inherit_common = edit.inherit_common.unwrap_or(inheritance(
-        connection,
-        member,
-        kind,
-        edit.expected_revision,
-        &previous,
-    )?);
+    let previous_inherit_common =
+        inheritance(connection, member, kind, edit.expected_revision, &previous)?;
+    let inherit_common = edit.inherit_common.unwrap_or(previous_inherit_common);
     let values = parse(&edit.json, cfg!(windows))?;
     // Preserve command replay/conflict detection without hashing environment values.
     // A committed revision is immutable, so an old command must carry the same private values.
@@ -429,6 +426,7 @@ pub fn prepare(
         inherit_common: edit.inherit_common,
     };
     Ok(PreparedEnvironment {
+        changed: values != previous || inherit_common != previous_inherit_common,
         ciphertext: encrypt(
             connection,
             &context(member, kind, edit.expected_revision + 1),

@@ -2,12 +2,12 @@
 document_type: ui-component-spec
 authority: desktop-bootstrap-shell-presentation
 status: accepted
-last_updated: 2026-10-12
+last_updated: 2026-10-25
 ---
 
 # Desktop Bootstrap Shell
 
-Bootstrap Shell 是 Supervisor 明确进入 `blocked` / `crashed` 后可见的非权威恢复面。它沿用 Porcelain Day / Steel Night
+Bootstrap Shell 是 Supervisor 明确进入 `blocked` / `crashed` 后可见的非权威恢复面。它沿用当前主题 Token
 与既有品牌，不是每次启动的默认页面，也不是空工作区。
 
 BrowserWindow 创建后，Renderer 首帧就显示覆盖完整视口的不透明品牌画布，遮住同时挂载的普通 App rail/顶行；本机

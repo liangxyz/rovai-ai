@@ -205,7 +205,7 @@ pub struct BuiltinToolBindingCredential {
     pub conversation_version: i64,
     pub adapter_installation_id: String,
     pub native_session_id: Option<String>,
-    pub binding_compatibility_digest: String,
+    pub binding_compatibility_digest: Option<String>,
     pub binding_replaced: bool,
     pub previous_adapter_installation_id: Option<String>,
     pub previous_native_session_id: Option<String>,
@@ -834,8 +834,11 @@ impl TeamToolService {
         ensure_runtime_is_frozen(adapter_kind.as_deref())?;
         let frozen_installation_id = frozen_installation_id
             .context("Team Tool AgentRun has no frozen Runtime installation")?;
-        let frozen_compatibility_digest = frozen_compatibility_digest
-            .context("Team Tool AgentRun has no frozen Native Binding compatibility digest")?;
+        anyhow::ensure!(
+            adapter_kind.as_deref() == Some(AdapterKind::CommandCodeCli.as_str())
+                || frozen_compatibility_digest.is_some(),
+            "Team Tool AgentRun has no frozen Native Binding compatibility digest"
+        );
         let frozen_installation_generation = frozen_installation_generation
             .context("Team Tool AgentRun has no frozen installation generation")?;
 
@@ -8644,6 +8647,80 @@ mod tests {
             fixture.credential.native_binding_id
         );
         assert_eq!(resumed.native_session_id.as_deref(), Some("native-source"));
+
+        // Command's new policy must retain an old binding even when its
+        // historical compatibility digest differs from the frozen Run.
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE adapter_installation SET adapter_kind='command-code-cli' WHERE id=?1",
+                [&resumed.adapter_installation_id],
+            )
+            .unwrap();
+        fixture.database.connection().execute(
+            "UPDATE agent_run SET runtime_adapter_kind='command-code-cli', runtime_binding_compatibility_digest=NULL, runtime_host_config_digest=NULL WHERE runtime_installation_id=?1",
+            [&resumed.adapter_installation_id],
+        ).unwrap();
+        fixture.database.connection().execute(
+            "UPDATE conversation SET native_binding_compatibility_digest='historical-digest' WHERE id=?1",
+            [&conversation_id],
+        ).unwrap();
+        let command_binding = TeamToolService::default()
+            .prepare_binding_credential(
+                &mut fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+                false,
+            )
+            .unwrap();
+        assert_eq!(command_binding.native_binding_id, resumed.native_binding_id);
+        assert_eq!(command_binding.native_session_id, resumed.native_session_id);
+        assert!(command_binding.binding_compatibility_digest.is_none());
+        let bound = crate::runtime::ExecutionRuntimeService::default()
+            .bind_native_session(
+                &mut fixture.database,
+                &crate::command::CommandEnvelope {
+                    command_id: "command-preserve-legacy-binding".into(),
+                    execution_epoch: None,
+                    expected_versions: Default::default(),
+                    actor: crate::command::ActorRef::System {
+                        component_id: "runtime-adapter:command-code-cli".into(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    payload: crate::runtime::BindNativeSessionCommand {
+                        conversation_id: conversation_id.clone(),
+                        agent_run_id: fixture.source_run_id.clone(),
+                        expected_conversation_version: command_binding.conversation_version,
+                        expected_execution_epoch: fixture.source_epoch,
+                        previous_adapter_installation_id: command_binding
+                            .previous_adapter_installation_id
+                            .clone(),
+                        previous_native_session_id: command_binding
+                            .previous_native_session_id
+                            .clone(),
+                        previous_binding_compatibility_digest: Some("irrelevant-old-value".into()),
+                        proposed_binding_id: Some(command_binding.native_binding_id.clone()),
+                        adapter_installation_id: command_binding.adapter_installation_id.clone(),
+                        native_session_id: command_binding.native_session_id.clone().unwrap(),
+                        binding_compatibility_digest: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(bound.result.status, CommandResultStatus::Applied);
+        let retained: (String, i64, String) = fixture.database.connection().query_row(
+            "SELECT native_binding_id,native_binding_generation,native_binding_compatibility_digest FROM conversation WHERE id=?1",
+            [&conversation_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            retained,
+            (
+                resumed.native_binding_id.clone(),
+                resumed.native_binding_generation,
+                "historical-digest".into()
+            )
+        );
 
         let replaced = TeamToolService::default()
             .prepare_binding_credential(

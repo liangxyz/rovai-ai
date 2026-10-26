@@ -10,6 +10,34 @@ import { createThreadAdapter } from './camp-adapter'
 // Owns the production Web adapter + execution window seam. A Host-only HTTP
 // test bypasses this adapter's allowlist; a populated page hides missing deltas.
 afterEach(() => vi.unstubAllGlobals())
+it('routes public reference directory and availability reads through the Web adapter', async () => {
+  const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
+  vi.stubGlobal('sessionStorage', storage)
+  vi.stubGlobal('localStorage', storage)
+  vi.stubGlobal('navigator', { platform: 'MacIntel' })
+  vi.stubGlobal('window', { sessionStorage: storage, history: { state: null } })
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  const requests: unknown[] = []
+  const item = { kind: 'thread', id: 'rvcamp_01k87hrb9yfay8vvr14d2pf2db', title: '登录改造', projectBindingKind: 'directory', projectPath: '/project' }
+  const fetcher = vi.fn<typeof fetch>(async (url, options) => {
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    const request = JSON.parse(String(options?.body))
+    requests.push(request)
+    return Response.json({ result: request.operation === 'threadReferences.list' ? { items: [item], nextCursor: null } : [item, null] })
+  })
+  const transport = new ConsoleClient('http://127.0.0.1:8766', fetcher)
+  await transport.login('b'.repeat(64))
+  const client = createThreadAdapter(transport, async () => null).environment.client
+  const list = { threadId: 'current', kind: 'thread', query: '登录' }
+  const resolve = { threadId: 'current', references: [{ kind: 'thread', id: item.id }, { kind: 'mission', id: 'missing' }] }
+  try {
+    expect(await client.request('threadReferences.list', list)).toEqual({ items: [item], nextCursor: null })
+    expect(await client.request('threadReferences.resolve', resolve)).toEqual([item, null])
+    expect(requests).toEqual([{ operation: 'threadReferences.list', params: list }, { operation: 'threadReferences.resolve', params: resolve }])
+    expect(transport.pendingCommandCount).toBe(0)
+  } finally { transport.clear() }
+})
+
 it('loads a command after an initially empty Web Run and refreshes its completion', async () => {
   const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
   vi.stubGlobal('sessionStorage', storage)

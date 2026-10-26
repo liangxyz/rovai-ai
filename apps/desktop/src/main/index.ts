@@ -60,7 +60,7 @@ import {
   resolvedTheme,
   themeBackground
 } from './appearance-preference'
-import { DEFAULT_APPEARANCE } from '../shared/appearance'
+import { DEFAULT_APPEARANCE, resolveThemeId } from '../shared/appearance'
 import {
   readWindowStateFile,
   resetWindowBounds,
@@ -250,6 +250,8 @@ const allowedMethods = new Set<CoreMethod>([
   'nativeSkills.list',
   'nativeSkills.read',
   'skills.candidates',
+  'threadReferences.list',
+  'threadReferences.resolve',
   'skills.content.read',
   'skills.deliveryGroups.list',
   'skills.import.inspect',
@@ -747,8 +749,8 @@ function publishAppearance(): AppearanceSnapshot {
   const snapshot = appearanceSnapshot()
   const signature = JSON.stringify(snapshot)
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setBackgroundColor(themeBackground(snapshot.resolvedTheme))
-    applyWindowChromeAppearance(mainWindow, process.platform, snapshot.resolvedTheme)
+    mainWindow.setBackgroundColor(themeBackground(resolveThemeId(snapshot.preference, snapshot.resolvedTheme)))
+    applyWindowChromeAppearance(mainWindow, process.platform, snapshot)
   }
   if (signature !== lastAppearanceSignature) {
     lastAppearanceSignature = signature
@@ -787,7 +789,7 @@ function createWindow(): void {
   if (!generalPreferences || !restorableLocations) {
     throw new Error('Desktop Shell preferences are not ready')
   }
-  const theme = appearanceSnapshot().resolvedTheme
+  const initialAppearance = appearanceSnapshot()
   const windowStatePath = join(app.getPath('userData'), 'window-state.json')
   const displayAreas = screen.getAllDisplays().map((display) => display.workArea)
   const savedState = sanitizeWindowState(
@@ -807,8 +809,8 @@ function createWindow(): void {
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: APP_NAME,
-    ...windowChromeOptions(process.platform, theme),
-    backgroundColor: themeBackground(theme),
+    ...windowChromeOptions(process.platform, initialAppearance),
+    backgroundColor: themeBackground(resolveThemeId(initialAppearance.preference, initialAppearance.resolvedTheme)),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.js'),
       contextIsolation: true,

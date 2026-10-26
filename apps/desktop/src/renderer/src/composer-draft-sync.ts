@@ -190,6 +190,7 @@ export class ComposerDraftSync<Draft = unknown> {
     this.setDirty(true)
     this.rebuildContributions(editorState)
     this.setPersistenceStatus({ state: 'dirty' })
+    this.bindings.onEffectiveDocumentChange?.(editorStateToComposerDocument(editorState))
     if (this.bindings.persist) this.scheduleSave()
   }
 

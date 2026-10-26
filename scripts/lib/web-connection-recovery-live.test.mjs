@@ -13,9 +13,10 @@ import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from 
 // refresh. No configured model is needed: send commands use execution: null.
 test('production Web retains its mounted Composer and authentication across a real Host stop/restart', { timeout: 90_000 }, async t => {
   const root = resolve(import.meta.dirname, '../..')
+  const uiDirectory = process.env.ROVAI_WEB_RECOVERY_UI_DIRECTORY ?? join(root, 'out/web')
   const binary = process.env.ROVAI_HOST_BIN ?? join(root, 'target/debug/rovai-host')
   const chrome = process.env.ROVAI_REVIEW_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-  try { await access(binary); await access(chrome); await access(join(root, 'out/web/index.html')) }
+  try { await access(binary); await access(chrome); await access(join(uiDirectory, 'index.html')) }
   catch { t.skip('Requires a built Host, WebUI and Chrome'); return }
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-web-recovery-live-')))
   const dataDir = join(fixture, 'core')
@@ -31,7 +32,7 @@ test('production Web retains its mounted Composer and authentication across a re
     const created = await host.request('camps.create', { commandId: crypto.randomUUID(), name: '停服恢复验收', workspace: null,
       memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId, collaborationMode: 'peer' })
     assert.equal(created.status, 'applied')
-    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: join(root, 'out/web') })
+    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
     browser = await launchAcceptanceBrowser({ executable: chrome, args: ['--headless=new', `--user-data-dir=${join(fixture, 'chrome')}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', 'about:blank'] })
     await browser.send('Page.navigate', { url: service.origin })
     await browser.wait(`document.querySelector('#administrator-token') !== null`)
@@ -56,7 +57,7 @@ test('production Web retains its mounted Composer and authentication across a re
     assert.equal(await browser.evaluate(`document.querySelector('.web-offline-dialog') !== null`), true)
     host = launchHost(binary, args, { cwd: root })
     await within(host.ready)
-    const resumed = await host.request('host.web.start', { listen: new URL(service.origin).host, uiDirectory: join(root, 'out/web') })
+    const resumed = await host.request('host.web.start', { listen: new URL(service.origin).host, uiDirectory })
     assert.equal(resumed.origin, service.origin)
     if (await browser.evaluate(`document.querySelector('.web-offline-retry') !== null`)) await browser.click(`document.querySelector('.web-offline-retry')`)
     await browser.wait(`document.querySelector('.web-offline-dialog') === null && document.querySelector('.web-login-overlay') === null`)
@@ -135,7 +136,9 @@ test('production Web retains its mounted Composer and authentication across a re
 
     // Use the production ConsoleClient against this same real Host to inspect
     // the original Promise as well as the durable receipt (no synthetic Core replies).
-    const probe = await build({ configFile: false, logLevel: 'error', build: { write: false, lib: {
+    const probe = await build({ configFile: false, logLevel: 'error', resolve: { alias: {
+      '@contracts': join(root, 'packages/contracts/src/index.ts')
+    } }, build: { write: false, lib: {
       entry: join(root, 'apps/web/src/client.ts'), name: 'RecoveryClientProbe', formats: ['iife'] } } })
     await browser.evaluate(`${(Array.isArray(probe) ? probe[0] : probe).output.find(entry => entry.type === 'chunk').code}\nvoid 0`)
     const validation = await browser.evaluate(`(async () => {

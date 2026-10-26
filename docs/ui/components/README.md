@@ -2,7 +2,7 @@
 document_type: ui-component-index
 authority: renderer-component-routing
 status: accepted
-last_updated: 2026-09-19
+last_updated: 2026-10-25
 ---
 
 # Rovai AI 复杂 UI 组件
@@ -15,7 +15,8 @@ Dialog、Popover 等基础原子遵守根目录 [`DESIGN.md`](../../../DESIGN.md
 | [Team 工作区](team-workspace.md) | 团队创建模板、指引、名册、Custom/Team 默认配置和新对话选择 |
 | [App Shell 与统一侧栏](app-shell-navigation.md) | 一级导航、Project/Camp 投影、Quick Chat、设置入口和窗口布局 |
 | [快捷键设置](shortcut-settings.md) | Desktop 本机快捷键、按键和侧键录制、冲突替换与发送方式 |
-| [MCP 与 Skills 设置](capability-settings.md) | 可拖拽列表/详情、启停筛选、JSON 与文件夹导入、正文预览和头像范围选择 |
+| [MCP 设置](capability-settings.md) | 列表/详情、JSON 导入、编辑与队员范围选择 |
+| [Skills、工具箱与会话选择](skills-settings.md) | 原生只读页、逐队员配置与会话 `/` 候选 |
 | [Mission 使命板](mission-board.md) | 桌面使命导航、卡片、抽屉、会话板、交付与活动 |
 | [Automation 工作区](automation-workspace.md) | 定时任务一级入口、模板、自动保存、计划字段、运行/通知状态与结果会话入口 |
 | [Desktop Bootstrap Shell](bootstrap-shell.md) | Full Core ready 前的 authority 状态、重试、诊断、本机主题与偏好降级；不挂载业务空态 |

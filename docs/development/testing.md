@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-17
+last_updated: 2026-10-25
 ---
 
 # 测试与 Smoke Test
@@ -1491,12 +1491,6 @@ owner 继续拥有指标数量保留与 127/128 升级；默认 workspace 与字
 拥有 Node hook 的 A/B 绑定及缺失/摘要/预算负例，已纳入 `pnpm test`。
 
 
-Command Code 原生配置指纹回归由
-`command_code_acp::tests::native_configuration_tracks_scoped_mod_sources_without_hashing_history` 拥有。
-新增此默认 Rust owner 的原因是没有既有测试覆盖其官方 Mod scope：同一嵌套 cwd 下，用户相对路径、
-项目相对路径、自动发现 Mod 和本地 source 的正文变化必须使配置不兼容，而 Session 历史追加必须不改变
-配置指纹；非法 settings 必须拒绝。这是保留 Host/Native Binding 的跨文件行为门禁，不是枚举快照测试。
-
 真实 App 拒绝审批暴露 Cline 在执行前只发送 `tool_call_update.pending → failed`，缺少 `tool_call` 时
 原配对器会退出读取，Run 停在 waiting。新增最低层纯状态 owner
 `acp::tests::paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`：拥有权限提案的
@@ -1705,3 +1699,117 @@ CLI 解析与教学 owner 保留文件输入矩阵并覆盖旧 taskId 兼容；`
 它拥有原生文件阅读、失败恢复、迟到响应、键盘导航、逐队员配置与 MCP 凭据编辑的 Electron 交互覆盖；
 完整范围见 [fixture 说明](../../scripts/fixtures/capability-workspace/README.md)。旧 `SkillSettings` 页面及仅服务
 旧导入／交付组的单元测试已退役。Core 的历史 Library、Revision、投影恢复与兼容测试继续拥有旧数据路径。
+
+
+## Command Code 1.88 简化测试归属（2026-10-24）
+
+macOS 两架构 Preview 开放扩展既有 `macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence`：
+Command 允许使用但不伪称 qualified，保留缺失证据原因。同日 Windows 开放扩展既有
+`windows_catalog_qualifies_only_adapter_scoped_frozen_evidence` 验证相同 Preview 语义，Linux 继续验证拒绝。
+Renderer 沿既有 App、OnboardingFlow、RuntimeInstallationGuide、RuntimeMonitoring 与 member-runtime-apply
+owner 验证公开目录、两种 macOS 与 Windows 的配置准入和 Linux 的只读限制；不增加 Rust owner。
+App CLI 的既有 `member_runtime_configuration_admits_native_runtime_defaults` 同步允许解析 Command 配置，
+目标 Host 平台仍由 Core 准入；现有隔离 Electron Runtime Picker 覆盖实际菜单选择与默认模型保留。
+
+退役 `native_configuration_tracks_scoped_mod_sources_without_hashing_history`：其唯一生产路径（配置扫描、
+HOME 镜像和原生文件合并）已删除。同模块 owner 后续更名为 `native_home_and_bootstrap_control`，
+验证原生 HOME 不被改写、一次握手清理和直接控制正文编码。health owner 中的 `mcp list` 格式矩阵随已删除
+解析器退役；真实 1.88 原生同名优先验证由隔离 native-contract 探针承接。
+
+扩展既有 `member_sessions_reuse_only_within_their_camp_and_current_session` 覆盖显式身份策略与跨 cwd/owner；
+`binding_transitions_preserve_public_accepted_boundary` 覆盖旧摘要迁移到无摘要 Run 的 Binding 提交；
+`private_host_config_is_scoped_to_profiles_that_require_it` 增加构造失败时实际进程回收先于目录删除。
+既有成员配置写入 owner 扩展并更名为
+`runtime_configuration_writes_preserve_startups_and_retire_changed_command_hosts`：保留原 Codex 启动中写入
+边界，覆盖实际 dispatcher 的 MCP 分配/撤销、定义、启停、删除、有效成员变化与冲突拒绝；重复保存不退役，
+无关成员及其他 Runtime Host 保留。导入的实际/无变化成员事实归既有
+`import_commit_rehydrates_credentials_and_fences_replacement_before_startup`。
+`launch_version_uses_the_frozen_program_without_blocking_ordinary_execution` 同时拥有 Command 缺失入口下
+允许 warm 准入、cold 拒绝启动，以及显式禁用/删除安装的拒绝；
+`trae_completed_run_enters_lru_and_reuses_the_same_host_session` 覆盖共享 ACP cold callback 只在创建执行，
+warm 不调用、cold 失败不创建进程/材料。
+终态矩阵移除基线已失效的 14 个 Adapter 固定计数（实际为 15），改验非空后继续遍历全部 Adapter；
+目录数量仍由 Registry owner 拥有。保留取消/终态 owner，不新增等价 Rust 测试。真实控制面继续使用既有 ignored
+`isolated_command_code_acp_direct_bootstrap_and_cold_resume`（原 bootstrap_gate owner 更名），
+基线为 1.88，以实际 ManagedProcess/ACP Host 和本地确定性 Provider 验证逐轮直接交付。
+
+最小命令：`cargo test -p rovai-core --features slow-tests --lib`，分别过滤上述 owner 与 `command_code`；
+Core dispatcher owner 使用 `cargo test -p rovai-core --features slow-tests --lib runtime_configuration_writes`；
+Node 沿用 `node --test scripts/lib/command-code-bootstrap.test.mjs`。再执行默认 `cargo test --workspace`。
+真实 native Home 仅由验收夹具创建，adapter 本身不得覆盖共享 HOME；真实模型/MCP 与平台资格分别记账。
+
+2026-10-25 跟进扩展既有 owner，不增加测试文件或平行 Rust owner：
+原 `native_home_and_immutable_bootstrap_materials` 曾验证已有文件不重写；其 Host 生命周期冻结断言
+已由下述 User 确认的 Run 边界交付替代，不再作为当前合同；
+长正文 owner 更名为 `long_bootstrap_bindings_preserve_utf8_and_enforce_body_limits`，与既有 Node Mod owner
+共同验证 128 KiB 引号正文即使 JSON 大于 256 KiB 仍可交付，正文超限仍拒绝。
+`private_versions_preserve_credentials_and_new_launches_read_current_configuration` 覆盖成员环境的值、继承、
+格式无变化与重放事实；`acp_probe_failure_classification_separates_auth_protocol_and_transient_errors` 扩展
+假 ACP 进程，对照 Command/Kimi 的认证、协议与临时错误，确认真实 probe 边界保留原因与 stderr。
+
+六项审查跟进继续扩展上述 dispatcher owner：控制一个 Fleet startup 等待数据库，安装更新进入退役后
+确认数据库锁已释放，再完成启动/回收；同命令 replay 和新命令保存相同值均保留 Host 及安装版本。
+该跨 Core/SQLite/Fleet 等待关系不能由纯函数证明，复用原隔离 fixture，不增加锁或生产测试入口。
+已有 `local_saves_finish_while_environment_capture_is_held_and_never_launch_work` 增加旧字段请求重放且
+程序入口暂时移走的情况；原事务 owner 保留冲突/失败回滚并确认已应用编辑为空。
+MCP dispatcher/import owner 覆盖保留成员不退役、关闭 Server 的修改不退役与重新启用生效。
+新增唯一纯函数 owner `command_code_acp::tests::version_gate_accepts_native_release_labels`：
+修复前 `v1.88.0`、`Command Code v1.88.0` 与 `1.88.0+build-name` 会失败；此前 Command 无版本解析
+owner，HOME/binding fixture 不拥有该独立边界。该测试不创建文件或进程，同时保留低版本/预发布/无版本拒绝。
+最小命令为 `cargo test -p rovai-core --features slow-tests --lib version_gate_accepts_native_release_labels`；
+其余定向命令复用同一入口并过滤上述既有 owner。Rust 测试函数净增 1，无测试文件新增或已有 owner 退役。
+
+stdio 资源跟进新增纯函数 owner
+`command_code_acp::tests::mcp_wire_uses_session_cwd_without_a_launcher_and_preserves_literals`：修复前共享投影
+补全的默认 cwd 会触发多余 Node launcher；同目录应保持原 command/args，不同目录继续保留参数式包装。
+该 owner 同时保留 env/header 的单次 wire 转义和含空格／空参数／shell 字面值。现有 HOME/binding 与版本
+owner 不经过 MCP wire，`runtime_mcp` 的原生文件 owner 也不拥有 Command ACP 适配，故不能用它们替代。
+测试不创建文件、进程或数据库；最小命令为
+`cargo test -p rovai-core --lib mcp_wire_uses_session_cwd_without_a_launcher_and_preserves_literals`。
+
+2026-10-25 Run 边界收口继续扩展原 owners，不增加 Rust 测试函数或 fixture 文件：
+`native_home_and_run_bootstrap_materials`（原 immutable owner 更名）拥有同 Session 的新 B 覆盖、
+相同冻结字节重复发布、不同 Session 隔离和非法输入不覆盖旧文件；不可变整 Host 正文断言随旧行为退役。
+`history_restore_replay_is_quarantined_and_only_current_prompt_accepts_input` 增加 Command 协议进程分支，
+没有 `session/list` 回应也可完成 load、历史隔离与当前输入；真实 ignored Command owner 不再要求目录预检
+拒绝缺失 ID。`native_resume_consumes_only_adapter_evidence` 保留原生明确拒绝与模糊错误的分类，删除专属目录案例。
+`runtime_directory_overrides_change_native_candidates_without_explicit_refresh` 增加 Command 的四处原址发现；
+`acp_tool_events_expose_only_the_public_command_and_payload_digests` 增加 edit 新建、失败/提案/异路径、已有空文件
+和 write 回执不明确的矩阵，并检查新增内容进入共享 Diff 准入。Node Mod owner 验证过滤问卷且保留其余 active tools。
+固定官方 1.88 的 active-tools、真实文件回执、warm B 更新和 cold 同 ID 证据记录在
+[实施报告](../versions/v1.72/command-code-native-simplification.md#run-边界与原生能力补齐2026-10-25)。
+最小命令沿用 `cargo test -p rovai-core --features extended-tests --lib <owner>`、Node Mod owner 与默认 workspace。
+真实 cwd 与进程父子关系由隔离官方 1.88 控制探针验证：CLI 初始 cwd 与 Session cwd 不同，分别执行
+`session/new` 和同 ID 的 `session/load`，检查 MCP `tools/list` 回执及停止后回收；这不替代历史恢复、
+真实模型工具调用或 Windows/Linux 资格。证据追加到已有 Command JSON，不新增测试文件或常驻验收服务。
+
+
+2026-10-25 Bootstrap 直接传输接入继续复用上述 owners，Rust 测试函数和文件均未增加：
+
+- `native_home_and_bootstrap_control` 拥有中文／换行／引号等控制编码、完整 128 KiB UTF-8 正文预算、
+  无效输入拒绝、原生 HOME 和 ready 清理；原 binding 文件发布／不同文件名断言随正文文件路径退役。
+  Windows npm 入口修复扩展同一 owner 的 revision/nonce、PID 类型／范围和归属拒绝矩阵。
+  `managed_process::tests::windows_bat_entrypoint_job_owns_the_complete_child_tree` 原地核对存活后代、
+  已退出根进程、无关当前进程、零 PID 与终止后代；复用已有真实 Job fixture，不新增 Rust 测试函数。
+  修复前官方 `.cmd` 入口的根 PID 与 Mod Node PID 不同，实际 Run 被 `command_code_bootstrap_readiness_invalid`
+  拦截；纯 ready 解析不能证明 OS Job 归属，因此后者由既有 Windows 进程 owner 拥有。
+  最小命令分别为 `cargo test -p rovai-core --features extended-tests --lib native_home_and_bootstrap_control`
+  与 `cargo test -p rovai-core --features extended-tests --lib windows_bat_entrypoint_job_owns_the_complete_child_tree`。
+- `history_restore_replay_is_quarantined_and_only_current_prompt_accepts_input` 保留 TRAE/Command 恢复
+  回放隔离，扩展生产交付调用：控制 end_turn、usage、mode 仅属准备，错误／cancelled 返回不提交业务
+  prompt；成功后只有原业务输入生成接受和终态。复用 Ready 路由与普通 RPC waiter，没有新状态机。
+- 既有真实 ignored owner 更名为 `isolated_command_code_acp_direct_bootstrap_and_cold_resume`。
+  使用实际官方 1.88 executable、ManagedProcess、生产 Mod 与 AcpRuntime；保留五种 mode 和本地
+  `rovai-probe/model` 显式 BYOK 选模，同 PID/Session A→B→A、
+  128 KiB 引号正文、新 PID 精确 ID cold，以及四类无效控制参数。每次控制后业务事件为空，每轮原始
+  user 输入仅接受一次；Host 材料只含 Mod，shutdown 清除。测试所需隔离 HOME 由调用者提供，不能替代
+  完整 Core/App 或跨平台资格。旧文件缺失／坏 SHA 时退出及多 binding 文件断言随唯一生产路径删除；
+  所属范围仍由既有 Fleet/Native Binding owner 负责，不新增跨 Session 内存管理器。
+- `long_bootstrap_bindings_preserve_utf8_and_enforce_body_limits` 保留 Cline 的文件交付断言，删除 Command
+  文件分支；Command 容量由其控制 owner 和既有 Node Mod owner 承接。
+- `scripts/lib/command-code-bootstrap.test.mjs` 验证注册完成后才写 ready、A→B→A 直接替换、失败保留旧值、
+  固定错误不含输入、完整 128 KiB 和原问卷过滤。删除旧文件读写／SHA／文件名门禁测试。
+
+定向命令仍为 `cargo test -p rovai-core --features extended-tests --lib <owner>` 和上述 Node 文件；
+真实 owner 显式 `--ignored --nocapture`，需 `ROVAI_COMMAND_CODE_SMOKE_ROOT` 与
+`ROVAI_COMMAND_CODE_SMOKE_EXECUTABLE` 指向一次性原生夹具与官方 CLI。默认 workspace 和文档门禁继续运行。

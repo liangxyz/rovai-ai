@@ -1,5 +1,5 @@
 import type { AgentRunView, ThreadMessageView } from '@contracts'
-import { agentRunPresentation, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
+import { agentRunIsStarting, agentRunPresentation, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
 import { uiAttribute } from './interface-language'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
 
@@ -13,12 +13,11 @@ function eligibleConversationRuns(runs: readonly AgentRunView[]): AgentRunView[]
   const publicRuns = runs.filter(run => run.invocationKind !== 'single_chat')
   const latestByAgent = new Map<string, AgentRunView>()
   for (const run of publicRuns) {
-    if (run.status === 'queued') continue
     const previous = latestByAgent.get(run.agentId)
     if (!previous || run.createdAt > previous.createdAt
       || run.createdAt === previous.createdAt && run.id > previous.id) latestByAgent.set(run.agentId, run)
   }
-  return publicRuns.filter(run => run.status === 'running'
+  return publicRuns.filter(run => run.status === 'running' || agentRunIsStarting(run)
     || run.status === 'waiting' && run.startedAt !== null
     || run.status === 'failed' && run.invocationKind === 'batch'
       && (run.failure?.code === 'context_payload_too_large' || latestByAgent.get(run.agentId)?.id === run.id)
@@ -114,7 +113,6 @@ function currentNarrationLine(text: string): string {
 }
 
 const fallbackCopy = {
-  connecting: ['正在和{0}接上线…', '正在联系{0}…', '正在与{0}会合…'],
   working: ['{0}正在为你推进…', '{0}正在推进这项任务…', '{0}正与你一起推进…']
 } as const
 
@@ -159,9 +157,10 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
       || run.failure?.code === 'runtime_disconnected'
     return { kind: 'error', text: disconnected ? uiAttribute('连接中断 · 查看原因') : uiAttribute('执行中断 · 查看原因') }
   }
+  if (!['queued', 'running', 'waiting'].includes(run.status)) return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
   if (run.cancelRequestedAt) return { kind: 'status', text: uiAttribute('正在停止…') }
-  if (run.status === 'waiting') return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
-  const initializing = run.status === 'running' && run.waitReason === 'runtime_initializing'
+  if (run.status === 'waiting' || run.failure?.code === 'runtime_network_interrupted') return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
+  const initializing = agentRunIsStarting(run)
   // ACP can acknowledge the input only at prompt completion. Current-epoch
   // activity already describes what is happening, without changing that ACK.
   // Older or unscoped evidence must not hide a genuine reconnection.
@@ -175,6 +174,6 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
     iconKind: latest.step.publicCommand && latest.step.iconKind === 'unknown' ? 'terminal' : latest.step.iconKind
   }
   if (latest?.kind === 'narration') return { kind: 'narration', text: currentNarrationLine(latest.body) }
-  if (initializing) return { kind: 'status', text: fallbackText(run.id, 'connecting', name) }
+  if (initializing) return { kind: 'status', text: uiAttribute('启动中…') }
   return { kind: 'status', text: progress.runtimeThinkingTitle || fallbackText(run.id, 'working', name) }
 }

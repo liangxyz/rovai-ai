@@ -1297,6 +1297,32 @@ async fn local_saves_finish_while_environment_capture_is_held_and_never_launch_w
                 "startup save must never edit native configuration"
             );
         }
+        // A stale field-edit retry is already applied. Even an entry temporarily
+        // moved by an external upgrade must not turn that no-op into an error.
+        let moved = program.with_extension("moved");
+        std::fs::rename(&program, &moved).unwrap();
+        let before =
+            rovai_core::runtime_startup::load(&*fixture.core.database.lock().await, kind).unwrap();
+        let generation = fixture
+            .core
+            .runtime_search_environment
+            .read()
+            .await
+            .generation();
+        let retried = fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+            "runtimeKind":kind,"edits":[{"path":["programPath"],"before":null,"after":program,"label":"fixture"}]
+        })).await.unwrap();
+        assert_eq!(retried["revision"], before.revision);
+        assert_eq!(
+            fixture
+                .core
+                .runtime_search_environment
+                .read()
+                .await
+                .generation(),
+            generation
+        );
+        std::fs::rename(&moved, &program).unwrap();
         old.assert_current().unwrap();
         // An external native edit still fences the previous connection.
         std::fs::write(

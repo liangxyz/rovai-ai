@@ -51,7 +51,7 @@ try {
     for(let n=0;n<total;n++) {
       await scenario(name,n)
       const result=await b.evaluate('__presence.verify()')
-      for(const key of ['allMessagesPresent','messagesInOrder','uniqueMessages','slotsAreNotMessages','noQueuedPlaceholders','noCompletedRows','uniqueRuns','anchoredOrder','independentActivityRows','compactRows','identityMatchesRun','commandIconsMatchContent','retryOnlyOnFailure']) assert.equal(result[key],true,`${name}/${n}/${key}`)
+      for(const key of ['allMessagesPresent','messagesInOrder','uniqueMessages','slotsAreNotMessages','queuedRunsAreStarting','noCompletedRows','uniqueRuns','anchoredOrder','independentActivityRows','compactRows','identityMatchesRun','commandIconsMatchContent','retryOnlyOnFailure']) assert.equal(result[key],true,`${name}/${n}/${key}`)
       assert.equal(result.overflow,false)
       report.scenarios.push({name,stage:n,...result})
     }
@@ -208,7 +208,7 @@ try {
 
   await b.evaluate('__presence.showStartupStatus("runtime_initializing")'); await settle()
   const startupGeometry = await lineGeometry()
-  assert.match(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),/^正在(?:和爱丽丝接上线|联系爱丽丝|与爱丽丝会合)…$/)
+  assert.equal(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),'启动中…')
   await b.evaluate('__presence.showStartupStatus(null)'); await settle()
   assert.match(await b.evaluate('document.querySelector(".run-presence-preview").textContent'),/^爱丽丝(?:正在为你推进|正在推进这项任务|正与你一起推进)…$/)
   assert.deepEqual(await lineGeometry(),startupGeometry)
@@ -314,13 +314,14 @@ try {
 
   await scenario('parallel',0);assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),0)
   await stage(1);assert.equal(await b.evaluate('__presence.getState().snapshot.agentRuns.some(r=>r.status==="queued")'),true)
-  assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),1)
+  assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),2)
+  assert.equal(await b.evaluate('document.querySelector("[data-presence-state=queued] .run-presence-preview").textContent'),'启动中…')
   await stage(2)
   assert.deepEqual(await b.evaluate('Array.from(document.querySelectorAll(".conversation-run-presence")).map(e=>[e.dataset.presenceRun,e.dataset.continuation])'),[['run-alice','false'],['run-audrey','true']])
   await b.capture(join(out,'parallel-live-tail.png'))
   await scenario('followup',2);assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),1);assert.equal((await identity()).after,'request-main')
   await scenario('silent',2);assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),0)
-  report.interactions.push('queued inputs occupy no space; parallel rows retain individual anchors; silent completion leaves no completion row')
+  report.interactions.push('unclaimed inputs occupy no space; created Runs show startup; parallel rows retain individual anchors; silent completion leaves no completion row')
 
   // Compare the actual message-action styles with the unchanged production view.
   await scenario('interleaved',3);await rest()
@@ -727,6 +728,51 @@ try {
     assert.equal(await b.evaluate(changeReads),1,'one trailing refresh catches up without another notification')
   }
   report.interactions.push('slow initial page retains its invalidation and catches up once; newer live narration stays visible while both page and trailing changes are delayed')
+  // Exercise the actual card through startup, evidence, Stop submission and its
+  // terminal snapshot, including Web's evidence-only invalidation path.
+  for (const windowed of [false, true]) {
+    const url = pathToFileURL(join(root,'rovai-teammate-presence.html'))
+    url.search = `scenario=stream&stage=1&startup=queued${windowed ? '&windowed=1' : ''}`
+    await b.send('Page.navigate',{url:url.href})
+    await b.wait('!!window.__presence && !!document.querySelector(".run-presence-open")')
+    await b.click('.run-presence-open'); await settle()
+    const card = '.camp-detail-popover [data-agent-run-id="run-alice"]'
+    const cardState = () => b.evaluate(`(() => {
+      const card=document.querySelector('${card}'),text=card.querySelector('.execution-run-status'),style=getComputedStyle(text)
+      return { text:text.textContent,height:card.getBoundingClientRect().height,
+        font:[style.fontFamily,style.fontSize,style.fontWeight],
+        stop:!!card.querySelector('.execution-run-operations button.is-danger'),
+        timeline:!!card.querySelector(':scope > .execution-process-node svg') }
+    })()`)
+    const queued = await cardState()
+    assert.equal(queued.text,'启动中…'); assert.equal(queued.stop,true); assert.equal(queued.timeline,true)
+    await b.evaluate('__presence.showStartupStatus("runtime_initializing",false,"running")'); await settle()
+    assert.deepEqual(await cardState(),queued,'Run creation and Runtime initialization use one card presentation')
+    await b.capture(join(out,`card-starting-${windowed ? 'web' : 'desktop'}.png`))
+    await b.evaluate('__presence.setStage(1); __presence.showStartupStatus("runtime_initializing",true); __presence.resync()')
+    await b.wait(`!!document.querySelector('${card} .tool-activity-group') && !document.querySelector('${card} .execution-run-status')`)
+    assert.ok((await b.evaluate(`document.querySelector('${card}').innerText`)).includes('rg -n'))
+    await b.evaluate('__presence.controls.holdStop=true')
+    await b.click(`${card} .execution-run-operations button.is-danger`)
+    await b.wait(`document.querySelector('${card} .execution-run-status')?.textContent === '正在停止…'`)
+    for (const theme of ['day','night']) {
+      await b.evaluate(`__presence.setTheme('${theme}')`); await settle()
+      const rect = await b.evaluate(`document.querySelector('${card}').getBoundingClientRect().toJSON()`)
+      await b.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.x+rect.width-25,y:rect.y+23})
+      const stopped = await cardState()
+      assert.equal(stopped.stop,false); assert.deepEqual(stopped.font,queued.font); assert.equal(stopped.timeline,true)
+      const content = await b.evaluate(`document.querySelector('${card}').innerText`)
+      assert.equal(content.split('正在停止…').length-1,1)
+      assert.ok(content.includes('rg -n'))
+      assert.equal(await b.evaluate(`!!document.querySelector('${card} .process-action.cancelling')`),false)
+      await b.capture(join(out,`card-stopping-${windowed ? 'web' : 'desktop'}-${theme}.png`))
+    }
+    await b.evaluate('__presence.controls.holdStop=false')
+    await b.wait(`document.querySelector('${card} .execution-run-status')?.textContent === '已取消'`)
+    assert.deepEqual((await cardState()).font,queued.font)
+    assert.equal(await b.evaluate(`document.querySelector('${card}').innerText.includes('正在停止')`),false)
+  }
+  report.interactions.push('created and initializing Runs share a card; current evidence replaces startup in event and windowed views; Stop hides its hover action, keeps command content, then shows the terminal state with consistent typography and timeline icons')
   await b.send('Page.navigate',{url:pathToFileURL(join(root,'rovai-teammate-presence.html')).href})
   await b.wait('!!window.__presence && !!document.querySelector(".composer-box")')
 

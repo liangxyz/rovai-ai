@@ -1227,6 +1227,8 @@ export type StructuredThreadMessageSegment =
   | { kind: 'all_members_mention' }
   | { kind: 'current_user_mention'; userId: 'local_user' }
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
+  | { kind: 'thread_reference'; threadId: string; titleAtSend: string }
+  | { kind: 'mission_reference'; missionId: string; titleAtSend: string }
   | {
       kind: 'external_quote'
       senderDisplayName: string
@@ -1250,6 +1252,8 @@ export type ComposerAtom =
   | MemberComposerAtom
   | AllMembersComposerAtom
   | SkillComposerAtom
+  | ThreadReferenceComposerAtom
+  | MissionReferenceComposerAtom
 
 export interface MemberComposerAtom {
   type: 'member'
@@ -1266,6 +1270,27 @@ export interface SkillComposerAtom {
   skillId: string
   nameAtSend: string
 }
+
+export interface ThreadReferenceComposerAtom {
+  type: 'thread_reference'
+  threadId: string
+  labelFallback?: string
+}
+
+export interface MissionReferenceComposerAtom {
+  type: 'mission_reference'
+  missionId: string
+  labelFallback?: string
+}
+
+export type ReferenceKind = 'thread' | 'mission'
+export interface ReferenceIdentity { kind: ReferenceKind; id: string }
+export interface ReferenceCandidate extends ReferenceIdentity {
+  title: string
+  projectBindingKind: 'directory' | 'quick_chat'
+  projectPath: string
+}
+export interface ReferencePage { items: ReferenceCandidate[]; nextCursor: string | null }
 
 export type SkillSelectionOmissionReason =
   | 'missing_at_send'
@@ -2622,8 +2647,10 @@ export interface ThreadMessageChange {
   throughGlobalSequence: number
 }
 export interface ThreadReadInvalidation {
+  referencesChanged?: boolean
   notificationsChanged?: boolean
   tasksChanged?: boolean
+  teamsChanged?: boolean
   resync?: boolean
   messages?: ThreadMessageChange[]
 }
@@ -3040,7 +3067,9 @@ export interface SupervisorApi {
   onChanged(listener: (snapshot: SupervisorSnapshot) => void): () => void
 }
 
-export type ThemePreference = 'system' | 'day' | 'night'
+export type ThemeId = 'day' | 'night' | 'horizon' | 'classic-red' | 'ember'
+export type ThemePreference = 'system' | ThemeId
+/** Light/dark rendering mode, independent of the selected palette. */
 export type ResolvedTheme = 'day' | 'night'
 
 export interface AppearancePreferences {
@@ -4299,6 +4328,8 @@ export type CoreMethod =
   | 'nativeSkills.list'
   | 'nativeSkills.read'
   | 'skills.candidates'
+  | 'threadReferences.list'
+  | 'threadReferences.resolve'
   | 'skills.content.read'
   | 'skills.deliveryGroups.list'
   | 'skills.import.inspect'
@@ -4591,7 +4622,7 @@ export type MissionStatus = 'needs_you' | 'not_started' | 'in_progress' | 'compl
 export interface MissionInfo { missionId: string; title: string; description: string; status: MissionStatus; sourceMessageId: string | null }
 export interface MissionWorkspaceCleanupView { state: 'cleaning' | 'failed' | 'cleaned'; worktreeRemoved: boolean; branchRemoved: boolean; diagnostic: string | null }
 export interface MissionRecord extends MissionInfo { descriptionContent?: MissionDescriptionContent; number: number; hasUnread: boolean; threadId: string; projectPath: string; projectBindingKind: ProjectBindingKind; detailsVersion: number; tags: string[]; attachments: LocalAttachmentSourceView[]; createdAt: string; updatedAt: string; memberAgentIds: string[]; defaultLeadAgentId: string | null; runningAgentIds: string[]; startAvailable: boolean; workspaceEverCreated: boolean; workspaceResourcesPresent: boolean; cleanupAvailable: boolean; workspaceCleanup?: MissionWorkspaceCleanupView }
-export interface MissionCreate { descriptionContent?: MissionDescriptionContent; title: string; description: string; projectPath: string; projectBindingKind: ProjectBindingKind; memberAgentIds: string[]; defaultLeadAgentId: string; tags: string[] }
+export interface MissionCreate { team?: TeamSelection; descriptionContent?: MissionDescriptionContent; title: string; description: string; projectPath: string; projectBindingKind: ProjectBindingKind; memberAgentIds: string[]; defaultLeadAgentId: string; tags: string[] }
 export interface MissionUpdate { descriptionContent?: MissionDescriptionContent; missionId: string; title?: string; description?: string; tags?: string[]; expectedDetailsVersion?: number }
 export interface MissionAttachmentDraft { id: string; file: File; kindHint: 'file' | 'directory' }
 export interface MissionAttachmentsApi {

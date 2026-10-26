@@ -74,7 +74,7 @@ function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, regist
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true) }
   }, [anchor, workspace])
   // The split context updates before a ResizeObserver delivery on a window resize.
-  const width = workspace && layout ? (layout.compact ? layout.availableWidth : Math.round(layout.width)) : bounds?.fallbackWidth ?? 0
+  const width = workspace && layout ? ((layout.compact || layout.expanded) ? layout.availableWidth : Math.round(layout.width)) : bounds?.fallbackWidth ?? 0
   const positioned = bounds && {
     top: bounds.top, height: bounds.height, width, left: bounds.right - width
   }

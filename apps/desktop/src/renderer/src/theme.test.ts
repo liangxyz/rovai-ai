@@ -18,8 +18,8 @@ function rootWithTheme(theme?: string): HTMLElement {
 }
 
 describe('renderer theme model', () => {
-  it('exposes the three stable settings options', () => {
-    expect(THEME_OPTIONS.map((option) => option.value)).toEqual(['system', 'day', 'night'])
+  it('retains the original preferences alongside the three new palettes', () => {
+    expect(THEME_OPTIONS.map((option) => option.value)).toEqual(['system', 'day', 'night', 'horizon', 'classic-red', 'ember'])
   })
 
   it('resolves the first-paint theme from the document without reviving obsolete themes', () => {
@@ -41,7 +41,24 @@ describe('renderer theme model', () => {
 
     applyAppearanceSnapshot(root, { ...DEFAULT_APPEARANCE, preference: 'day', resolvedTheme: 'day' })
     expect(root.dataset.theme).toBe('day')
+    expect(root.dataset.themeId).toBe('day')
     expect(root.style.colorScheme).toBe('light')
+  })
+
+  it('switches palettes independently of mode and clears a fixed palette when following the system', () => {
+    const root = rootWithTheme('night')
+    root.dataset.activeThread = 'retained-thread'
+    for (const [preference, mode] of [['horizon', 'day'], ['classic-red', 'day'], ['ember', 'night']] as const) {
+      applyAppearanceSnapshot(root, { ...DEFAULT_APPEARANCE, preference, resolvedTheme: mode })
+      expect(root.dataset.themeId).toBe(preference)
+      expect(root.dataset.theme).toBe(mode)
+      expect(root.style.colorScheme).toBe(mode === 'night' ? 'dark' : 'light')
+      expect(root.dataset.activeThread).toBe('retained-thread')
+    }
+    applyAppearanceSnapshot(root, { ...DEFAULT_APPEARANCE, resolvedTheme: 'day' })
+    expect(root.dataset.themeId).toBe('day')
+    applyAppearanceSnapshot(root, { ...DEFAULT_APPEARANCE, resolvedTheme: 'night' })
+    expect(root.dataset.themeId).toBe('night')
   })
 
   it('maps a stable AgentProfile id to one of the shared identity tokens', () => {

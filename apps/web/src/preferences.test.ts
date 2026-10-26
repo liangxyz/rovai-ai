@@ -112,3 +112,24 @@ it('merges concurrent directory writes and protects removal, completed migration
   await expect(a.registerProjects(['/lost'], true)).rejects.toThrow()
   expect(entries.get(key)).toBe('{broken')
 })
+
+
+it('persists fixed palettes independently of OS changes and restores system following', async () => {
+  const entries = new Map<string, string>()
+  vi.stubGlobal('localStorage', { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => entries.set(key, value) })
+  const media = { matches: true, addEventListener() {}, removeEventListener() {} }
+  vi.stubGlobal('matchMedia', () => media)
+  const transport = { request: vi.fn() } as unknown as ConsoleClient
+  const api = browserPreferences('theme-owner', transport).preferences.appearance
+  await api.updatePreferences({ chatFontSize: 18 })
+  for (const [preference, resolvedTheme] of [['horizon', 'day'], ['classic-red', 'day'], ['ember', 'night']] as const) {
+    expect(await api.setPreference(preference)).toMatchObject({ preference, resolvedTheme, chatFontSize: 18 })
+    media.matches = !media.matches
+    expect(await browserPreferences('theme-owner', transport).preferences.appearance.get()).toMatchObject({ preference, resolvedTheme, chatFontSize: 18 })
+  }
+  await api.setPreference('system')
+  media.matches = false
+  expect(await api.get()).toMatchObject({ preference: 'system', resolvedTheme: 'day' })
+  media.matches = true
+  expect(await api.get()).toMatchObject({ preference: 'system', resolvedTheme: 'night' })
+})

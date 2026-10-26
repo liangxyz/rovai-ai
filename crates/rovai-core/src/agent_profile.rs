@@ -493,8 +493,8 @@ pub struct FrozenAgentRuntimeConfig {
     pub model: ResolvedModelSelection,
     pub permissions: AdapterPermissionConfig,
     pub native_session_compatibility_key: Option<String>,
-    pub binding_compatibility_digest: String,
-    pub host_config_digest: String,
+    pub binding_compatibility_digest: Option<String>,
+    pub host_config_digest: Option<String>,
     pub config_digest: String,
 }
 
@@ -1694,17 +1694,22 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
+        // A live Command Host is admitted by its installation identity. Disk
+        // entry observations belong to the Fleet's cold startup branch.
+        let command = runtime.adapter_kind == AdapterKind::CommandCodeCli;
         if adapter_kind != runtime.adapter_kind.as_str()
-            || executable_path != runtime.executable_path
-            || generation != runtime.installation_generation
-            || executable_fingerprint.as_deref() != Some(runtime.executable_fingerprint.as_str())
+            || (!command
+                && (executable_path != runtime.executable_path
+                    || generation != runtime.installation_generation
+                    || executable_fingerprint.as_deref()
+                        != Some(runtime.executable_fingerprint.as_str())))
         {
             return Ok(Some(runtime_blocker(
                 "runtime_snapshot_changed",
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        if path_state != "valid" {
+        if !command && path_state != "valid" {
             return Ok(Some(runtime_blocker(
                 "runtime_path_invalid",
                 json!({
@@ -3489,17 +3494,37 @@ impl AgentProfileService {
         self.gateway.execute(database, envelope, |transaction| {
             let current = transaction
                 .query_row(
-                    "SELECT adapter_kind, version FROM adapter_installation WHERE id = ?1",
-                    [&envelope.payload.installation_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                    "SELECT adapter_kind, version,
+                        executable_path = ?2 AND command_name = ?3 AND source = ?4
+                        AND auth_scope = ?5 AND enabled = ?6
+                     FROM adapter_installation WHERE id = ?1",
+                    params![
+                        envelope.payload.installation_id,
+                        envelope.payload.executable_path,
+                        envelope.payload.command_name,
+                        envelope.payload.source.as_str(),
+                        envelope.payload.auth_scope,
+                        envelope.payload.enabled,
+                    ],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, bool>(2)?)),
                 )
                 .optional()?;
-            let Some((adapter_kind, version)) = current else {
+            let Some((adapter_kind, version, unchanged)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "adapter_installation.not_found",
                     json!({ "installationId": envelope.payload.installation_id }),
                 ));
             };
+            if unchanged {
+                return Ok(CommandHandlerResult::applied(
+                    "adapter_installation.unchanged",
+                    json!({ "installationId": envelope.payload.installation_id, "version": version }),
+                    Some(EntityReference {
+                        entity_type: "adapter_installation".to_string(),
+                        entity_id: envelope.payload.installation_id.clone(),
+                    }),
+                ));
+            }
             if version != envelope.payload.expected_version {
                 return Ok(version_conflict(version));
             }
@@ -4864,8 +4889,10 @@ fn resolve_frozen_runtime_binding_with_snapshot(
         // pre-upgrade member-env sessions) keep that identity only when today's
         // installation/protocol/permission projection still matches exactly.
         // Do not read member env or historical environment plans to decide this.
-        None if native_binding_compatibility_digest
-            == Some(projection.binding_compatibility_digest.as_str()) =>
+        None if adapter_kind != AdapterKind::CommandCodeCli
+            && native_binding_compatibility_digest.is_some()
+            && native_binding_compatibility_digest
+                == projection.binding_compatibility_digest.as_deref() =>
         {
             None
         }
@@ -4894,14 +4921,16 @@ fn resolve_frozen_runtime_binding_with_snapshot(
         host_config_digest: projection.host_config_digest,
         config_digest: String::new(),
     };
-    if let Some(api) = &frozen.custom_api {
+    if let Some(api) = &frozen.custom_api
+        && adapter_kind != AdapterKind::CommandCodeCli
+    {
         let identity = api.identity()?;
-        frozen.host_config_digest = canonical_json_digest(&json!({
+        frozen.host_config_digest = Some(canonical_json_digest(&json!({
             "native": frozen.host_config_digest, "customApi": identity
-        }))?;
-        frozen.binding_compatibility_digest = canonical_json_digest(&json!({
+        }))?);
+        frozen.binding_compatibility_digest = Some(canonical_json_digest(&json!({
             "native": frozen.binding_compatibility_digest, "customApi": identity
-        }))?;
+        }))?);
     }
     frozen.refresh_config_digest()?;
     Ok(Ok(frozen))
@@ -7075,6 +7104,25 @@ mod slow_tests {
             .as_str()
             .expect("installation id")
             .to_string();
+        let unchanged = service
+            .update_installation(
+                &mut database,
+                &user_command(
+                    "unchanged-installation",
+                    UpdateAdapterInstallationCommand {
+                        installation_id: installation_id.clone(),
+                        expected_version: 0,
+                        executable_path: executable_path.to_string_lossy().into_owned(),
+                        command_name: "codex".into(),
+                        source: InstallationSource::Custom,
+                        auth_scope: "default".into(),
+                        enabled: true,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(unchanged.result.code, "adapter_installation.unchanged");
+        assert_eq!(unchanged.result.payload["version"], 1);
         let profile = service
             .get_profile(&database, &profile_id)
             .expect("profile should load")
@@ -8387,8 +8435,8 @@ mod slow_tests {
                     old.binding_compatibility_digest
                 );
                 for previous in [
-                    &old.binding_compatibility_digest,
-                    &hosted.binding_compatibility_digest,
+                    old.binding_compatibility_digest.as_deref().unwrap(),
+                    hosted.binding_compatibility_digest.as_deref().unwrap(),
                     "unknown-binding",
                 ] {
                     let current = resolve_frozen_runtime_binding_with_snapshot(
@@ -8399,9 +8447,12 @@ mod slow_tests {
                     )
                     .unwrap()
                     .unwrap();
-                    if previous == old.binding_compatibility_digest {
+                    if Some(previous) == old.binding_compatibility_digest.as_deref() {
                         assert!(current.custom_api.is_none());
-                        assert_eq!(current.binding_compatibility_digest, previous);
+                        assert_eq!(
+                            current.binding_compatibility_digest.as_deref(),
+                            Some(previous)
+                        );
                         assert_eq!(current.host_config_digest, old.host_config_digest);
                     } else {
                         assert!(current.custom_api.is_some());
@@ -8426,7 +8477,7 @@ mod slow_tests {
                     database.connection(),
                     &changed,
                     None,
-                    Some(&old.binding_compatibility_digest),
+                    old.binding_compatibility_digest.as_deref(),
                 )
                 .unwrap()
                 .unwrap();
@@ -8451,7 +8502,7 @@ mod slow_tests {
                         database.connection(),
                         &changed,
                         None,
-                        Some(&old.binding_compatibility_digest),
+                        old.binding_compatibility_digest.as_deref(),
                     )
                     .unwrap()
                     .is_err(),

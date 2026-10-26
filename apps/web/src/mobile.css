@@ -4,6 +4,7 @@
   --mobile-page: #fff;
   --mobile-unread: var(--conversation-unread);
   --conversation-surface: var(--mobile-page);
+  --execution-surface: var(--mobile-page);
   --surface: var(--mobile-page);
   --home-surface: var(--mobile-page);
   --rail: var(--mobile-page);
@@ -416,7 +417,7 @@ html[data-mobile-web="true"] .new-camp-picker-body .compact-menu-heading { paddi
 html[data-mobile-web="true"] .new-camp-picker-body .compact-menu-heading button { min-height: 44px; padding: 8px 0 8px 16px; color: var(--ink); font-size: 13px; }
 html[data-mobile-web="true"] .new-camp-picker-body .compact-option { width: 100%; min-height: 68px; padding: 12px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; text-align: left; }
 html[data-mobile-web="true"] .new-camp-picker-body .compact-option:last-child { border-bottom: 0; }
-html[data-mobile-web="true"] .new-camp-picker-body .compact-option > span:not(.member-avatar) { flex: 1; min-width: 0; }
+html[data-mobile-web="true"] .new-camp-picker-body .compact-option > span:not(.member-avatar):not(.compact-checkbox) { flex: 1; min-width: 0; }
 html[data-mobile-web="true"] .new-camp-picker-body .compact-option small { overflow-wrap: anywhere; }
 html[data-mobile-web="true"] .new-camp-picker-body .compact-option > svg { flex-shrink: 0; width: 18px; height: 18px; }
 html[data-mobile-web="true"] .new-camp-mobile-member input { flex: 0 0 18px; width: 18px; height: 18px; margin-left: auto; accent-color: var(--conversation-action); }

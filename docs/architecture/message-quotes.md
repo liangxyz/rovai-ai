@@ -2,7 +2,7 @@
 document_type: architecture
 authority: message-quote-ownership-and-projection
 status: accepted
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # 消息选文引用
@@ -24,3 +24,10 @@ Renderer 先将 raw 节点转为文本再替换可信 Mention，Core 将 HTML in
 历史消息与引用不迁移，不新增解析服务、修复队列或第二份正文存储。
 
 草稿与历史共用紧凑引用标签和非模态悬浮气泡；鼠标移入气泡保持打开，整条选文行直接回跳。键盘 focus/ArrowDown/Tab、Escape 与触屏点击使用同一入口；只有草稿可逐段直接移除，不提供撤销入口，移除最后一段后隐藏标签与气泡。公共 Pending 编辑复用已加载的当前会话来源集合，私聊始终限定当前 Conversation。
+
+## 结构化对话与使命引用的选文
+
+用户 Text 的选文保持字面含义，Thread/Mission 引用段映射为其可见标题。Renderer 用真实引用节点
+关联规范正文中的链接范围；Core 从 structured_content_json 按同一段类型构造选文投影。
+原始 bodyAtSelection 仍先校验来源版本，引用 URI 继续用于模型正文与整条复制。
+旧 quote 快照和已冻结输入不重新投影；此修复不改变 Context、Native Binding 或恢复流程。

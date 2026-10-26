@@ -1,3 +1,4 @@
+import { isReferenceAtom, isReferenceSegment, validReferenceAtom, projectReference, referenceIdentity } from './thread-reference'
 import type {
   ComposerAtom,
   ComposerDocument,
@@ -73,6 +74,7 @@ export function cloneComposerDocument(document: ComposerDocument): ComposerDocum
 }
 
 function cloneComposerAtom(atom: ComposerAtom): ComposerAtom {
+  if (isReferenceAtom(atom)) return { ...atom }
   if (atom.type === 'member') {
     return atom.labelFallback === undefined
       ? { type: 'member', agentId: atom.agentId }
@@ -81,7 +83,8 @@ function cloneComposerAtom(atom: ComposerAtom): ComposerAtom {
   if (atom.type === 'skill') {
     return { type: 'skill', skillId: atom.skillId, nameAtSend: atom.nameAtSend }
   }
-  return { type: 'all_members' }
+  if (atom.type === 'all_members') return { type: 'all_members' }
+  throw new Error('Unknown Composer Atom')
 }
 
 export function composerDocumentsEqualDirect(
@@ -114,7 +117,8 @@ function composerAtomsEqual(left: ComposerAtom, right: ComposerAtom): boolean {
       && left.agentId === right.agentId
       && left.labelFallback === right.labelFallback
   }
-  return right.type === 'skill'
+  if (isReferenceAtom(left)) return isReferenceAtom(right) && referenceIdentity(left).id === referenceIdentity(right).id && left.labelFallback === right.labelFallback
+  return left.type === 'skill' && right.type === 'skill'
     && left.skillId === right.skillId
     && left.nameAtSend === right.nameAtSend
 }
@@ -136,7 +140,7 @@ export function validateComposerDocument(value: unknown): value is ComposerDocum
     if (segment.kind !== 'atom'
       || !hasOnlyKeys(segment, ['kind', 'atom'])
       || !validateComposerAtom(segment.atom)) return false
-    if (segment.atom.type === 'member' && segment.atom.labelFallback) {
+    if ((segment.atom.type === 'member' || isReferenceAtom(segment.atom)) && segment.atom.labelFallback) {
       textLength += utf8Length(segment.atom.labelFallback)
       if (textLength > MAX_COMPOSER_TEXT_LENGTH) return false
     }
@@ -158,6 +162,7 @@ export function parseComposerClipboardDocument(value: string): ComposerDocument 
 
 function validateComposerAtom(value: unknown): value is ComposerAtom {
   if (!isRecord(value)) return false
+  if (value.type === 'thread_reference' || value.type === 'mission_reference') return validReferenceAtom(value)
   if (value.type === 'all_members') return Object.keys(value).length === 1
   if (value.type === 'member') {
     return hasOnlyKeys(value, ['type', 'agentId', 'labelFallback'])
@@ -233,6 +238,7 @@ export function composerDocumentToPlainText(
     if (segment.kind === 'text') return segment.text
     const atom = segment.atom
     if (atom.type === 'member') return memberAtomPlainText(atom, memberNames.get(atom.agentId) ?? null)
+    if (isReferenceAtom(atom)) return projectReference(atom)
     if (atom.type === 'all_members') return '@所有队员'
     return `/${atom.nameAtSend}`
   }).join('')
@@ -302,6 +308,10 @@ export function composerDocumentFromLegacyContent(
         kind: 'atom',
         atom: { type: 'skill', skillId: segment.skillId, nameAtSend: segment.nameAtSend }
       })
+    } else if (isReferenceSegment(segment)) {
+      segments.push({ kind: 'atom', atom: 'threadId' in segment
+        ? { type: 'thread_reference', threadId: segment.threadId, labelFallback: segment.titleAtSend }
+        : { type: 'mission_reference', missionId: segment.missionId, labelFallback: segment.titleAtSend } })
     } else {
       throw new Error(`Composer V2 cannot migrate the ${segment.kind} message segment`)
     }
@@ -318,6 +328,8 @@ export function composerDocumentToStructuredContent(
     if (atom.type === 'member') {
       return { kind: 'member_mention', agentId: atom.agentId }
     }
+    if (atom.type === 'thread_reference') return { kind: 'thread_reference', threadId: atom.threadId, titleAtSend: atom.labelFallback ?? atom.threadId }
+    if (atom.type === 'mission_reference') return { kind: 'mission_reference', missionId: atom.missionId, titleAtSend: atom.labelFallback ?? atom.missionId }
     if (atom.type === 'all_members') return { kind: 'all_members_mention' }
     return {
       kind: 'skill_mention',

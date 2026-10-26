@@ -4,7 +4,7 @@ contract: team-templates-v1
 status: accepted
 version: 1
 source_version: v1.72
-last_updated: 2026-10-22
+last_updated: 2026-10-25
 ---
 
 # Team Templates v1
@@ -17,7 +17,7 @@ Team 是 User 维护的具名创建预设，不拥有已创建 Thread 的成员�
 
 `Team = { id, name, memberAgentIds, defaultLeadAgentId, guidance, version }`。
 名称去除首尾空白后为 1–80 个 Unicode scalar；成员为 1–100 个不重复 ID；队长必须在成员中。
-指引去除首尾空白、保留内部换行，最多 1000 个 Unicode scalar，空字符串合法。
+指引去除首尾空白、保留内部换行，最多 10000 个 Unicode scalar，空字符串合法。
 
 - `teams.list {}` 返回按创建时间和 ID 排序的 Team 数组。
 - `teams.save { commandId, command: { teamId, expectedVersion, name, memberAgentIds, defaultLeadAgentId, guidance } }`：新增时前两项为 `null`，服务端生成 ID；编辑提供原版本。成功返回持久回执 `team.saved`，payload 含 `team`。
@@ -26,6 +26,8 @@ Team 是 User 维护的具名创建预设，不拥有已创建 Thread 的成员�
 
 Desktop IPC 和已认证 Web User 操作使用同一 Core 事务与命令回执；不向 Agent 内置工具开放 Team 编辑。
 应用层成功后发布 `teams.changed`，删除同时发布创建偏好失效事件。
+Web 既有 SSE 失效流仅为该事件附加 `teamsChanged: true`；Renderer 在此标记或 `resync`
+时重读团队列表，不因其他 Thread 的消息、运行输出或通知变化重读，不运输 Team 正文。
 
 ## 创建与独立默认配置
 
@@ -61,3 +63,7 @@ Core 首次读取旧 `new-conversation-preferences.json` 时导入 SQLite single
 
 Migration 213 / projection schema 163 创建 `team`、`creation_preferences`、`thread_team_bootstrap`，并
 扩展 Bootstrap v6 准入。沿用 data contract v1.72；失败事务回滚，旧输入与运行绑定不重写。
+
+Migration 214 / projection schema 164 将 Team 和 Thread 启动材料的指引上限扩大至 10000，
+两张表原数据、不可变触发器及外键保留；升级失败原子回滚。已有 Thread 原文不变，不触发补发。
+确认与兼容边界见 [长度上限 R1](../versions/v1.72/model-context-change-team-guidance-limit.md)。

@@ -1087,10 +1087,10 @@ fn insert_batch_run(
             runtime
                 .map(|runtime| serde_json::to_string(&runtime.permissions))
                 .transpose()?,
-            runtime.map(|runtime| runtime.binding_compatibility_digest.as_str()),
+            runtime.and_then(|runtime| runtime.binding_compatibility_digest.as_deref()),
             runtime.map(|runtime| runtime.executable_path.as_str()),
             runtime.map(|runtime| runtime.auth_scope.as_str()),
-            runtime.map(|runtime| runtime.host_config_digest.as_str()),
+            runtime.and_then(|runtime| runtime.host_config_digest.as_deref()),
             runtime.map(|runtime| runtime.protocol_version.as_str()),
             runtime.map(|runtime| runtime.installation_generation),
             runtime.map(|runtime| runtime.search_environment_generation),
@@ -2967,6 +2967,7 @@ mod tests {
                         | crate::agent_profile::AdapterKind::Pi
                         | crate::agent_profile::AdapterKind::CodebuddyCli
                         | crate::agent_profile::AdapterKind::QwenCode
+                        | crate::agent_profile::AdapterKind::MinimaxCodeCli
                         | crate::agent_profile::AdapterKind::GrokBuild
                         | crate::agent_profile::AdapterKind::KiroCli
                         | crate::agent_profile::AdapterKind::ZcodeApp
@@ -3092,6 +3093,23 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture.publish_visible_without_delivery("quoted-reference", "agent", "agent_2");
         fixture.enqueue("initial-steer", "initial work");
+        // Already published weak references must survive claim even after their
+        // targets have disappeared; initial input and Steer share one projector.
+        let reference_id = crate::camp_id::ThreadId::new().to_string();
+        let reference = StructuredThreadMessageSegment::ThreadReference {
+            thread_id: reference_id.clone(),
+            title_at_send: "登录 [发布标题]".into(),
+        };
+        let initial_content = vec![
+            StructuredThreadMessageSegment::Text {
+                text: "initial work".into(),
+            },
+            reference.clone(),
+        ];
+        fixture.database.connection().execute(
+            "UPDATE camp_message SET structured_content_json=?1,content_digest=?2 WHERE id='initial-steer'",
+            params![serde_json::to_string(&initial_content).unwrap(), canonical_content_digest(&initial_content).unwrap()],
+        ).unwrap();
         let run = claim_waiting_delivery_batches(&mut fixture.database, 1)
             .unwrap()
             .remove(0);
@@ -3104,6 +3122,11 @@ mod tests {
             )
             .unwrap();
         let initial = fixture.materialize_run(&run);
+        assert!(
+            initial
+                .runtime_payload
+                .contains(&format!("rovai://thread/{reference_id}"))
+        );
         fixture.database.connection().execute("UPDATE conversation SET native_session_id='steer-session' WHERE id='delivery-queue-agent-1'", []).unwrap();
         let first = ContextService
             .prepare_input_delivery_for_context(&mut fixture.database, &run, 1, &initial)
@@ -3143,6 +3166,7 @@ mod tests {
                 skill_id: "unavailable-skill".into(),
                 name_at_send: "not-authorized".into(),
             },
+            reference,
         ];
         fixture
             .database
@@ -3386,6 +3410,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(projected["messages"].as_array().unwrap().len(), 1);
+        let body = projected["messages"][0]["body"].as_str().unwrap();
+        assert!(body.contains(&format!("rovai://thread/{reference_id}")));
+        assert!(body.contains("登录 \\[发布标题\\]"));
+        assert!(projected["messages"][0].get("references").is_none());
         assert_eq!(
             projected["messages"][0]["quotes"][0]["text"],
             "visible history"

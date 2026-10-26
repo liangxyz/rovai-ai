@@ -2,7 +2,7 @@
 document_type: ui-qa-contract
 authority: renderer-accessibility
 status: accepted
-last_updated: 2026-10-14
+last_updated: 2026-10-25
 ---
 
 # Renderer 无障碍基线
@@ -11,7 +11,7 @@ last_updated: 2026-10-14
 
 - 对比度目标：普通文字至少 4.5:1；控件边界与非文字状态至少 3:1。当前产品明确取消额外焦点装饰，因此不宣称满足 WCAG 的 Focus Visible 条款或完整 AA。
 - 状态必须结合文字、图标、形状或稳定位置，不能只依赖颜色。
-- 八组身份色在实际 Day/Night surface 上验证；身份色不承担状态语义。
+- 八组身份色在所有已注册配色的实际 surface 上验证；身份色不承担状态语义。
 - Diff 同时使用 `+/-`、行号或结构标签；错误与恢复说明保留可读正文和下一步。
 
 ## Keyboard and focus
@@ -24,9 +24,9 @@ last_updated: 2026-10-14
 
 ## Dialogs, drawers and popovers
 
-模态 Radix Dialog/Drawer 负责 focus trap 与 Esc；关闭时不额外将焦点送回入口按钮。提交中可阻止关闭，但必须说明
-忙碌状态。队员头像选择/裁切弹窗按已确认交互作为限定例外：关闭后恢复实际头像入口的 DOM focus，
-不滚动、不增加焦点装饰；详见 [队员身份](../components/member-identity.md)。
+模态 Radix Dialog/Drawer 负责 focus trap 与 Esc。仅按 surface 合同恢复指定入口焦点，其余关闭不自动回焦。
+新对话遵循其 [brief](../../../apps/desktop/.impeccable/surfaces/new-conversation-dialog.md)，头像选择/裁切遵循
+[队员身份](../components/member-identity.md)；回焦不滚动、不增加装饰。提交中可阻止关闭，但必须显示忙碌状态。
 非模态锚定 Popover 不设 focus trap，保留 Esc、点击外部与必要输入定位。原有运行配置下拉框交互不重做。
 Approval Dock 是非模态且不得遮住 Composer/Stop。
 
@@ -40,7 +40,7 @@ Approval Dock 是非模态且不得遮住 Composer/Stop。
 
 一级 surface 覆盖 Loading、Empty、Partial、Error、Disabled、Submitting 与 Recovery。局部失败
 保留 Header、导航、Draft、选择、滚动和焦点；不确定状态必须说明对象、最后已知事实、未知范围和
-下一步。按[主题矩阵](theme-matrix.md)在最小窗口、2K、200% zoom 和双主题中检查所有路径。
+下一步。按[主题矩阵](theme-matrix.md)在最小窗口、2K、200% zoom 和全部配色中检查所有路径。
 
 ## Host assistive technology
 

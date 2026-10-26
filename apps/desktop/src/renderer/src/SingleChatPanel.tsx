@@ -424,7 +424,7 @@ export function SingleChatRunHistory({
   }
 
   return (
-    <section className="single-chat-agent-response" aria-label={uiAttribute("队员回复")} data-single-chat-run-id={run.id} tabIndex={-1}>
+    <section className={`single-chat-agent-response${stopping ? ' is-stopping' : ''}`} aria-label={uiAttribute("队员回复")} data-single-chat-run-id={run.id} tabIndex={-1}>
       <div className="single-chat-agent-column">
         <details
           className={`single-chat-run-history${terminal ? ' is-terminal' : ' is-live'}`}
@@ -443,7 +443,7 @@ export function SingleChatRunHistory({
                 <RunningText text={feedback} />
               </div>
             )}
-            {stopping && <div className="process-action cancelling" role="status"><UiText zh={"正在提交停止请求，完成后即可继续发送。"} /></div>}
+            {stopping && <div className="run-stop-feedback" role="status"><UiText zh="正在停止…" /></div>}
             {grouped.length === 0 && run.status === 'failed' && (
               <p className="single-chat-process-note is-error"><UiText zh={"本轮回复失败，可以重新发送。"} /></p>
             )}
@@ -1704,7 +1704,7 @@ export function SingleChatPanel({
           {!sending && currentSnapshot && currentSnapshot.messages.length === 0 && <div className="single-chat-empty"><strong><UiText zh={"和 "} />{selectedMember?.displayName}<UiText zh={" 单独聊聊"} /></strong><span><UiText zh={"发送第一条消息开始这段对话。"} /></span></div>}
           {currentSnapshot && <SingleChatTranscript snapshot={currentSnapshot} now={now} cancelling={cancelling} onNotify={onNotify} />}
           {sending && !activeRun && <div className="process-action current single-chat-send-feedback" role="status">
-            <span className="process-spinner" aria-hidden="true" /><RunningText text={uiAttribute("连接中")} />
+            <span className="process-spinner" aria-hidden="true" /><RunningText text={uiAttribute("准备中…")} />
           </div>}
         </div>
       </section>

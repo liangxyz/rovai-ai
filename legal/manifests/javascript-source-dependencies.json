@@ -3,19 +3,19 @@
   "ecosystem": "javascript",
   "distribution_scope": "source",
   "lockfile": "pnpm-lock.yaml",
-  "package_instances": 494,
-  "production_instances": 149,
+  "package_instances": 495,
+  "production_instances": 150,
   "development_instances": 345,
   "coverage": {
-    "package_instances": 494,
-    "with_package_legal_files": 473,
+    "package_instances": 495,
+    "with_package_legal_files": 474,
     "with_curated_clarification": 1,
     "metadata_only": 20,
     "zero_legal_files": 20,
     "with_notice": 0,
     "with_notice_copyright_or_patent": 1,
     "with_multiple_license_files": 1,
-    "legal_file_count": 476
+    "legal_file_count": 477
   },
   "dependencies": [
     {
@@ -11009,6 +11009,36 @@
         {
           "path": "legal/licenses/javascript/picomatch@4.0.5/LICENSE",
           "sha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "pinyin-pro@3.29.5",
+      "name": "pinyin-pro",
+      "version": "3.29.5",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "zh-lx",
+      "homepage": "https://pinyin-pro.cn",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/pinyin-pro@3.29.5/LICENSE",
+          "sha256": "824f6069c5a59b0c1650d0fb9f8d091866c6019eb761c8e658dfc03f001eabd2",
+          "size": 1070
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/pinyin-pro@3.29.5/LICENSE",
+          "sha256": "824f6069c5a59b0c1650d0fb9f8d091866c6019eb761c8e658dfc03f001eabd2"
         }
       ],
       "notice_file_present": false

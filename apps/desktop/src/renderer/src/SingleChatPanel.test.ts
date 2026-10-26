@@ -175,7 +175,7 @@ describe('Single Chat presentation', () => {
           expect(markup).toContain('继续核对结果')
           expect(markup).not.toMatch(/连接中|执行中/)
         } else {
-          expect(markup).toContain(`<span>${status === 'queued' ? '连接中' : '执行中'}</span>`)
+          expect(markup).toContain(`<span>${status === 'queued' ? '启动中…' : '执行中'}</span>`)
         }
       }
     }
@@ -206,7 +206,9 @@ describe('Single Chat presentation', () => {
       }))
     expect(markupFor('waiting')).toContain('等待继续')
     expect(markupFor('waiting')).not.toMatch(/Thinking|连接中|思考中/)
-    expect(markupFor('running', true)).toContain('正在提交停止请求')
+    expect(markupFor('running', true)).toContain('正在停止…')
+    expect(markupFor('running', true)).not.toContain('process-action cancelling')
+    expect(markupFor('cancelled', true)).not.toContain('正在停止')
     expect(markupFor('running', true)).not.toMatch(/Thinking|连接中|思考中/)
     expect(markupFor('failed')).toContain('运行 39 分 17 秒后失败')
     expect(markupFor('failed')).not.toMatch(/Thinking|连接中|思考中/)
@@ -334,7 +336,7 @@ describe('Single Chat presentation', () => {
     expect(source).toContain('draftRevision: current.draft.revision')
     expect(source).toContain('<AttachmentCard')
     expect(source).not.toContain('preparedAttachments')
-    expect(source).toContain('className="single-chat-agent-response"')
+    expect(source).toContain('className={`single-chat-agent-response')
     expect(source).not.toContain('single-chat-agent-bubble')
   })
 

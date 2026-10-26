@@ -1071,6 +1071,7 @@ impl CollaborationService {
                 envelope.execution_epoch,
                 &envelope.payload,
                 &camp_id,
+                &[],
             )
         })
     }
@@ -3541,6 +3542,7 @@ pub(crate) fn create_camp_in_tx(
     execution_epoch: Option<i64>,
     command: &CreateThreadCommand,
     camp_id: &ThreadId,
+    additional_member_ids: &[String],
 ) -> Result<CommandHandlerResult> {
     validate_project_path(&command.project_path)?;
     let normalized_name = normalize_camp_name(command.name.as_deref().unwrap_or(""));
@@ -3562,9 +3564,9 @@ pub(crate) fn create_camp_in_tx(
             "This collaboration mode is not available",
         ));
     }
-    let resolved;
+    let mut resolved = command.clone();
     let mut guidance = None;
-    let command = if let Some(selection) = &command.team {
+    if let Some(selection) = &command.team {
         let Some(team) = crate::teams::get_on_connection(transaction, &selection.team_id)? else {
             return Ok(rejected(
                 "team.unavailable",
@@ -3577,18 +3579,20 @@ pub(crate) fn create_camp_in_tx(
                 "The selected Team has changed. Review it before creating a Thread",
             ));
         }
-        resolved = CreateThreadCommand {
-            member_agent_ids: team.roster.member_agent_ids,
-            default_lead_agent_id: team.roster.default_lead_agent_id,
-            ..command.clone()
-        };
+        resolved.member_agent_ids = team.roster.member_agent_ids;
+        resolved.default_lead_agent_id = team.roster.default_lead_agent_id;
         if !team.guidance.is_empty() {
             guidance = Some(team.guidance);
         }
-        &resolved
-    } else {
-        command
-    };
+    }
+    // Mission description mentions join the resolved roster, never replace the
+    // Team's members or Lead with the caller's cached projection.
+    for id in additional_member_ids {
+        if !resolved.member_agent_ids.contains(id) {
+            resolved.member_agent_ids.push(id.clone());
+        }
+    }
+    let command = &resolved;
     if command.member_agent_ids.is_empty() {
         return Ok(rejected(
             "camp.no_present_members",
@@ -4076,7 +4080,7 @@ fn load_structured_draft_submission(
 fn load_structured_content_submission(
     transaction: &Transaction<'_>,
     camp_id: &str,
-    content: StructuredThreadMessageContent,
+    mut content: StructuredThreadMessageContent,
     source_attachments: Vec<LocalAttachmentSourceRef>,
     reply_to_camp_message_id: Option<String>,
     recipient_required: bool,
@@ -4107,6 +4111,17 @@ fn load_structured_content_submission(
         }
     }
 
+    if let Err(rejection) =
+        crate::thread_reference::capture_titles(transaction, camp_id, &mut content)?
+    {
+        return Ok(Err(rejection));
+    }
+    if crate::thread_reference::contains_reference(&content)
+        && !content.iter().any(|segment| matches!(segment, StructuredThreadMessageSegment::Text { text } if !text.trim().is_empty()))
+        && source_attachments.is_empty() && prepared_attachment_ids.is_empty()
+    {
+        return Ok(Err(rejected("camp_message.empty_body", "请补充本轮内容")));
+    }
     let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();
     for agent_id in &mentioned_agent_ids {
@@ -5113,8 +5128,19 @@ fn generated_camp_name(
     content: &[StructuredThreadMessageSegment],
     member_name: impl FnMut(&str) -> Option<String>,
 ) -> Result<String> {
-    let title_content = content_after_leading_mentions(content);
-    let title = normalize_camp_name(&render_plain_text(title_content, member_name)?)
+    let title_content: Vec<_> = content_after_leading_mentions(content)
+        .iter()
+        .map(|segment| match segment {
+            StructuredThreadMessageSegment::ThreadReference { title_at_send, .. }
+            | StructuredThreadMessageSegment::MissionReference { title_at_send, .. } => {
+                StructuredThreadMessageSegment::Text {
+                    text: title_at_send.clone(),
+                }
+            }
+            other => other.clone(),
+        })
+        .collect();
+    let title = normalize_camp_name(&render_plain_text(&title_content, member_name)?)
         .chars()
         .take(CAMP_NAME_MAX_SCALARS)
         .collect::<String>();
@@ -7561,6 +7587,26 @@ mod slow_tests {
             "@手写名字 仍是标题文字"
         );
 
+        assert_eq!(
+            generated_camp_name(
+                &[
+                    Segment::Text {
+                        text: "参考 ".into()
+                    },
+                    Segment::ThreadReference {
+                        thread_id: ThreadId::new().to_string(),
+                        title_at_send: "登录改造".into()
+                    },
+                    Segment::Text {
+                        text: " 检查重试".into()
+                    },
+                ],
+                |_| None
+            )
+            .unwrap(),
+            "参考 登录改造 检查重试"
+        );
+
         let mention_only = vec![Segment::MemberMention {
             agent_id: "agent_1".to_string(),
         }];
@@ -9350,6 +9396,25 @@ mod slow_tests {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
+        let reference_source = service
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "withdraw-reference-source",
+                    None,
+                    CreateThreadCommand::for_test(
+                        directory
+                            .join("reference-workspace")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                ),
+            )
+            .unwrap();
+        let reference_id = reference_source.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let (output, mut changes) = tokio::sync::mpsc::unbounded_channel();
         database.message_changes = Some(output);
         let send = user_envelope(
@@ -9360,6 +9425,10 @@ mod slow_tests {
                 steer_targets: None,
                 camp_id: camp_id.clone(),
                 content: composer_document(vec![
+                    Segment::ThreadReference {
+                        thread_id: reference_id,
+                        title_at_send: "旧标题".into(),
+                    },
                     Segment::MemberMention {
                         agent_id: "agent_2".to_string(),
                     },
