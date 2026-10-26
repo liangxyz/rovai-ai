@@ -952,6 +952,8 @@
   "下次": "Next",
   "本地时间": "Local time",
   "已关闭，可在任务操作中运行一次。": "Disabled. Can be run once in task operations.",
+  "对话名自动附加运行日期": "Append the run date to Conversation names",
+  "每次运行新建的对话会在名称后加上当天日期，如“每日简报 2026-10-22”。": "Each run adds the day's date after the name of the Conversation it creates, e.g. \"Daily brief 2026-10-22\".",
   "通知到渠道": "Notify to channel",
   "由当前队员的渠道 Bot 发送结果": "Sent by the channel Bot of the current teammate",
   "完成后通知": "Notify on completion",

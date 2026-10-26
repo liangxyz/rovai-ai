@@ -910,6 +910,7 @@ mod tests {
                                     at: due.format("%H:%M").to_string(),
                                 },
                                 notify_channels: Vec::new(),
+                                append_run_date_to_title: false,
                             },
                         },
                     )

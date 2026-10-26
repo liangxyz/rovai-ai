@@ -17,7 +17,7 @@ Automation 定义至少包含：
 
 ```text
 id, version, name, prompt, enabled, memberId, projectRef,
-schedule, notifyChannels, nextRunAt, lastRun, createdAt, updatedAt
+schedule, notifyChannels, appendRunDateToTitle, nextRunAt, lastRun, createdAt, updatedAt
 ```
 
 `projectRef` 是 `{kind: quick_chat}` 或 `{kind: directory, path: canonicalAbsolutePath}`。目录在写入定义时必须存在并
@@ -25,6 +25,14 @@ schedule, notifyChannels, nextRunAt, lastRun, createdAt, updatedAt
 
 名称去除首尾空白并折叠内部空白，最多 80 个 Unicode scalar。创建时名称为空则从规范化 Prompt 取前 20 个
 Unicode scalar，剩余内容以 `…` 表示。普通 Prompt 编辑不改名；显式提交空名称时按新 Prompt 重新派生。
+
+`appendRunDateToTitle` 默认 `false`，创建请求省略时按关闭处理；更新请求省略时保留已保存的值。开启后，每次
+occurrence 新建的 Conversation 标题为 `<任务名> YYYY-MM-DD`：日期取领取该 occurrence 的实际启动时间，按 Host
+本地时区，手动“立即运行”同样适用。标题只在领取时计算一次，数据库标题与 `camp.created` 事件一致。任务名与
+Conversation 标题都限制为 80 个 Unicode scalar，附加日期时只缩短名称部分，日期完整保留。该选项不改变
+Automation 自身的名称，也不改动已创建的 Conversation。它保存在 fork 自有的 `fork_automation_option` 表中，
+首次开启时按需创建，不属于上游数据契约，也不占用 `schema_migration` 编号；缺表或缺行按关闭处理，删除
+Automation 时同步删除该行。
 
 每个计划 occurrence 的稳定身份是 `(automationId, scheduledFor)`，其中 `scheduledFor` 使用 UTC RFC 3339。
 领取时冻结以下字段，后续定义编辑不得改变它们：

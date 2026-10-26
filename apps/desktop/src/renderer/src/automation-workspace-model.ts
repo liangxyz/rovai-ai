@@ -8,6 +8,7 @@ export type AutomationDraft = {
   projectRef: AutomationProjectRef
   schedule: AutomationSchedule
   notifyChannels: AutomationNotifyChannel[]
+  appendRunDateToTitle: boolean
 }
 
 export type TemplateId = 'issue-pr' | 'weekly-report' | 'release-notes'
@@ -84,7 +85,8 @@ export function defaultDraft(memberId: string): AutomationDraft {
     memberId,
     projectRef: { kind: 'quick_chat' },
     schedule: { kind: 'daily', at: '09:00' },
-    notifyChannels: []
+    notifyChannels: [],
+    appendRunDateToTitle: false
   }
 }
 
@@ -95,7 +97,8 @@ export function draftFromAutomation(automation: AutomationView): AutomationDraft
     memberId: automation.memberId,
     projectRef: automation.projectRef,
     schedule: automation.schedule,
-    notifyChannels: automation.notifyChannels
+    notifyChannels: automation.notifyChannels,
+    appendRunDateToTitle: automation.appendRunDateToTitle === true
   }
 }
 

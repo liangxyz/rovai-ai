@@ -33,7 +33,7 @@ let automations: AutomationView[] = Object.entries(templates).map(([id, template
       scheduledFor: createdAt, createdAt, endedAt: status === 'running' ? null : createdAt, notificationStatus: position === 3 ? 'failed' : 'none' }
   })
   return { automationId: id, version: 1, name: template.name, prompt: template.prompt, schedule: template.schedule,
-    enabled: index !== 2, memberId: agents[index].agentId, projectRef: { kind: 'directory', path: projects[0].projectPath }, notifyChannels: [],
+    enabled: index !== 2, memberId: agents[index].agentId, projectRef: { kind: 'directory', path: projects[0].projectPath }, notifyChannels: [], appendRunDateToTitle: false,
     nextRunAt: index === 2 ? null : '2026-09-08T01:00:00Z', lastRun: history[id][0], createdAt: now, updatedAt: now }
 })
 if (params.has('empty')) automations = []

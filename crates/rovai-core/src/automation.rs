@@ -155,6 +155,10 @@ pub struct CreateAutomationCommand {
     pub schedule: AutomationSchedule,
     #[serde(default)]
     pub notify_channels: Vec<AutomationNotifyChannel>,
+    /// Append the actual start date (`YYYY-MM-DD`, Host local time) to the title of every
+    /// Conversation this Automation creates. Omitted means off.
+    #[serde(default)]
+    pub append_run_date_to_title: bool,
 }
 
 impl sealed::Sealed for CreateAutomationCommand {}
@@ -195,6 +199,9 @@ pub struct UpdateAutomationCommand {
     pub notify_channels: Option<Vec<AutomationNotifyChannel>>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// Omitted keeps the stored choice.
+    #[serde(default)]
+    pub append_run_date_to_title: Option<bool>,
 }
 
 impl sealed::Sealed for UpdateAutomationCommand {}
@@ -292,6 +299,7 @@ pub struct AutomationView {
     pub project_ref: AutomationProjectRef,
     pub schedule: AutomationSchedule,
     pub notify_channels: Vec<AutomationNotifyChannel>,
+    pub append_run_date_to_title: bool,
     pub next_run_at: Option<String>,
     pub last_run: Option<AutomationRunSummary>,
     pub created_at: String,
@@ -523,6 +531,7 @@ struct AutomationRecord {
     project_ref: AutomationProjectRef,
     schedule: AutomationSchedule,
     notify_channels: Vec<AutomationNotifyChannel>,
+    append_run_date_to_title: bool,
     next_run_at: Option<String>,
     created_at: String,
     updated_at: String,
@@ -617,6 +626,9 @@ impl AutomationService {
                     now_text,
                 ],
             )?;
+            if command.append_run_date_to_title {
+                write_title_date_option(transaction, &automation_id, true)?;
+            }
             let view = load_automation_view(transaction, &automation_id)?
                 .context("created Automation is unavailable")?;
             Ok(CommandHandlerResult::applied(
@@ -753,6 +765,9 @@ impl AutomationService {
                     now_text,
                 ],
             )?;
+            if let Some(append) = command.append_run_date_to_title {
+                write_title_date_option(transaction, &command.automation_id, append)?;
+            }
             let view = load_automation_view(transaction, &command.automation_id)?
                 .context("updated Automation is unavailable")?;
             Ok(CommandHandlerResult::applied(
@@ -832,6 +847,7 @@ impl AutomationService {
                 "DELETE FROM automation WHERE id = ?1",
                 [&command.automation_id],
             )?;
+            delete_title_date_option(transaction, &command.automation_id)?;
             Ok(CommandHandlerResult::applied(
                 "automation.deleted",
                 json!({ "automationId": command.automation_id, "deleted": true }),
@@ -1363,7 +1379,11 @@ fn claim_occurrence_in_tx(
         transaction,
         ScheduledAutomationAdmissionInput {
             automation_run_id: run_id.clone(),
-            automation_name: record.name.clone(),
+            automation_name: run_title(
+                &record.name,
+                record.append_run_date_to_title,
+                &now.with_timezone(&Local),
+            ),
             prompt: record.prompt.clone(),
             member_id: record.member_id.clone(),
             project_binding_kind: record.project_ref.binding_kind(),
@@ -2267,6 +2287,7 @@ fn load_automation_record(
             row.get::<_, Option<String>>(9)?, row.get::<_, String>(10)?, row.get::<_, String>(11)?, row.get::<_, Option<i64>>(12)?,
         )),
     ).optional()?.map(|row| Ok(AutomationRecord {
+        append_run_date_to_title: read_title_date_option(connection, &row.0)?,
         id: row.0,
         version: row.1,
         name: row.2,
@@ -2353,6 +2374,7 @@ fn load_automation_view(
         project_ref: record.project_ref,
         schedule: record.schedule,
         notify_channels: record.notify_channels,
+        append_run_date_to_title: record.append_run_date_to_title,
         next_run_at: record.next_run_at,
         last_run,
         created_at: record.created_at,
@@ -2423,6 +2445,81 @@ fn normalized_or_derived_name(name: Option<&str>, prompt: &str) -> Result<String
         anyhow::bail!("Automation name is too long");
     }
     Ok(name)
+}
+
+/// Fork-owned storage for the per-Automation "append run date to Conversation title" choice.
+/// It deliberately lives outside the upstream data contract (no schema_migration receipt), so
+/// merging upstream schema changes never competes for a migration number. A missing table or
+/// row means the option is off.
+const TITLE_DATE_OPTION_TABLE: &str = "fork_automation_option";
+
+fn title_date_option_table_exists(connection: &rusqlite::Connection) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [TITLE_DATE_OPTION_TABLE],
+        |row| row.get(0),
+    )?)
+}
+
+fn read_title_date_option(connection: &rusqlite::Connection, automation_id: &str) -> Result<bool> {
+    if !title_date_option_table_exists(connection)? {
+        return Ok(false);
+    }
+    Ok(connection
+        .query_row(
+            "SELECT append_run_date_to_title FROM fork_automation_option WHERE automation_id = ?1",
+            [automation_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+fn write_title_date_option(
+    transaction: &Transaction<'_>,
+    automation_id: &str,
+    append: bool,
+) -> Result<()> {
+    if !append && !title_date_option_table_exists(transaction)? {
+        return Ok(());
+    }
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS fork_automation_option (
+            automation_id TEXT PRIMARY KEY CHECK(length(trim(automation_id)) > 0),
+            append_run_date_to_title INTEGER NOT NULL DEFAULT 0
+                CHECK(append_run_date_to_title IN (0, 1))
+        )",
+    )?;
+    transaction.execute(
+        "INSERT INTO fork_automation_option(automation_id, append_run_date_to_title)
+         VALUES (?1, ?2)
+         ON CONFLICT(automation_id) DO UPDATE SET append_run_date_to_title = excluded.append_run_date_to_title",
+        params![automation_id, append],
+    )?;
+    Ok(())
+}
+
+fn delete_title_date_option(transaction: &Transaction<'_>, automation_id: &str) -> Result<()> {
+    if title_date_option_table_exists(transaction)? {
+        transaction.execute(
+            "DELETE FROM fork_automation_option WHERE automation_id = ?1",
+            [automation_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Title of the Conversation created for one occurrence. The date is the actual start date in
+/// the Host's local time zone. Automation names and Conversation titles share the same 80
+/// Unicode-scalar limit, so only the name part is shortened to make room for ` YYYY-MM-DD`.
+fn run_title(name: &str, append_date: bool, started_at: &DateTime<Local>) -> String {
+    if !append_date {
+        return name.to_string();
+    }
+    let date = started_at.format("%Y-%m-%d").to_string();
+    let budget = MAX_NAME_SCALARS.saturating_sub(date.chars().count() + 1);
+    let head: String = name.chars().take(budget).collect();
+    format!("{} {date}", head.trim_end())
 }
 
 pub fn derive_name(prompt: &str) -> String {
@@ -2858,6 +2955,7 @@ mod tests {
                     AutomationNotifyChannel::Feishu,
                     AutomationNotifyChannel::Dingtalk,
                 ],
+                append_run_date_to_title: false,
             },
         );
         let execution = service
@@ -2878,6 +2976,191 @@ mod tests {
             derive_name("一二三四五六七八九十一二三四五六七八九十一"),
             "一二三四五六七八九十一二三四五六七八九十…"
         );
+    }
+
+    #[test]
+    fn run_title_appends_the_local_start_date_and_keeps_the_limit() {
+        let started = Local.with_ymd_and_hms(2026, 10, 22, 23, 59, 58).unwrap();
+        assert_eq!(run_title("每日简报", false, &started), "每日简报");
+        assert_eq!(run_title("每日简报", true, &started), "每日简报 2026-10-22");
+        // The date is never cut: only the name makes room, counted in Unicode scalars.
+        let long = "报".repeat(80);
+        let titled = run_title(&long, true, &started);
+        assert_eq!(titled.chars().count(), MAX_NAME_SCALARS);
+        assert!(titled.ends_with(" 2026-10-22"));
+        assert_eq!(titled.chars().filter(|c| *c == '报').count(), 69);
+        let emoji = run_title(&"😀".repeat(80), true, &started);
+        assert_eq!(emoji.chars().count(), MAX_NAME_SCALARS);
+        assert!(emoji.ends_with(" 2026-10-22"));
+        // Trailing space of a shortened name does not leave a double space before the date.
+        let spaced = run_title(&format!("{} x", "a".repeat(68)), true, &started);
+        assert!(!spaced.contains("  "));
+    }
+
+    #[test]
+    fn run_date_title_option_is_off_by_default_persists_and_survives_partial_updates() {
+        let service = AutomationService::default();
+        let (mut database, directory, quick_chat_path) = test_database();
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let titles = |database: &Database| -> Vec<String> {
+            let mut statement = database
+                .connection()
+                .prepare("SELECT title FROM camp ORDER BY created_at, id")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let run = |database: &mut Database, command_id: &str, automation_id: &str| {
+            let result = service
+                .run_now(
+                    database,
+                    &user_command(
+                        command_id,
+                        RunAutomationCommand {
+                            automation_id: automation_id.to_string(),
+                        },
+                    ),
+                    CURRENT_USER_ID,
+                    &quick_chat_path,
+                )
+                .unwrap();
+            assert_eq!(result.result.payload["status"], "started");
+            let camp_id = result.result.payload["threadId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            // Finish the run so the next manual run is not skipped as an overlap.
+            database
+                .connection()
+                .execute(
+                    "UPDATE automation_run SET status='failed', reason='no_result', ended_at=started_at WHERE camp_id=?1",
+                    [&camp_id],
+                )
+                .unwrap();
+            camp_id
+        };
+        let update = |database: &mut Database,
+                      command_id: &str,
+                      version: i64,
+                      id: &str,
+                      name: Option<&str>,
+                      append: Option<bool>| {
+            let execution = service
+                .update(
+                    database,
+                    &user_command(
+                        command_id,
+                        UpdateAutomationCommand {
+                            automation_id: id.to_string(),
+                            expected_version: version,
+                            name: name.map(str::to_string),
+                            prompt: None,
+                            member_id: None,
+                            project_ref: None,
+                            schedule: None,
+                            notify_channels: None,
+                            enabled: None,
+                            append_run_date_to_title: append,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(
+                execution.result.status,
+                crate::command::CommandResultStatus::Applied
+            );
+            execution.result.payload
+        };
+
+        // A database that never stored the option reads it as off, and the legacy request
+        // shape (no field at all) creates a definition with the option off.
+        let legacy: CreateAutomationCommand = serde_json::from_value(json!({
+            "name": "每日简报", "prompt": "Summarize.", "memberId": "agent_1",
+            "projectRef": {"kind": "quick_chat"}, "schedule": {"kind": "manual"}
+        }))
+        .unwrap();
+        assert!(!legacy.append_run_date_to_title);
+        assert!(!title_date_option_table_exists(database.connection()).unwrap());
+        let created = service
+            .create(&mut database, &user_command("create-legacy", legacy))
+            .unwrap();
+        let id = created.result.payload["automationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(created.result.payload["appendRunDateToTitle"], false);
+        // Turning an unset option off never creates the side table.
+        update(&mut database, "update-noop", 1, &id, None, Some(false));
+        assert!(!title_date_option_table_exists(database.connection()).unwrap());
+
+        let off_camp = run(&mut database, "run-off", &id);
+        assert_eq!(titles(&database), vec!["每日简报".to_string()]);
+
+        // Enable: persisted, visible in the view, and applied to the next Conversation title and event.
+        let enabled = update(&mut database, "update-on", 2, &id, None, Some(true));
+        assert_eq!(enabled["appendRunDateToTitle"], true);
+        let on_camp = run(&mut database, "run-on", &id);
+        let expected = format!("每日简报 {today}");
+        assert_eq!(
+            titles(&database),
+            vec!["每日简报".to_string(), expected.clone()]
+        );
+        let event_title: String = database
+            .connection()
+            .query_row(
+                "SELECT json_extract(payload_json,'$.title') FROM event_log WHERE camp_id=?1 AND event_type='camp.created'",
+                [&on_camp],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_title, expected);
+
+        // Partial updates keep the choice; renaming changes later titles only; the stored
+        // Automation name is never decorated and earlier Conversations are untouched.
+        let renamed = update(&mut database, "update-name", 3, &id, Some("周报"), None);
+        assert_eq!(renamed["appendRunDateToTitle"], true);
+        assert_eq!(renamed["name"], "周报");
+        let renamed_camp = run(&mut database, "run-renamed", &id);
+        let stored = |database: &Database, camp: &str| -> String {
+            database
+                .connection()
+                .query_row("SELECT title FROM camp WHERE id=?1", [camp], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(stored(&database, &off_camp), "每日简报");
+        assert_eq!(stored(&database, &on_camp), expected);
+        assert_eq!(stored(&database, &renamed_camp), format!("周报 {today}"));
+
+        // Disable again, then delete: the option row goes with the definition.
+        let disabled = update(&mut database, "update-off", 4, &id, None, Some(false));
+        assert_eq!(disabled["appendRunDateToTitle"], false);
+        let off_again = run(&mut database, "run-off-again", &id);
+        assert_eq!(stored(&database, &off_again), "周报");
+        service
+            .delete(
+                &mut database,
+                &user_command(
+                    "delete",
+                    DeleteAutomationCommand {
+                        automation_id: id.clone(),
+                        expected_version: 5,
+                    },
+                ),
+            )
+            .unwrap();
+        let leftover: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM fork_automation_option", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(leftover, 0);
+        remove_test_database(database, directory);
     }
 
     #[test]
@@ -3016,6 +3299,7 @@ mod tests {
                         schedule: None,
                         notify_channels: None,
                         enabled: None,
+                        append_run_date_to_title: None,
                     },
                 ),
             )
@@ -3238,6 +3522,7 @@ mod tests {
                                 AutomationNotifyChannel::Lark,
                                 AutomationNotifyChannel::Dingtalk,
                             ],
+                            append_run_date_to_title: false,
                         },
                     ),
                 )
@@ -3502,6 +3787,7 @@ mod tests {
                             at: local_due.format("%H:%M").to_string(),
                         },
                         notify_channels: Vec::new(),
+                        append_run_date_to_title: false,
                     },
                 ),
             )
@@ -3622,6 +3908,7 @@ mod tests {
                         project_ref: AutomationProjectRef::QuickChat,
                         schedule: schedule.clone(),
                         notify_channels: Vec::new(),
+                        append_run_date_to_title: false,
                     },
                 ),
             )
@@ -3657,6 +3944,7 @@ mod tests {
                         schedule: Some(schedule),
                         notify_channels: Some(Vec::new()),
                         enabled: None,
+                        append_run_date_to_title: None,
                     },
                 ),
             )
@@ -3737,6 +4025,7 @@ mod tests {
                             }),
                             notify_channels: None,
                             enabled: Some(true),
+                            append_run_date_to_title: None,
                         },
                     ),
                 )
@@ -4050,6 +4339,7 @@ mod tests {
                             at: local_due.format("%H:%M").to_string(),
                         },
                         notify_channels: Vec::new(),
+                        append_run_date_to_title: false,
                     },
                 ),
             )
@@ -4077,6 +4367,7 @@ mod tests {
                                 at: local_due.format("%H:%M").to_string(),
                             },
                             notify_channels: Vec::new(),
+                            append_run_date_to_title: false,
                         },
                     ),
                 )

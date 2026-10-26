@@ -178,6 +178,10 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       {automation?.nextRunAt && <p className="automation-next-run"><UiText zh={"下次 "} /><time dateTime={automation.nextRunAt}>{dateTimeLabel(automation.nextRunAt)}</time><span><UiText zh={"本地时间"} /></span></p>}
       {automation && !automation.enabled && <p className="automation-next-run"><UiText zh={"已关闭，可在任务操作中运行一次。"} /></p>}
     </section>
+    <label className="automation-title-date-option">
+      <input type="checkbox" checked={draft.appendRunDateToTitle} disabled={busy} onChange={(event) => onChange((current) => ({ ...current, appendRunDateToTitle: event.target.checked }))} />
+      <span><strong><UiText zh={"对话名自动附加运行日期"} /></strong><small><UiText zh={"每次运行新建的对话会在名称后加上当天日期，如“每日简报 2026-10-22”。"} /></small></span>
+    </label>
     <details className="automation-channel-disclosure" onToggle={(event) => setChannelsOpen(event.currentTarget.open)}>
       <summary><span className="automation-channel-symbol"><AutomationGlyph name="channel" /></span><span><strong><UiText zh={"通知到渠道"} /></strong><small><UiText zh={"由当前队员的渠道 Bot 发送结果"} /></small></span><span className="automation-channel-count">{draft.notifyChannels.length ? draft.notifyChannels.map((channel) => uiAttribute(CHANNEL_PROVIDER_BRANDS[channel].name)).join('、') : uiAttribute("未选择")}</span><AutomationGlyph name="chevron" /></summary>
       <fieldset className="automation-channel-options"><legend className="sr-only"><UiText zh={"完成后通知"} /></legend>

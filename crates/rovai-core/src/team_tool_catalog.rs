@@ -849,6 +849,7 @@ fn automation_view_schema() -> Value {
             "projectRef": automation_project_ref_schema(),
             "schedule": automation_stored_schedule_schema(),
             "notifyChannels": automation_notify_schema(),
+            "appendRunDateToTitle": {"type": "boolean"},
             "nextRunAt": {"type": ["string", "null"]},
             "lastRun": {"oneOf": [automation_run_summary_schema(), {"type": "null"}]},
             "createdAt": {"type": "string"},

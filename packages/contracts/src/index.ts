@@ -4159,6 +4159,7 @@ export interface AutomationView {
   projectRef: AutomationProjectRef
   schedule: AutomationSchedule
   notifyChannels: AutomationNotifyChannel[]
+  appendRunDateToTitle: boolean
   nextRunAt: string | null
   lastRun: AutomationRunSummary | null
   createdAt: string
@@ -4184,6 +4185,7 @@ export interface CreateAutomationCommand {
   projectRef: AutomationProjectRef
   schedule: AutomationSchedule
   notifyChannels: AutomationNotifyChannel[]
+  appendRunDateToTitle?: boolean
 }
 
 export interface UpdateAutomationCommand {
@@ -4196,6 +4198,7 @@ export interface UpdateAutomationCommand {
   schedule?: AutomationSchedule
   notifyChannels?: AutomationNotifyChannel[]
   enabled?: boolean
+  appendRunDateToTitle?: boolean
 }
 
 export type CoreMethod =
