@@ -3007,17 +3007,40 @@ mod tests {
     fn run_date_title_option_is_off_by_default_persists_and_survives_partial_updates() {
         let service = AutomationService::default();
         let (mut database, directory, quick_chat_path) = test_database();
-        let today = Local::now().format("%Y-%m-%d").to_string();
-        let titles = |database: &Database| -> Vec<String> {
-            let mut statement = database
+        let title_of = |database: &Database, camp_id: &str| -> String {
+            database
                 .connection()
-                .prepare("SELECT title FROM camp ORDER BY created_at, id")
+                .query_row("SELECT title FROM camp WHERE id=?1", [camp_id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        // Expected date comes from the run's own recorded start, in Host local time, so the
+        // test cannot disagree with the code across midnight.
+        let started_date = |database: &Database, camp_id: &str| -> String {
+            let started_at: String = database
+                .connection()
+                .query_row(
+                    "SELECT started_at FROM automation_run WHERE camp_id=?1",
+                    [camp_id],
+                    |row| row.get(0),
+                )
                 .unwrap();
-            statement
-                .query_map([], |row| row.get::<_, String>(0))
+            parse_timestamp(&started_at)
                 .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
+                .with_timezone(&Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        };
+        let finish = |database: &Database, camp_id: &str| {
+            // Let the next manual run start instead of being skipped as an overlap.
+            database
+                .connection()
+                .execute(
+                    "UPDATE automation_run SET status='failed', reason='no_result', ended_at=started_at WHERE camp_id=?1",
+                    [camp_id],
+                )
+                .unwrap();
         };
         let run = |database: &mut Database, command_id: &str, automation_id: &str| {
             let result = service
@@ -3038,14 +3061,7 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .to_string();
-            // Finish the run so the next manual run is not skipped as an overlap.
-            database
-                .connection()
-                .execute(
-                    "UPDATE automation_run SET status='failed', reason='no_result', ended_at=started_at WHERE camp_id=?1",
-                    [&camp_id],
-                )
-                .unwrap();
+            finish(database, &camp_id);
             camp_id
         };
         let update = |database: &mut Database,
@@ -3103,17 +3119,14 @@ mod tests {
         assert!(!title_date_option_table_exists(database.connection()).unwrap());
 
         let off_camp = run(&mut database, "run-off", &id);
-        assert_eq!(titles(&database), vec!["每日简报".to_string()]);
+        assert_eq!(title_of(&database, &off_camp), "每日简报");
 
         // Enable: persisted, visible in the view, and applied to the next Conversation title and event.
         let enabled = update(&mut database, "update-on", 2, &id, None, Some(true));
         assert_eq!(enabled["appendRunDateToTitle"], true);
         let on_camp = run(&mut database, "run-on", &id);
-        let expected = format!("每日简报 {today}");
-        assert_eq!(
-            titles(&database),
-            vec!["每日简报".to_string(), expected.clone()]
-        );
+        let expected = format!("每日简报 {}", started_date(&database, &on_camp));
+        assert_eq!(title_of(&database, &on_camp), expected);
         let event_title: String = database
             .connection()
             .query_row(
@@ -3130,23 +3143,68 @@ mod tests {
         assert_eq!(renamed["appendRunDateToTitle"], true);
         assert_eq!(renamed["name"], "周报");
         let renamed_camp = run(&mut database, "run-renamed", &id);
-        let stored = |database: &Database, camp: &str| -> String {
-            database
-                .connection()
-                .query_row("SELECT title FROM camp WHERE id=?1", [camp], |row| {
-                    row.get(0)
-                })
-                .unwrap()
-        };
-        assert_eq!(stored(&database, &off_camp), "每日简报");
-        assert_eq!(stored(&database, &on_camp), expected);
-        assert_eq!(stored(&database, &renamed_camp), format!("周报 {today}"));
+        assert_eq!(title_of(&database, &off_camp), "每日简报");
+        assert_eq!(title_of(&database, &on_camp), expected);
+        assert_eq!(
+            title_of(&database, &renamed_camp),
+            format!("周报 {}", started_date(&database, &renamed_camp))
+        );
 
-        // Disable again, then delete: the option row goes with the definition.
+        // Disable again: an explicit false is stored and later titles are plain.
         let disabled = update(&mut database, "update-off", 4, &id, None, Some(false));
         assert_eq!(disabled["appendRunDateToTitle"], false);
         let off_again = run(&mut database, "run-off-again", &id);
-        assert_eq!(stored(&database, &off_again), "周报");
+        assert_eq!(title_of(&database, &off_again), "周报");
+
+        // A scheduled occurrence whose planned day differs from the day it really starts uses
+        // the actual start date. The planned time is two days ahead so a midnight rollover
+        // during the test cannot make the two coincide.
+        let planned = Local::now() + Duration::days(2);
+        let scheduled = service
+            .create(
+                &mut database,
+                &user_command(
+                    "create-scheduled",
+                    CreateAutomationCommand {
+                        name: Some("计划简报".to_string()),
+                        prompt: "Summarize on schedule.".to_string(),
+                        member_id: "agent_1".to_string(),
+                        project_ref: AutomationProjectRef::QuickChat,
+                        schedule: AutomationSchedule::Once {
+                            date: planned.format("%Y-%m-%d").to_string(),
+                            at: planned.format("%H:%M").to_string(),
+                        },
+                        notify_channels: Vec::new(),
+                        append_run_date_to_title: true,
+                    },
+                ),
+            )
+            .unwrap();
+        let scheduled_id = scheduled.result.payload["automationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let due = parse_timestamp(scheduled.result.payload["nextRunAt"].as_str().unwrap()).unwrap();
+        let dispatches = service
+            .claim_due(
+                &mut database,
+                due + Duration::seconds(1),
+                due - Duration::seconds(1),
+                &quick_chat_path,
+            )
+            .unwrap();
+        assert_eq!(dispatches.len(), 1);
+        let scheduled_camp = dispatches[0].camp_id.clone();
+        let planned_day = due.with_timezone(&Local).format("%Y-%m-%d").to_string();
+        let actual_day = started_date(&database, &scheduled_camp);
+        assert_ne!(planned_day, actual_day);
+        assert_eq!(
+            title_of(&database, &scheduled_camp),
+            format!("计划简报 {actual_day}")
+        );
+        finish(&database, &scheduled_camp);
+
+        // Deleting a definition removes only its own option row.
         service
             .delete(
                 &mut database,
@@ -3159,13 +3217,18 @@ mod tests {
                 ),
             )
             .unwrap();
-        let leftover: i64 = database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM fork_automation_option", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(leftover, 0);
+        let rows = |database: &Database, automation_id: &str| -> i64 {
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM fork_automation_option WHERE automation_id=?1",
+                    [automation_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(rows(&database, &id), 0);
+        assert_eq!(rows(&database, &scheduled_id), 1);
         remove_test_database(database, directory);
     }
 

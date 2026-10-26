@@ -2272,6 +2272,90 @@ mod tests {
     }
 
     #[test]
+    fn automation_run_date_title_flag_is_parsed_from_the_real_cli_description() {
+        let create = builtin_tool_description("automation.create", true).unwrap();
+        let update = builtin_tool_description("automation.update", true).unwrap();
+        let flag = create
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "appendRunDateToTitle")
+            .expect("create exposes the option");
+        assert_eq!(flag.flag, "--append-run-date-to-title");
+        assert_eq!(flag.value_kind, "boolean");
+        assert!(!flag.required && !flag.repeatable);
+        let strings = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        };
+        let base = ["--prompt", "Summarize.", "--repeat", "manual"];
+        let with = |extra: &[&str]| {
+            parse_operation_input(&create, &strings(&[&base[..], extra].concat())).unwrap()
+        };
+        // Bare flag = on, explicit true/false (spaced or inline) are honored, omission leaves it out.
+        assert_eq!(
+            with(&["--append-run-date-to-title"])["appendRunDateToTitle"],
+            true
+        );
+        assert_eq!(
+            with(&["--append-run-date-to-title", "true"])["appendRunDateToTitle"],
+            true
+        );
+        assert_eq!(
+            with(&["--append-run-date-to-title", "false"])["appendRunDateToTitle"],
+            false
+        );
+        assert_eq!(
+            with(&["--append-run-date-to-title=false"])["appendRunDateToTitle"],
+            false
+        );
+        assert!(with(&[]).get("appendRunDateToTitle").is_none());
+        // The parsed shape is accepted by the same validator the Agent call goes through.
+        for extra in [
+            &["--append-run-date-to-title"][..],
+            &["--append-run-date-to-title=false"],
+            &[],
+        ] {
+            rovai_core::team_tool_catalog::validate_builtin_tool_input(
+                "automation.create",
+                &with(extra),
+            )
+            .unwrap();
+        }
+        // Update: explicit false is distinguishable from omission (omitted keeps the stored value).
+        let update_input = |extra: &[&str]| {
+            parse_operation_input(
+                &update,
+                &strings(
+                    &[
+                        &["--automation-id", "rvat_1", "--expected-version", "1"][..],
+                        extra,
+                    ]
+                    .concat(),
+                ),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            update_input(&["--append-run-date-to-title=false"])["appendRunDateToTitle"],
+            false
+        );
+        assert_eq!(
+            update_input(&["--append-run-date-to-title"])["appendRunDateToTitle"],
+            true
+        );
+        assert!(update_input(&[]).get("appendRunDateToTitle").is_none());
+        assert!(
+            parse_operation_input(
+                &create,
+                &strings(&[&base[..], &["--append-run-date-to-title", "maybe"]].concat())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn memory_view_direct_flags_form_the_exact_relationship_input() {
         let description = builtin_tool_description("memory.view", true).unwrap();
         let input = parse_operation_input(

@@ -1425,13 +1425,8 @@ mod tests {
                 .extend(bad.as_object().unwrap().clone());
             assert!(validate_builtin_tool_input(AUTOMATION_UPDATE_TOOL_NAME, &update).is_err());
         }
-        // The CLI flag is derived from the schema, so the Agent can set it as --append-run-date-to-title.
-        let definition = builtin_tool_definitions()
-            .iter()
-            .find(|definition| definition["name"] == AUTOMATION_CREATE_TOOL_NAME)
-            .unwrap();
-        let schema = serde_json::to_string(&definition["inputSchema"]).unwrap();
-        assert!(schema.contains("appendRunDateToTitle"));
+        // The command-line flag is covered where it is parsed: rovai.rs
+        // automation_run_date_title_flag_is_parsed_from_the_real_cli_description.
     }
 
     #[test]
