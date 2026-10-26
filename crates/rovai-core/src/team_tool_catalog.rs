@@ -803,7 +803,8 @@ fn automation_schedule_schema() -> Value {
         "prompt": {"type": "string", "minLength": 1, "maxLength": 100000},
         "member": {"type": "string", "minLength": 1},
         "project": {"type": "string", "minLength": 1},
-        "notify": automation_notify_schema()
+        "notify": automation_notify_schema(),
+        "appendRunDateToTitle": {"type": "boolean"}
     });
     let properties = |repeat: &str| {
         let mut value = common.clone();
@@ -876,7 +877,8 @@ fn automation_update_input_schema() -> Value {
             "cron": {"type": "string"},
             "notify": automation_notify_schema(),
             "clearNotify": {"type": "boolean"},
-            "enabled": {"type": "boolean"}
+            "enabled": {"type": "boolean"},
+            "appendRunDateToTitle": {"type": "boolean"}
         }
     })
 }
@@ -1370,6 +1372,66 @@ mod tests {
         assert!(!serialized.contains("\"rovaiTeamReceipt\""));
         assert!(!serialized.contains("team.call_member"));
         assert!(!serialized.contains("rovai member call"));
+    }
+
+    #[test]
+    fn automation_tool_inputs_carry_the_run_date_title_option() {
+        let create = |extra: Value| {
+            let mut input = json!({"prompt": "Summarize.", "repeat": "manual"});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            input
+        };
+        // Schema and serde both accept true, false and omission for create and update.
+        for extra in [
+            json!({}),
+            json!({"appendRunDateToTitle": true}),
+            json!({"appendRunDateToTitle": false}),
+        ] {
+            let input = create(extra.clone());
+            validate_builtin_tool_input(AUTOMATION_CREATE_TOOL_NAME, &input).unwrap();
+            let parsed: AutomationCreateToolInput = serde_json::from_value(input).unwrap();
+            assert_eq!(
+                parsed.append_run_date_to_title,
+                extra.get("appendRunDateToTitle").and_then(Value::as_bool)
+            );
+            let mut update = json!({"automationId": "rvat_1", "expectedVersion": 1});
+            update
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            validate_builtin_tool_input(AUTOMATION_UPDATE_TOOL_NAME, &update).unwrap();
+            let parsed: AutomationUpdateToolInput = serde_json::from_value(update).unwrap();
+            assert_eq!(
+                parsed.append_run_date_to_title,
+                extra.get("appendRunDateToTitle").and_then(Value::as_bool)
+            );
+        }
+        // Not a boolean, or misspelled: still rejected by the closed schema.
+        for bad in [
+            json!({"appendRunDateToTitle": "yes"}),
+            json!({"appendRunDateToTitles": true}),
+        ] {
+            assert!(
+                validate_builtin_tool_input(AUTOMATION_CREATE_TOOL_NAME, &create(bad.clone()))
+                    .is_err()
+            );
+            let mut update = json!({"automationId": "rvat_1", "expectedVersion": 1});
+            update
+                .as_object_mut()
+                .unwrap()
+                .extend(bad.as_object().unwrap().clone());
+            assert!(validate_builtin_tool_input(AUTOMATION_UPDATE_TOOL_NAME, &update).is_err());
+        }
+        // The CLI flag is derived from the schema, so the Agent can set it as --append-run-date-to-title.
+        let definition = builtin_tool_definitions()
+            .iter()
+            .find(|definition| definition["name"] == AUTOMATION_CREATE_TOOL_NAME)
+            .unwrap();
+        let schema = serde_json::to_string(&definition["inputSchema"]).unwrap();
+        assert!(schema.contains("appendRunDateToTitle"));
     }
 
     #[test]

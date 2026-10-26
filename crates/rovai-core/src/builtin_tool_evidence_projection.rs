@@ -328,6 +328,11 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             insert_string_array(&mut projected, "notify", input.get("notify"));
             insert_bool(&mut projected, "clearNotify", input.get("clearNotify"));
             insert_bool(&mut projected, "enabled", input.get("enabled"));
+            insert_bool(
+                &mut projected,
+                "appendRunDateToTitle",
+                input.get("appendRunDateToTitle"),
+            );
         }
         _ => anyhow::bail!("unsupported Built-in Tool Evidence operation: {operation}"),
     }

@@ -7442,7 +7442,9 @@ impl Core {
                                 project_ref,
                                 schedule,
                                 notify_channels: input.notify,
-                                append_run_date_to_title: false,
+                                append_run_date_to_title: input
+                                    .append_run_date_to_title
+                                    .unwrap_or(false),
                             },
                         ),
                     )?;
@@ -7642,7 +7644,7 @@ impl Core {
                                 schedule,
                                 notify_channels,
                                 enabled: input.enabled,
-                                append_run_date_to_title: None,
+                                append_run_date_to_title: input.append_run_date_to_title,
                             },
                         ),
                     )?;

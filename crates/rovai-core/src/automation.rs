@@ -363,6 +363,9 @@ pub struct AutomationCreateToolInput {
     pub cron: Option<String>,
     #[serde(default)]
     pub notify: Vec<AutomationNotifyChannel>,
+    /// Omitted means off.
+    #[serde(default)]
+    pub append_run_date_to_title: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -384,6 +387,9 @@ pub struct AutomationUpdateToolInput {
     #[serde(default)]
     pub clear_notify: bool,
     pub enabled: Option<bool>,
+    /// Omitted keeps the stored choice.
+    #[serde(default)]
+    pub append_run_date_to_title: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
