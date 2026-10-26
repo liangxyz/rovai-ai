@@ -328,11 +328,6 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             insert_string_array(&mut projected, "notify", input.get("notify"));
             insert_bool(&mut projected, "clearNotify", input.get("clearNotify"));
             insert_bool(&mut projected, "enabled", input.get("enabled"));
-            insert_bool(
-                &mut projected,
-                "appendRunDateToTitle",
-                input.get("appendRunDateToTitle"),
-            );
         }
         _ => anyhow::bail!("unsupported Built-in Tool Evidence operation: {operation}"),
     }
@@ -893,35 +888,6 @@ mod tests {
             Some(&result_digest),
         )
         .unwrap()
-    }
-
-    #[test]
-    fn automation_evidence_keeps_an_explicit_false_run_date_title_choice() {
-        for (input, expected) in [
-            (
-                json!({"prompt": "p", "repeat": "manual", "appendRunDateToTitle": false}),
-                Some(false),
-            ),
-            (
-                json!({"prompt": "p", "repeat": "manual", "appendRunDateToTitle": true}),
-                Some(true),
-            ),
-            (json!({"prompt": "p", "repeat": "manual"}), None),
-        ] {
-            let projected = project_input(AUTOMATION_CREATE_TOOL_NAME, &input).unwrap();
-            assert_eq!(
-                projected
-                    .get("appendRunDateToTitle")
-                    .and_then(Value::as_bool),
-                expected
-            );
-        }
-        let update = project_input(
-            AUTOMATION_UPDATE_TOOL_NAME,
-            &json!({"automationId": "rvat_1", "expectedVersion": 2, "appendRunDateToTitle": false}),
-        )
-        .unwrap();
-        assert_eq!(update["appendRunDateToTitle"], false);
     }
 
     #[test]

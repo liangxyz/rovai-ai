@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-automation-workspace
 status: accepted
-last_updated: 2026-10-21
+last_updated: 2026-10-26
 ---
 
 # Automation 工作区
@@ -33,12 +33,19 @@ last_updated: 2026-10-21
 模板只预填名称、Prompt 与计划，在同一新建草稿中切换模板保留队员、项目和通知选择。名称可留空，由 Core 从 Prompt 派生。
 通过新建或模板进入草稿时，不自动聚焦标题或其他输入框；用户自行选择开始编辑的位置。
 
-详情使用紧凑可编辑标题、Prompt、带头像/职责/智能体的队员选择、带路径的项目选择、运行时间参数和默认折叠的通知区域。
+详情使用紧凑可编辑标题、Prompt、带头像/职责/智能体的队员选择、带路径的项目选择、运行时间参数、对话命名和默认折叠的通知区域。
 计划参数随每天、工作日、每周、仅一次、自定义 Cron、手动触发六种类型切换；通知选择展示当前队员真实已发布 Bot，未发布渠道不能新增选中，已有选择仍允许取消。
 新建页底部仅在右侧提供“保存”，不显示辅助提示。Prompt 为空、没有可用队员或运行时间无效时禁用，名称可留空，保存后自动开启。
 已有定义就地显示保存状态。表单通常最大 900px；详情容器至少 1100px 时最大 1440px。
 队员与运行项目在每组至少 280px 时并排，再窄时各占一整行，选择框延伸至右边缘。
-运行时间、通知到渠道、执行历史和新建保存区域始终与 Prompt 等宽。
+运行时间、对话命名、通知到渠道、执行历史和新建保存区域始终与 Prompt 等宽。
+
+运行时间与通知之间提供默认折叠的“对话命名”。默认勾选日期和时间、ISO 日期、24 小时制、名称后置。
+展开后依次显示日期开关与四种格式、时间开关与三种格式、名称前／后的单选，以及完整标题预览。
+关闭开关禁用对应格式控件但保留选择；两者均关闭时位置控件禁用，预览只显示任务名称。
+预览随输入即时变化，使用浏览器本地当前时间作为格式样例；真正运行标题由 Core 在创建对话时冻结。
+不加额外规则小字；长标题在预览换行，保存时不截断。命名改动复用自动保存、失败保留草稿和冲突处理。
+历史对话不随设置变化。完整字段与时间来源见 [Scheduled Automation v4](../../contracts/scheduled-automation-v4.md)。
 
 时间选择使用小时/分钟分栏、加减按钮、直接输入和快捷时间；分钟步进 5 分钟并跨小时进位。
 Enter 或“完成”提交并收起，Escape 收起，不额外回焦触发控件。日期选择采用月历，支持方向键、Home/End 和 PageUp/PageDown。
@@ -81,6 +88,6 @@ Renderer 使用 `cron-parser` 提供就地反馈，最终接受与求值仍由 C
 ## References
 
 - [App Shell 与统一侧栏](app-shell-navigation.md)
-- [Scheduled Automation v1](../../contracts/scheduled-automation-v1.md)
+- [Scheduled Automation v4](../../contracts/scheduled-automation-v4.md)
 - [Scheduled Automation Architecture](../../architecture/scheduled-automation.md)
 - [Rovai AI Design](../../../DESIGN.md)

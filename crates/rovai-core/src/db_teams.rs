@@ -139,6 +139,7 @@ pub(super) fn migrate_guidance_limit(database: &mut Database) -> Result<()> {
             matches!(
                 classify_database_contract(&tx)?,
                 DatabaseContractClassification::Current(_)
+                    | DatabaseContractClassification::SupportedMigrationSource(_)
             ),
             "Team guidance schema admission failed"
         );
@@ -153,6 +154,7 @@ pub(super) fn migrate_guidance_limit(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_guidance_limit_for_test(c: &Connection) {
+    automation_naming::downgrade_for_test(c);
     if !c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=214)",

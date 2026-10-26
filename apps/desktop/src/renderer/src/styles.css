@@ -8573,12 +8573,6 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 .automation-cron-row > input { width: 75%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .automation-next-run { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0 0; color: var(--muted); font-size: 10.5px; }
 .automation-next-run > span { margin-left: auto; }
-.automation-title-date-option { display: flex; width: 100%; min-width: 0; align-items: flex-start; gap: 9px; padding: 8px 6px; border-radius: 7px; cursor: pointer; }
-.automation-title-date-option input { flex: none; margin-top: 3px; }
-.automation-title-date-option > span { display: grid; min-width: 0; gap: 2px; }
-.automation-title-date-option strong { font-size: 12.5px; font-weight: 500; }
-.automation-title-date-option small { color: var(--muted); font-size: 11px; line-height: 1.5; }
-.automation-title-date-option:has(input:disabled) { cursor: default; opacity: 0.7; }
 .automation-channel-disclosure { width: 100%; }
 .automation-channel-disclosure summary { display: flex; min-width: 0; min-height: 44px; align-items: center; gap: 9px; border-radius: 7px; padding: 6px; cursor: pointer; list-style: none; }
 .automation-channel-disclosure summary::-webkit-details-marker { display: none; }

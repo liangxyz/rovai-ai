@@ -1,7 +1,7 @@
 ---
 document_type: implementation-report
 source_version: v1.72
-last_updated: 2026-10-25
+last_updated: 2026-10-26
 ---
 
 # Command Code 1.88 原生接入简化
@@ -100,7 +100,9 @@ Skills 只给现有 `native_skills` 增加 user/project 的 `.agents/skills` 来
 Diff 仍关联同 ToolCall 的成功终态。单次 edit 用 reported mutation 展示片段；空 old_string 加
 精确原生 `Created <同路径> (<行数> line[s])` 回执接入已有 full-before-after/add 展示。
 原生 write_file 对已有空文件也说 created，故不凭该文案或提案的 oldText:null 声称新增；
-write/overwrite、空文件填充及无完整结果的多处替换保留操作记录，失败不生成 Diff。不新增磁盘读取或 Git 检查。
+2026-10-26 修正其行数映射：精确同路径的 created 成功回执与非空 content 已足以说明旧正文为空，
+按完整 update 显示 `+N / −0` 和 Diff。空 content、非空覆盖及无完整结果的多处替换保留操作记录，
+失败不生成 Diff。不新增磁盘读取或 Git 检查。
 
 本次使用官方 npm `command-code@1.88.0`，CLI SHA-256 为
 `600725f967cc98f6144066c24e850d934bd4a1f503c3bf82f2bd2584a8757dfd`。
@@ -193,7 +195,7 @@ CLI 初始目录设为 `host space`、ACP 目录设为不同的 `session space`�
 | Compaction continuity | System 原生保留与 Core 补发是不同策略；只有补发正确性需要信号时才接 detector。 | Command 每次 System hook 追加 B，当前 detector 为 Disabled；这不等于原生压缩功能被禁用。 | 旧 1.74 manual/threshold/cold 证据不能替代 1.88 的 manual/threshold/overflow+retry 矩阵。补验 System 保留即可，不为打勾另造 detector/outbox。 |
 | Skills | 当前共享来源是平台索引、成员工具箱和 Harness 原址发现；原生目录依 Runtime 不同。 | 共享 native_skills 同时枚举 `.commandcode/skills` 和 `.agents/skills` 的 user/project 来源；无私有投影。Registry 仍标 DocumentationOnly。 | 原生目录兼容与同名优先级不等于整轴通过；读取、热更新、删除与相邻成员完整矩阵仍分别验收。 |
 | External MCP | Codex Session 配置、Cline 原生配置、其他 ACP 参数交付；同名规则可因原生行为不同。 | 标准 mcpServers，原生同名优先；本次默认目录直启、自定义 cwd 包装、HTTP 均真实调用，cold 后再次直启。 | 默认包装已删；保留共享投影和必要 wire 转义。生产 Assignment 更新/撤销、相邻成员与取消副作用的完整新版本矩阵不能只靠工具调用通过。 |
-| Tool / Action / Output | 共享 Tool ID、Action、命令输出与分级 Diff；Cline/MiniMax 也需要关联稀疏事件。 | 单次 edit 片段、原生明确 edit 新建回执进入共享展示；write 的创建状态不明确时保留操作记录。 | 不将工具执行前的 Diff 当成功，不伪造多处替换行号；完整命令输出矩阵仍分别验收。 |
+| Tool / Action / Output | 共享 Tool ID、Action、命令输出与分级 Diff；Cline/MiniMax 也需要关联稀疏事件。 | 单次 edit 片段、明确 edit 新建及 write 空正文到新正文进入共享展示；write 不凭 created 文案宣称新增。 | 不将工具执行前的 Diff 当成功，不伪造多处替换行号；完整命令输出矩阵仍分别验收。 |
 | Narration / Final / Missing-Send | 各协议提供权威终态，公开发送与 Missing-Send 使用共享规则。 | ACP prompt 结果与稀疏事件沿共享路径；本次四轮 end_turn 均回传实际 receipt。 | 原生 final 不等于产品公开消息已发送；本次未运行 Core 的 zero-send/accepted-send/tool→final 全链路。无需新增 Command 终态状态机。 |
 | Permission / Approval / Workspace | 唯一原生审批权威；例如 Kimi 用 Session mode，Cline 用 mode 与 auto_approve。 | 五种原生 mode 经 set_mode；Command 不再由 Core 自动允许同一请求，避免第二层审批。本次使用 bypass。 | allow/deny/cancel、只读及实际目录边界仍需独立验；不能把 bypass 的 MCP 成功当作这些选项通过。 |
 | Built-in rovai CLI | 当前 bundled CLI、逐 Run binding/lease 和操作目录共享。 | 沿共享 Built-in 进程上下文与租约，没有 Command 专属 CLI 或桥。 | 旧版本公开发送证据保留；本次没有 Core lease，未重跑当前完整 operation 集，不能把 MCP 当 Built-in CLI 资格。 |
@@ -597,3 +599,39 @@ owners，无新增 Rust 测试函数；归属见[测试说明](../../development
 [验收报告](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)区分真实模型、浏览器、
 受控故障、已接受差异与未覆盖范围。维护者要求本次 Linux 开放与上述 macOS 分支一同交付；
 采用同一 Preview 状态，稳定版下限、原生配置和共享生命周期不变。前节的平台表保留 macOS 开放时的事实。
+
+## write_file 行级 Diff（2026-10-26）
+
+User 的实际 1.88 会话只显示一次写入，尽管原生已提供完整新正文与 created 成功回执。核对固定包的
+`createWriteFileTool`：该回执只在原先不存在或旧正文为空时返回，非空覆盖返回 updated 回执。
+因此“无法区分新文件与已有空文件”不妨碍计算空正文到新正文的行数。
+
+在 `rovai/command-code-write-diff` 独立 worktree、`origin/main` 基线 `db8cd6e34` 上补齐现有
+Command normalizer：同调用成功回执与非空 content 生成 `oldText:""` 的完整 update。共享 Diff、
+Activity 和 Files Changed 自动获得行数与可展开正文；保持未知的文件创建身份，不增加 Renderer 分支、
+文件读写、扫描、锁、协议或数据库迁移。空 content 保留操作，不把可能的新建空文件误写为 no_changes。
+只作用于新 ingress；历史已存的 operation-only 证据不回填。
+
+扩展现有 `acp_tool_events_expose_only_the_public_command_and_payload_digests` owner，修复前成功 write
+案例失败、修复后通过；同时验证成功 edit 新建仍为 add，write 为 update、`+2 / −0`，CRLF 与中文空格
+路径保真，以及失败／未完成／异路径／未知回执／非空覆盖／空 content 的回退。
+该变更不改变 Activity 分类或公开 schema，不新增测试 owner；本轮没有重跑真实模型或完整 App 验收。
+
+验证在 macOS arm64 独立 worktree 中完成：
+
+| 检查 | 结果 |
+| --- | --- |
+| 定向 ACP 映射 owner | 修复前失败、修复后通过；未增加测试函数。 |
+| `pnpm typecheck`、`pnpm test` | 通过；Vitest 256 个文件、3005 项通过/2 项跳过；Node suite 358 项通过/2 项跳过。 |
+| `cargo fmt --all --check`、`git diff --check` | 通过。 |
+| `pnpm docs:test`、`pnpm docs:check`、`pnpm docs:check:ci` | 通过；CI 文档门禁使用本节记录的 base。 |
+| `pnpm test:rust:pr` 首次 | Core 430 项通过、1 项失败、1 项忽略；失败为 `runtime_probe_process::tests::successful_leader_with_stdio_holding_descendant_finishes_bounded` 的 `runtime_probe_stdout_cleanup_timed_out`，单独重跑通过。 |
+| `pnpm test:rust:pr` 完整重跑 | 保持原命令及测试设置，通过：Core 431 项、CLI 31 项、Host 4 项、Web 11 项，共 477 项通过、1 项忽略。 |
+| `pnpm test:rust:extended` | Core 1027 项通过、1 项失败、8 项忽略。`acp::tests::client_terminal_rejects_invalid_cwd_and_cleans_a_run_session` 在 `bridge.is_empty()` 断言失败；使用同一测试二进制单独重跑通过。 |
+
+上述两个首次失败都在未修改的进程清理路径，不是 Command Diff 映射用例；仍保留完整命令的失败结果，
+不以单独重跑通过宣称扩展 workspace 全绿，也未修改清理代码或测试阈值。
+
+交付 worktree 为 `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-command-write-diff`，
+分支 `rovai/command-code-write-diff`，base `db8cd6e34aa9e0348fa750020105acf8f04869fd`，状态 `ready`。
+按 User 的分支交付约定推送并保留此 worktree；后续 PR、合并与本机安装另按明确指令执行。

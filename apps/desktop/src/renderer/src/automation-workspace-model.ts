@@ -1,4 +1,5 @@
-import type { AutomationNotifyChannel, AutomationProjectRef, AutomationRunSummary, AutomationSchedule, AutomationView, AutomationWeekday, StoredCommandResult } from '@contracts'
+import type { AutomationNotifyChannel, AutomationProjectRef, AutomationRunSummary, AutomationSchedule, AutomationThreadNaming, AutomationView, AutomationWeekday, StoredCommandResult } from '@contracts'
+import { defaultThreadNaming } from './automation-thread-naming'
 import { getInterfaceLanguage, uiAttribute } from './interface-language'
 
 export type AutomationDraft = {
@@ -7,8 +8,8 @@ export type AutomationDraft = {
   memberId: string
   projectRef: AutomationProjectRef
   schedule: AutomationSchedule
+  threadNaming: AutomationThreadNaming
   notifyChannels: AutomationNotifyChannel[]
-  appendRunDateToTitle: boolean
 }
 
 export type TemplateId = 'issue-pr' | 'weekly-report' | 'release-notes'
@@ -85,8 +86,8 @@ export function defaultDraft(memberId: string): AutomationDraft {
     memberId,
     projectRef: { kind: 'quick_chat' },
     schedule: { kind: 'daily', at: '09:00' },
-    notifyChannels: [],
-    appendRunDateToTitle: false
+    threadNaming: defaultThreadNaming(),
+    notifyChannels: []
   }
 }
 
@@ -97,8 +98,9 @@ export function draftFromAutomation(automation: AutomationView): AutomationDraft
     memberId: automation.memberId,
     projectRef: automation.projectRef,
     schedule: automation.schedule,
-    notifyChannels: automation.notifyChannels,
-    appendRunDateToTitle: automation.appendRunDateToTitle === true
+    // Historical command replay retains its original payload, before this field existed.
+    threadNaming: { ...defaultThreadNaming(), ...automation.threadNaming },
+    notifyChannels: automation.notifyChannels
   }
 }
 

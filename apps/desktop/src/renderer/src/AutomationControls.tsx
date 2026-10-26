@@ -1,7 +1,7 @@
 import { templates, localizedAutomationTemplate, scheduleLabel, type TemplateId } from './automation-workspace-model'
 import { UiText } from './interface-language'
 
-export type AutomationIcon = 'clock' | 'play' | 'pause' | 'plus' | 'trash' | 'chat' | 'search' | 'more' | 'chevron' | 'back' | 'close' | 'check' | 'failed' | 'skip' | 'channel' | 'folder' | 'code' | 'calendar' | 'document'
+export type AutomationIcon = 'clock' | 'play' | 'pause' | 'plus' | 'trash' | 'chat' | 'search' | 'more' | 'chevron' | 'back' | 'close' | 'check' | 'failed' | 'skip' | 'channel' | 'folder' | 'code' | 'calendar' | 'document' | 'text'
 
 export function AutomationGlyph({ name }: { name: AutomationIcon }): React.JSX.Element {
   return <svg className="automation-glyph" viewBox="0 0 24 24" aria-hidden="true">
@@ -23,6 +23,7 @@ export function AutomationGlyph({ name }: { name: AutomationIcon }): React.JSX.E
     {name === 'folder' && <path d="M3 6h7l2 3h9v11H3Z" />}
     {name === 'code' && <path d="m8 6-5 6 5 6M16 6l5 6-5 6M14 4l-4 16" />}
     {name === 'calendar' && <><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4M16 3v4M4 10h16M8 14h8M8 17h5" /></>}
+    {name === 'text' && <path d="M4 6h16M12 6v14M8 20h8" />}
     {name === 'document' && <><path d="M6 3h8l4 5v13H6Z" /><path d="M14 3v5h4M9 12h6M9 16h6" /></>}
   </svg>
 }

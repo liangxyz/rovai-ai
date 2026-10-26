@@ -260,7 +260,7 @@ impl Core {
             "当前平台不支持这个运行时。"
         );
         let search = self
-            .read_runtime_check_environment(true)
+            .read_runtime_check_environment()
             .await?
             .with_startup_configuration(kind, configuration);
         let path_search = search.clone();

@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-10-22
+last_updated: 2026-10-26
 ---
 
 # 当前规范与决定理由导航
@@ -61,7 +61,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
   [V1.60-D04](../versions/v1.60/decisions.md#v1-60-d04) 与
   [V1.68-D01](../versions/v1.68/decisions.md#v1-68-d01)。
 - Channel/Automation 复用普通消息：[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)、
-  [Scheduled Automation v3](../contracts/scheduled-automation-v3.md)；理由：
+  [Scheduled Automation v4](../contracts/scheduled-automation-v4.md)；理由：
   [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)。
 - Delivery-first 终态注意力：[Notification Episode v12](../contracts/notification-episode-v12.md)、
   [Current User Attention v10](../contracts/current-user-attention-v10.md)；理由：
@@ -207,7 +207,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Scheduled Automation
 
-- 当前规范：[Scheduled Automation 不变量](../architecture/foundational-invariants.md#scheduled-automation)、[Scheduled Automation Architecture](../architecture/scheduled-automation.md)、[Scheduled Automation v3](../contracts/scheduled-automation-v3.md)、[Automation 工作区](../ui/components/automation-workspace.md)和[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)。
+- 当前规范：[Scheduled Automation 不变量](../architecture/foundational-invariants.md#scheduled-automation)、[Scheduled Automation Architecture](../architecture/scheduled-automation.md)、[Scheduled Automation v4](../contracts/scheduled-automation-v4.md)、[Automation 工作区](../ui/components/automation-workspace.md)和[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)。
 - 原子领取、新 Camp 派发与不可恢复重派发的理由：[V1.54-D01](../versions/v1.54/decisions.md#v1-54-d01)；执行和渠道通知分离的理由：[V1.54-D02](../versions/v1.54/decisions.md#v1-54-d02)。
 
 ## Evidence、Runtime Activity 与 Usage
@@ -304,6 +304,9 @@ Linux 目标机验收后的 Preview 开放与已接受非零退出差异见
 macOS ACP detached 后代与 Core 重启回收当前规范见
 [Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md#macos-acp-descendants)，
 内核身份、私有 ledger 和不增加常驻代理的取舍见 [V1.72-D26](../versions/v1.72/decisions.md#v1-72-d26)。
+
+Runtime 基础 PATH 采集与主动检查刷新当前规范见 [Runtime Launch v73](../contracts/runtime-launch-and-verification-v73.md)
+及 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#安装发现与真实-host-验证)；这是既有发现流程的局部修复，无新增 Version Decision。
 
 Command 原生 HOME、官方 Mod、ACP MCP 与 Binding 身份复用的当前取舍见 [V1.72-D59](../versions/v1.72/decisions.md#v1-72-d59)，字段合同见 [Runtime Launch and Verification v72](../contracts/runtime-launch-and-verification-v72.md)。
 

@@ -25,6 +25,7 @@ pub mod agent_runtime_adapter;
 pub mod authority_migration;
 pub mod automation;
 mod automation_clock;
+pub mod automation_naming;
 pub mod brand;
 pub mod builtin_tool_cli_output;
 pub mod builtin_tool_evidence_projection;

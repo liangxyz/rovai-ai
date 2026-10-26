@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-file-change-observation
 authority: command-and-agent-run-file-change-boundaries
 status: accepted
-last_updated: 2026-10-25
+last_updated: 2026-10-26
 ---
 
 # Runtime File Change Observation 架构
@@ -44,8 +44,9 @@ checkpoint ref 或 filesystem capture；Git 与非 Git execution root 使用相�
   完全一致且包含 hunk；`write` 保持 operation-only，不从当前磁盘或 input 反推内容；
 - Command 关联同 ToolCall 的输入与成功终态：普通单次 `edit_file` 保留 reported mutation 片段；
   空 `old_string` 且终态精确匹配原生 `Created <同路径> (<行数> line[s])` 才将完整 `new_string`
-  作为 add。该回执仅在 1.88 的不存在分支产生；`write_file` 的 created 文案也用于已有空文件，
-  因而仍为 operation-only。失败、提案、多处替换和不明确写入不伪造内容、行号或全文件统计；
+  作为 add。该回执仅在 1.88 的不存在分支产生；`write_file` 的精确同路径 created 成功回执也用于已有
+  空文件，因此非空 content 按空正文到新正文作为完整 update，提供行数和 Diff，不宣称 add。
+  空 content、非空覆盖及不明确的多处替换仍为 operation-only；失败、提案不产生已发生 Diff；
 - 路径按 Run 冻结的 execution root 做纯词法规范化，该 root 也是 display root。root 内转换为相对路径；root 外
   保留规范化绝对路径。相对 `..` 可解析到 root 外，但不能越过文件系统根；其他 URI scheme、Git metadata 路径和
   不明确多路径 fail closed；

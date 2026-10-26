@@ -1065,22 +1065,19 @@ test('Host clock consumes scheduled occurrences with Web stopped and in standalo
     const [member] = await desktop.request('members.list')
     // Leave ten seconds of setup margin even just before a minute boundary.
     const firstAt = Math.ceil((Date.now() + 10_000) / 60_000) * 60_000
-    const localDay = due => { const date = new Date(due); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
-    const create = async (name, due, extra = {}) => {
+    const create = async (name, due) => {
       const date = new Date(due)
       const result = await desktop.request('automations.create', { commandId: crypto.randomUUID(), command: {
         name, prompt: 'Isolated scheduler acceptance; no configured Runtime.', memberId: member.agentId,
-        projectRef: { kind: 'quick_chat' }, notifyChannels: [], ...extra, schedule: { kind: 'once',
+        projectRef: { kind: 'quick_chat' }, notifyChannels: [], schedule: { kind: 'once',
           date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
           at: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` }
       } })
       assert.equal(result.status, 'applied')
       return result.payload.automationId
     }
-    // The Desktop one uses the legacy request shape (option omitted = off). The standalone one
-    // enables the run-date title option in this process and is claimed by another process.
     const desktopId = await create('Desktop Host clock', firstAt)
-    const standaloneId = await create('Standalone Host clock', firstAt + 60_000, { appendRunDateToTitle: true })
+    const standaloneId = await create('Standalone Host clock', firstAt + 60_000)
     const started = await desktop.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
     await desktop.request('host.web.stop')
     await assert.rejects(fetch(started.origin, { signal: AbortSignal.timeout(1000) }))
@@ -1123,15 +1120,12 @@ test('Host clock consumes scheduled occurrences with Web stopped and in standalo
         assert.equal(runs[0].claimed_agent_run_id, null, 'a waiting Delivery is not owned by an AgentRun')
       }
     }
-    const campTitle = id => database.prepare('SELECT camp.title FROM automation_run AS occurrence JOIN camp ON camp.id = occurrence.camp_id WHERE occurrence.automation_id = ?').get(id).title
     await waitForOccurrence(desktopId, firstAt)
-    assert.equal(campTitle(desktopId), 'Desktop Host clock', 'the option is off unless requested')
     const reply = await desktop.request('core.shutdown', { protocolVersion: 3, deadlineMs: 10_000 })
     assert.equal(reply.controlledShutdownCyclePersisted, true)
     assert.equal((await within(desktop.closed)).code, 0)
     await startStandalone()
     await waitForOccurrence(standaloneId, firstAt + 60_000)
-    assert.equal(campTitle(standaloneId), `Standalone Host clock ${localDay(firstAt + 60_000)}`, 'the stored option survives a Host restart and titles the scheduled Conversation')
     await stopStandalone()
     await startStandalone()
     // Reopening past both due times cannot create a second occurrence.

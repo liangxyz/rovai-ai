@@ -4,8 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { automationScheduleError, validateCron } from './automation-schedule-validation'
 import { automationDateKey, normalizeAutomationTime, stepAutomationTime } from './AutomationSchedulePickers'
 import { AutomationEditor } from './AutomationEditor'
-import type { AutomationView } from '@contracts'
-import { defaultDraft, draftFromAutomation } from './automation-workspace-model'
+import { defaultDraft } from './automation-workspace-model'
 
 describe('scheduled task input validation', () => {
   it('identifies the reported invalid minute and rejects other field boundaries', () => {
@@ -38,32 +37,6 @@ describe('scheduled task input validation', () => {
     expect(html).toContain('aria-invalid="true"')
     expect(html).toContain('分钟需在 0–59 之间，当前填写为 600。')
     expect(html).toMatch(/type="submit" disabled="">保存/)
-  })
-})
-
-describe('Conversation-name run date option', () => {
-  const view = (extra: Partial<AutomationView>): AutomationView => ({
-    automationId: 'rvat_1', version: 1, name: '每日简报', prompt: '汇总', enabled: true, memberId: 'agent_1',
-    projectRef: { kind: 'quick_chat' }, schedule: { kind: 'daily', at: '09:00' }, notifyChannels: [],
-    appendRunDateToTitle: false, nextRunAt: null, lastRun: null, createdAt: '2026-10-22T00:00:00Z', updatedAt: '2026-10-22T00:00:00Z', ...extra
-  })
-  const render = (draft: ReturnType<typeof defaultDraft>, busy = false): string => renderToStaticMarkup(createElement(AutomationEditor, {
-    draft, onChange: () => undefined, agents: [], projects: [], automation: null, busy, onOpenThread: () => undefined, onCreate: () => undefined
-  }))
-  it('is off for new drafts and follows the stored choice, treating older results without the field as off', () => {
-    expect(defaultDraft('agent_1').appendRunDateToTitle).toBe(false)
-    expect(draftFromAutomation(view({ appendRunDateToTitle: true })).appendRunDateToTitle).toBe(true)
-    const legacy = { ...view({}) } as Partial<AutomationView>
-    delete legacy.appendRunDateToTitle
-    expect(draftFromAutomation(legacy as AutomationView).appendRunDateToTitle).toBe(false)
-  })
-  it('renders a labelled checkbox that mirrors the draft and is disabled while saving', () => {
-    const off = render(defaultDraft('agent_1'))
-    expect(off).toContain('对话名自动附加运行日期')
-    expect(off).toMatch(/<input type="checkbox"(?![^>]*checked)[^>]*\/>/)
-    const on = render({ ...defaultDraft('agent_1'), appendRunDateToTitle: true })
-    expect(on).toMatch(/<input type="checkbox" checked=""[^>]*\/>/)
-    expect(render(defaultDraft('agent_1'), true)).toMatch(/<input type="checkbox"[^>]*disabled=""/)
   })
 })
 

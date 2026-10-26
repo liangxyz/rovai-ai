@@ -2024,8 +2024,9 @@ struct RefreshAdapterInstallationParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeDiscoveryRescanParams {
-    #[serde(default)]
-    interactive_shell: bool,
+    // Older clients may still send this flag; Core now owns the capture policy.
+    #[serde(default, rename = "interactiveShell")]
+    _interactive_shell: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3971,9 +3972,8 @@ impl Core {
                 .is_none_or(|current| current == executable_fingerprint)
     }
 
-    async fn rescan_runtime_discovery(&self, interactive_shell: bool) -> Result<Value> {
-        self.refresh_runtime_check_environment(interactive_shell)
-            .await?;
+    async fn rescan_runtime_discovery(&self) -> Result<Value> {
+        self.refresh_runtime_check_environment().await?;
         self.discover_runtime_installations(true).await;
         self.runtime_health_payload().await
     }
@@ -4406,27 +4406,11 @@ impl Core {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
-        let mut search = self.runtime_search_environment.read().await.clone();
-        if trigger == RuntimeCheckTrigger::UserCheck {
-            let saved = {
-                let database = self.database.lock().await;
-                AgentProfileService::default().managed_installation(&database, kind, "default")?
-            };
-            let current = search.clone();
-            let has_entry = tokio::task::spawn_blocking(move || {
-                let saved_path =
-                    saved.map(|installation| PathBuf::from(installation.executable_path));
-                current
-                    .candidates(kind, saved_path)
-                    .iter()
-                    .any(|candidate| is_runtime_entrypoint_file(&candidate.path))
-            })
-            .await
-            .context("Runtime entry lookup worker failed")?;
-            if !has_entry {
-                search = self.refresh_runtime_check_environment(true).await?;
-            }
-        }
+        let search = if trigger == RuntimeCheckTrigger::UserCheck {
+            self.refresh_runtime_check_environment().await?
+        } else {
+            self.runtime_search_environment.read().await.clone()
+        };
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
@@ -7436,15 +7420,13 @@ impl Core {
                             request.runtime_tool_call_id,
                             &authenticated_run,
                             CreateAutomationCommand {
+                                thread_naming: Default::default(),
                                 name: input.name,
                                 prompt: input.prompt,
                                 member_id,
                                 project_ref,
                                 schedule,
                                 notify_channels: input.notify,
-                                append_run_date_to_title: input
-                                    .append_run_date_to_title
-                                    .unwrap_or(false),
                             },
                         ),
                     )?;
@@ -7635,6 +7617,7 @@ impl Core {
                             request.runtime_tool_call_id,
                             &authenticated_run,
                             UpdateAutomationCommand {
+                                thread_naming: None,
                                 automation_id,
                                 expected_version: input.expected_version,
                                 name: input.name,
@@ -7644,7 +7627,6 @@ impl Core {
                                 schedule,
                                 notify_channels,
                                 enabled: input.enabled,
-                                append_run_date_to_title: input.append_run_date_to_title,
                             },
                         ),
                     )?;
@@ -7709,7 +7691,18 @@ impl Core {
                     );
                 }
             }
-            Ok(operation_result)
+            Ok(if matches!(
+                evidence_tool_name.as_str(),
+                AUTOMATION_LIST_TOOL_NAME
+                    | AUTOMATION_GET_TOOL_NAME
+                    | AUTOMATION_CREATE_TOOL_NAME
+                    | AUTOMATION_UPDATE_TOOL_NAME
+                    | AUTOMATION_CLOSE_TOOL_NAME
+            ) {
+                crate::automation_naming::without_desktop_settings(operation_result)
+            } else {
+                operation_result
+            })
         }
         .await;
         if result.is_ok() && member_roster_changed {
@@ -12266,10 +12259,9 @@ impl Core {
             }
             "runtime.status.get" => self.runtime_health_payload().await,
             "runtime.discovery.rescan" => {
-                let params: RuntimeDiscoveryRescanParams =
+                let _params: RuntimeDiscoveryRescanParams =
                     serde_json::from_value(request.params.clone())?;
-                self.rescan_runtime_discovery(params.interactive_shell)
-                    .await
+                self.rescan_runtime_discovery().await
             }
             "runtime.product.ensure" => {
                 let params: CheckProductRuntimeParams =
@@ -16011,7 +16003,7 @@ impl Core {
                     return Ok::<(), anyhow::Error>(());
                 }
                 if attempt == 0 {
-                    search = self.refresh_runtime_check_environment(true).await?;
+                    search = self.refresh_runtime_check_environment().await?;
                 } else {
                     anyhow::bail!(
                         "Runtime entry {} could not be resolved or executed: {}",
@@ -19009,7 +19001,7 @@ impl Core {
                     ending_git_observation,
                 },
             };
-            if runtime_terminal_observed
+            let failure = if runtime_terminal_observed
                 && error
                     .downcast_ref::<claude::ClaudeCodeCleanupPending>()
                     .is_some()
@@ -19019,6 +19011,37 @@ impl Core {
                 service.fail_agent_run(&mut database, &envelope)
             } else {
                 service.fail_agent_run_without_runtime_terminal(&mut database, &envelope)
+            };
+            // The ended one-shot worker cannot settle its outstanding tools.
+            // Keep the safety gate and reuse atomic unknown-effect settlement.
+            if failure.as_ref().is_ok_and(|failure| {
+                failure.result.status == CommandResultStatus::Rejected
+                    && failure.result.code == "agent_run.terminal_safety_blocked"
+            }) && execution.runtime.adapter_kind == AdapterKind::ClaudeCodeCli
+                && error.downcast_ref::<claude::ClaudeCodeRunEnded>().is_some()
+                && !self.planned_shutdown.shutdown_started()
+            {
+                ActionSafetyService::default().reconcile_runtime_loss(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-recovery-coordinator".to_string(),
+                        },
+                        camp_id: Some(execution.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: ReconcileRuntimeLossCommand {
+                            failure: envelope.payload.failure,
+                            agent_run_id: execution.agent_run_id.clone(),
+                            expected_version: current.version,
+                            execution_epoch: execution.execution_epoch,
+                            reason: format!("{error:#}"),
+                        },
+                    },
+                )
+            } else {
+                failure
             }
         };
         match failure {
@@ -34531,108 +34554,172 @@ done
     #[tokio::test]
     async fn ended_claude_run_fails_unknown_input_before_releasing_queued_delivery() {
         use std::os::unix::fs::PermissionsExt;
-        let root =
-            std::env::temp_dir().join(format!("rovai-claude-ended-{}", uuid::Uuid::new_v4()));
-        let workspace = root.join("workspace");
-        fs::create_dir_all(&workspace).unwrap();
-        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
-        let (camp_id, run_id, _, epoch) = claimed_runtime_cleanup_test_run(&core, &workspace).await;
-        core.send_test_camp_message_request(SendThreadMessageParams {
-            delivery_mode: Default::default(),
-            steer_targets: None,
-            command_id: uuid::Uuid::new_v4().to_string(),
-            camp_id: ThreadId::parse(&camp_id).unwrap(),
-            content: text_composer_document("New input waiting behind the lost execution"),
-            source_attachments: Vec::new(),
-            quotes: Vec::new(),
-            reply_to_camp_message_id: None,
-            execution: Some(ExecutionRequest {
-                task_id: None,
-                purpose: "Continue after cleanup".into(),
-                completion_role: "required".into(),
-                budget: None,
-            }),
-        })
-        .await
-        .unwrap();
-        let execution = {
-            let database = core.database.lock().await;
-            let service = ExecutionRuntimeService::default();
-            let mut execution = service
-                .load_agent_run_execution(&database, &run_id, epoch)
-                .unwrap()
-                .unwrap();
-            // Reuse the claimed-Run fixture; no Runtime is launched in this
-            // routing test. Keep its frozen columns and config consistent.
-            execution.runtime.adapter_kind = AdapterKind::ClaudeCodeCli;
-            execution.runtime.permissions.adapter_kind = AdapterKind::ClaudeCodeCli;
-            execution.runtime.permissions.values = json!({"permission_mode": "manual"});
-            execution.runtime.refresh_config_digest().unwrap();
-            database
-                .connection()
-                .execute(
-                    "UPDATE agent_run SET runtime_adapter_kind = 'claude-code-cli',
+        // Both launch-error routes must retain unknown effects and the cleanup gate.
+        for delivered_failure in [false, true] {
+            let root =
+                std::env::temp_dir().join(format!("rovai-claude-ended-{}", uuid::Uuid::new_v4()));
+            let workspace = root.join("workspace");
+            fs::create_dir_all(&workspace).unwrap();
+            let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
+            let (camp_id, run_id, _, epoch) =
+                claimed_runtime_cleanup_test_run(&core, &workspace).await;
+            core.send_test_camp_message_request(SendThreadMessageParams {
+                delivery_mode: Default::default(),
+                steer_targets: None,
+                command_id: uuid::Uuid::new_v4().to_string(),
+                camp_id: ThreadId::parse(&camp_id).unwrap(),
+                content: text_composer_document("New input waiting behind the lost execution"),
+                source_attachments: Vec::new(),
+                quotes: Vec::new(),
+                reply_to_camp_message_id: None,
+                execution: Some(ExecutionRequest {
+                    task_id: None,
+                    purpose: "Continue after cleanup".into(),
+                    completion_role: "required".into(),
+                    budget: None,
+                }),
+            })
+            .await
+            .unwrap();
+            let execution = {
+                let database = core.database.lock().await;
+                let service = ExecutionRuntimeService::default();
+                let mut execution = service
+                    .load_agent_run_execution(&database, &run_id, epoch)
+                    .unwrap()
+                    .unwrap();
+                // Reuse the claimed-Run fixture; no Runtime is launched in this
+                // routing test. Keep its frozen columns and config consistent.
+                execution.runtime.adapter_kind = AdapterKind::ClaudeCodeCli;
+                execution.runtime.permissions.adapter_kind = AdapterKind::ClaudeCodeCli;
+                execution.runtime.permissions.values = json!({"permission_mode": "manual"});
+                execution.runtime.refresh_config_digest().unwrap();
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_run SET runtime_adapter_kind = 'claude-code-cli',
                  runtime_permission_config_json = ?2,
                  effective_config_json = json_set(effective_config_json, '$.runtime', json(?3))
                  WHERE id = ?1",
-                    rusqlite::params![
-                        run_id,
-                        serde_json::to_string(&execution.runtime.permissions).unwrap(),
-                        serde_json::to_string(&execution.runtime).unwrap()
-                    ],
-                )
-                .unwrap();
-            rovai_core::test_support::insert_test_runtime_input(
-                &database, &run_id, epoch, "accepted",
+                        rusqlite::params![
+                            run_id,
+                            serde_json::to_string(&execution.runtime.permissions).unwrap(),
+                            serde_json::to_string(&execution.runtime).unwrap()
+                        ],
+                    )
+                    .unwrap();
+                rovai_core::test_support::insert_test_runtime_input(
+                    &database, &run_id, epoch, "accepted",
+                );
+                if delivered_failure {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    database
+                        .connection()
+                        .execute(
+                            "INSERT INTO action_execution(
+                        id, agent_run_id, action_kind, action_schema_version,
+                        action_digest, digest_algorithm, canonicalization_version,
+                        canonical_input_json, input_completeness, action_summary,
+                        execution_authority, control_mode, source_agent_run_execution_epoch,
+                        policy_decision, policy_version, matched_policy_rule_ids_json,
+                        status, dispatch_may_have_started_at, resolution_evidence_refs_json,
+                        created_at, updated_at
+                    ) VALUES (
+                        'approved-action', ?1, 'shell_command', '1',
+                        'sha256:approved-action', 'sha256', 'canonical-json-v1',
+                        '{}', 'complete', 'Approved Claude tool without a result',
+                        'runtime', 'intercepted', ?2, 'ask', 'runtime-managed-v2', '[]',
+                        'executing', ?3, '[]', ?3, ?3
+                    )",
+                            rusqlite::params![run_id, epoch, now],
+                        )
+                        .unwrap();
+                }
+                service
+                    .load_agent_run_execution(&database, &run_id, epoch)
+                    .unwrap()
+                    .unwrap()
+            };
+            let key = ActiveExecutionKey::new(&run_id, epoch);
+            let mut permit = core.planned_shutdown.enter_launch().await.unwrap();
+            assert!(
+                core.planned_shutdown
+                    .register_active(&permit, key.clone(), AdapterKind::ClaudeCodeCli)
+                    .await
             );
-            service
-                .load_agent_run_execution(&database, &run_id, epoch)
-                .unwrap()
-                .unwrap()
-        };
-        let key = ActiveExecutionKey::new(&run_id, epoch);
-        let mut permit = core.planned_shutdown.enter_launch().await.unwrap();
-        assert!(
-            core.planned_shutdown
-                .register_active(&permit, key.clone(), AdapterKind::ClaudeCodeCli)
-                .await
-        );
-        assert!(
-            core.planned_shutdown
-                .complete_handoff(
-                    &mut permit,
-                    &key,
-                    RuntimeRouteBinding {
-                        route_identity: format!("claude-code-process:{run_id}:{epoch}"),
-                        adapter_turn_correlation: format!("claude-code:{run_id}:{epoch}"),
-                        provider_turn_id: None,
-                    },
-                )
-                .await
-        );
-        drop(permit);
-        assert!(
-            core.planned_shutdown
-                .must_preserve_unresolved_after_nonterminal_error(&key)
-                .await
-        );
+            assert!(
+                core.planned_shutdown
+                    .complete_handoff(
+                        &mut permit,
+                        &key,
+                        RuntimeRouteBinding {
+                            route_identity: format!("claude-code-process:{run_id}:{epoch}"),
+                            adapter_turn_correlation: format!("claude-code:{run_id}:{epoch}"),
+                            provider_turn_id: None,
+                        },
+                    )
+                    .await
+            );
+            drop(permit);
+            assert!(
+                core.planned_shutdown
+                    .must_preserve_unresolved_after_nonterminal_error(&key)
+                    .await
+            );
 
-        // A transport error alone cannot take ownership away from a live worker.
-        let transport_error =
-            anyhow::anyhow!("Claude Code output collectors did not finish after root exit");
-        assert!(
-            !core
-                .reconcile_ended_claude_run(&core.output, &execution, &transport_error, None,)
-                .await
-        );
-        let ended_error = transport_error.context(claude::ClaudeCodeRunEnded);
-        assert!(
-            core.reconcile_ended_claude_run(&core.output, &execution, &ended_error, None,)
-                .await
-        );
-        let cleanup = {
-            let mut database = core.database.lock().await;
-            let state: (String, String, bool, String, bool) = database.connection().query_row(
+            // A transport error alone cannot take ownership away from a live worker.
+            let transport_error =
+                anyhow::anyhow!("Claude Code output collectors did not finish after root exit");
+            assert!(
+                !core
+                    .reconcile_ended_claude_run(&core.output, &execution, &transport_error, None,)
+                    .await
+            );
+            if delivered_failure {
+                assert!(
+                    !core
+                        .persist_claimed_agent_run_failure(
+                            &execution,
+                            "runtime_process_failed",
+                            &transport_error,
+                            true,
+                            None,
+                            None,
+                        )
+                        .await,
+                    "an unsettled Action must still block failure without ended-worker proof"
+                );
+            }
+            let ended_error = transport_error.context(claude::ClaudeCodeRunEnded);
+            if delivered_failure {
+                assert!(
+                    core.persist_claimed_agent_run_failure(
+                        &execution,
+                        "runtime_process_failed",
+                        &ended_error,
+                        true,
+                        None,
+                        None,
+                    )
+                    .await,
+                    "an ended Claude worker must settle the terminal-safety rejection"
+                );
+            } else {
+                assert!(
+                    core.reconcile_ended_claude_run(&core.output, &execution, &ended_error, None,)
+                        .await
+                );
+            }
+            let cleanup = {
+                let mut database = core.database.lock().await;
+                if delivered_failure {
+                    let action: (String, String) = database.connection().query_row(
+                    "SELECT status, effect_disposition FROM action_execution WHERE id = 'approved-action'",
+                    [], |row| Ok((row.get(0)?, row.get(1)?)),
+                ).unwrap();
+                    assert_eq!(action, ("unknown".into(), "unknown".into()));
+                }
+                let state: (String, String, bool, String, bool) = database.connection().query_row(
                 "SELECT agent_run.status, agent_run.last_error_code, agent_run.manual_retry_allowed,
                  runtime_input_delivery.status, agent_run.cancel_requested_at IS NOT NULL
                     AND agent_run.cancel_acknowledged_at IS NULL
@@ -34640,80 +34727,96 @@ done
                  WHERE agent_run.id = ?1",
                 [&run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             ).unwrap();
-            assert_eq!(
-                state,
-                (
-                    "failed".into(),
-                    "accepted_input_outcome_unknown".into(),
-                    false,
-                    "accepted".into(),
-                    true
-                )
-            );
-            assert!(
-                claim_waiting_delivery_batches(&mut database, 100)
+                assert_eq!(
+                    state,
+                    (
+                        "failed".into(),
+                        "accepted_input_outcome_unknown".into(),
+                        false,
+                        "accepted".into(),
+                        true
+                    )
+                );
+                assert!(
+                    claim_waiting_delivery_batches(&mut database, 100)
+                        .unwrap()
+                        .is_empty(),
+                    "a failed Run alone must not release the old execution's lane"
+                );
+                ExecutionRuntimeService::default()
+                    .list_cancellation_candidates(&database, 100)
                     .unwrap()
-                    .is_empty(),
-                "a failed Run alone must not release the old execution's lane"
-            );
-            ExecutionRuntimeService::default()
-                .list_cancellation_candidates(&database, 100)
-                .unwrap()
-                .pop()
-                .unwrap()
-        };
-        assert!(
-            core.finish_agent_run_runtime_cleanup(&core.output, cleanup)
-                .await
-        );
-        let next_run_id = {
-            let mut database = core.database.lock().await;
-            let next = claim_waiting_delivery_batches(&mut database, 100).unwrap();
-            assert_eq!(
-                next.len(),
-                1,
-                "cleanup must release the queued input exactly once"
-            );
-            assert_ne!(next[0], run_id);
-            assert!(
-                claim_waiting_delivery_batches(&mut database, 100)
+                    .pop()
                     .unwrap()
-                    .is_empty()
+            };
+            assert!(
+                core.finish_agent_run_runtime_cleanup(&core.output, cleanup)
+                    .await
             );
-            next[0].clone()
-        };
-        // The same late result cannot alter the terminal Run or its successor.
-        assert!(
-            core.reconcile_ended_claude_run(&core.output, &execution, &ended_error, None,)
-                .await
-        );
-        {
-            let database = core.database.lock().await;
-            let states: (String, String) = database
-                .connection()
-                .query_row(
-                    "SELECT status, (SELECT status FROM agent_run WHERE id = ?2)
+            let next_run_id = {
+                let mut database = core.database.lock().await;
+                let next = claim_waiting_delivery_batches(&mut database, 100).unwrap();
+                assert_eq!(
+                    next.len(),
+                    1,
+                    "cleanup must release the queued input exactly once"
+                );
+                assert_ne!(next[0], run_id);
+                assert!(
+                    claim_waiting_delivery_batches(&mut database, 100)
+                        .unwrap()
+                        .is_empty()
+                );
+                next[0].clone()
+            };
+            // The same late result cannot alter the terminal Run or its successor.
+            assert!(
+                core.reconcile_ended_claude_run(&core.output, &execution, &ended_error, None,)
+                    .await
+            );
+            if delivered_failure {
+                assert!(
+                    !core
+                        .persist_claimed_agent_run_failure(
+                            &execution,
+                            "runtime_process_failed",
+                            &ended_error,
+                            true,
+                            None,
+                            None,
+                        )
+                        .await,
+                    "a late failure must not settle the terminal Run again or touch its successor"
+                );
+            }
+            {
+                let database = core.database.lock().await;
+                let states: (String, String) = database
+                    .connection()
+                    .query_row(
+                        "SELECT status, (SELECT status FROM agent_run WHERE id = ?2)
                  FROM agent_run WHERE id = ?1",
-                    rusqlite::params![run_id, next_run_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
+                        rusqlite::params![run_id, next_run_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(states, ("failed".into(), "queued".into()));
+            }
+            core.abort_agent_run_tasks().await;
+            ThreadAttachmentStore::new(&core.data_dir)
+                .remove_camp(&camp_id)
                 .unwrap();
-            assert_eq!(states, ("failed".into(), "queued".into()));
+            let view = core.attachment_views.root().join("camps").join(&camp_id);
+            for path in [
+                &view,
+                view.parent().unwrap(),
+                view.parent().unwrap().parent().unwrap(),
+            ] {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            drop(core);
+            fs::remove_dir_all(root).unwrap();
         }
-        core.abort_agent_run_tasks().await;
-        ThreadAttachmentStore::new(&core.data_dir)
-            .remove_camp(&camp_id)
-            .unwrap();
-        let view = core.attachment_views.root().join("camps").join(&camp_id);
-        for path in [
-            &view,
-            view.parent().unwrap(),
-            view.parent().unwrap().parent().unwrap(),
-        ] {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        drop(core);
-        fs::remove_dir_all(root).unwrap();
     }
 
     // Owns Core's initialization-to-schema seam; camp_fast's writer tests do
@@ -35741,55 +35844,96 @@ for line in sys.stdin:
             assert!(update.pointer("/_meta/rovaiCommandMutation").is_none());
         }
 
-        // Only the native edit_file creation receipt proves nonexistence.
-        // write_file uses its "created" message even for an existing empty file.
-        for (input, status, receipt, has_diff) in [
+        // edit_file can prove creation; write_file's created receipt proves only
+        // an empty previous body. Both can provide counts without inventing add.
+        for (input, status, receipt, expected_old_text) in [
             (
                 json!({"file_path":"/repo/new.txt","old_string":"","new_string":"one\ntwo\n"}),
                 "completed",
                 "Created /repo/new.txt (3 lines)",
-                true,
+                Some(Value::Null),
             ),
             (
                 json!({"file_path":"/repo/new.txt","old_string":"","new_string":"one\ntwo\n"}),
                 "failed",
                 "Created /repo/new.txt (3 lines)",
-                false,
+                None,
             ),
             (
                 json!({"file_path":"/repo/new.txt","old_string":"","new_string":"one\ntwo\n"}),
                 "in_progress",
                 "Created /repo/new.txt (3 lines)",
-                false,
+                None,
             ),
             (
                 json!({"file_path":"/repo/new.txt","old_string":"","new_string":"one\ntwo\n"}),
                 "completed",
                 "Created /repo/other.txt (3 lines)",
-                false,
+                None,
             ),
             (
                 json!({"file_path":"/repo/new.txt","old_string":"","new_string":"one\ntwo\n"}),
                 "completed",
                 "Edited /repo/new.txt (replaced empty file content)",
-                false,
+                None,
             ),
             (
                 json!({"file_path":"/repo/new.txt","content":"one\ntwo\n"}),
                 "completed",
                 "File created successfully at: /repo/new.txt",
-                false,
+                Some(json!("")),
+            ),
+            (
+                json!({"file_path":"/repo/中文 space.txt","content":"one\r\ntwo\r\n"}),
+                "completed",
+                "File created successfully at: /repo/中文 space.txt",
+                Some(json!("")),
+            ),
+            (
+                json!({"file_path":"/repo/new.txt","content":""}),
+                "completed",
+                "File created successfully at: /repo/new.txt",
+                None,
+            ),
+            (
+                json!({"file_path":"/repo/new.txt","content":"one\ntwo\n"}),
+                "failed",
+                "File created successfully at: /repo/new.txt",
+                None,
+            ),
+            (
+                json!({"file_path":"/repo/new.txt","content":"one\ntwo\n"}),
+                "in_progress",
+                "File created successfully at: /repo/new.txt",
+                None,
+            ),
+            (
+                json!({"file_path":"/repo/new.txt","content":"one\ntwo\n"}),
+                "completed",
+                "File created successfully at: /repo/other.txt",
+                None,
+            ),
+            (
+                json!({"file_path":"/repo/new.txt","content":"one\ntwo\n"}),
+                "completed",
+                "Write succeeded",
+                None,
             ),
             (
                 json!({"file_path":"/repo/new.txt","content":"one\ntwo\n"}),
                 "completed",
                 "The file /repo/new.txt has been updated successfully.",
-                false,
+                None,
             ),
         ] {
+            let expected_new_text = input
+                .get("new_string")
+                .or_else(|| input.get("content"))
+                .unwrap()
+                .clone();
             let mut initial = json!({"sessionUpdate":"tool_call","toolCallId":"command-create","status":"pending","kind":"edit",
-                "locations":[{"path":"/repo/new.txt"}],"rawInput":input,
-                "content":[{"type":"diff","path":"/repo/new.txt","oldText":null,"newText":"one\ntwo\n"}]});
+                "locations":[{"path":input["file_path"]}],"rawInput":input,
+                "content":[{"type":"diff","path":input["file_path"],"oldText":null,"newText":expected_new_text}]});
             crate::command_code_acp::enrich_tool_update(&mut initial, None);
             assert_eq!(initial["content"], json!([]));
             let mut update = json!({"sessionUpdate":"tool_call_update","toolCallId":"command-create","status":status,
@@ -35805,19 +35949,26 @@ for line in sys.stdin:
             );
             assert_eq!(
                 !payload["runtimeDiff"].is_null(),
-                has_diff,
+                expected_old_text.is_some(),
                 "{status}: {receipt}"
             );
-            if has_diff {
+            if let Some(old_text) = expected_old_text {
+                assert_eq!(payload["runtimeDiff"]["entries"][0]["oldText"], old_text);
                 let admitted = crate::runtime_diff::admit_runtime_diff(
                     &payload,
                     std::path::Path::new("/repo"),
                     Some("command-code-cli"),
-                )
-                .unwrap()
-                .unwrap();
-                assert_eq!(admitted.evidence_entries[0]["changeKind"], "add");
-                assert_eq!(admitted.evidence_entries[0]["after"], "one\ntwo\n");
+                );
+                let admitted = admitted.unwrap().unwrap();
+                assert_eq!(
+                    admitted.evidence_entries[0]["changeKind"],
+                    if old_text.is_null() { "add" } else { "update" }
+                );
+                assert_eq!(admitted.evidence_entries[0]["after"], expected_new_text);
+                assert_eq!(
+                    (admitted.entries[0].additions, admitted.entries[0].deletions),
+                    (2, 0)
+                );
             }
         }
 

@@ -52,11 +52,7 @@ impl Fixture {
             Some({
                 let paths = paths.clone();
                 let captures = captures.clone();
-                Arc::new(move |generation, interactive| {
-                    assert!(
-                        interactive,
-                        "user checks must read the interactive search source"
-                    );
+                Arc::new(move |generation| {
                     captures.fetch_add(1, Ordering::SeqCst);
                     RuntimeSearchEnvironment::for_test_paths(
                         generation,
@@ -284,16 +280,20 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
     assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 1.0.0");
     *fixture.paths.lock().unwrap() = vec![new.parent().unwrap().into()];
+    assert!(
+        old.is_file(),
+        "an existing entry must not suppress PATH refresh"
+    );
     assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
-    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 1.0.0");
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 2.0.0");
     assert_eq!(
         fixture.captures.load(Ordering::SeqCst),
-        1,
-        "valid entries reuse the search environment"
+        2,
+        "each user check refreshes PATH even while the old entry still exists"
     );
     fixture
         .core
-        .refresh_runtime_check_environment(true)
+        .refresh_runtime_check_environment()
         .await
         .unwrap();
     assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
@@ -491,7 +491,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     // Shared credentials are private; saved checks use them, draft checks don't publish them.
     fixture
         .core
-        .refresh_runtime_check_environment(true)
+        .refresh_runtime_check_environment()
         .await
         .unwrap();
     fixture.core.run_runtime_discovery().await;
@@ -609,7 +609,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
 
 // Controlled child/file barriers own the interleaving, not scheduler timing.
 #[tokio::test]
-async fn independent_checks_reuse_environment_and_same_target_check() {
+async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
     use rovai_core::agent_profile::AgentProfileService;
     // No health evidence and stale pre-upgrade Ready evidence must both leave
     // the already discovered target stable when a diagnostic begins.
@@ -738,7 +738,7 @@ async fn independent_checks_reuse_environment_and_same_target_check() {
         // Even an explicit rescan with the same effective inputs must leave A valid.
         fixture
             .core
-            .refresh_runtime_check_environment(true)
+            .refresh_runtime_check_environment()
             .await
             .unwrap();
         assert_eq!(
@@ -752,8 +752,8 @@ async fn independent_checks_reuse_environment_and_same_target_check() {
         );
         assert_eq!(
             fixture.captures.load(Ordering::SeqCst),
-            1,
-            "only the explicit rescan captures the shell"
+            3,
+            "both user checks and the explicit rescan capture without invalidating unchanged inputs"
         );
         std::fs::write(fixture.root.join("probe-release"), b"release").unwrap();
         assert_eq!(first.await.unwrap(), RuntimeCheckOutcome::StableFailure);
@@ -818,7 +818,7 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
             *fixture.paths.lock().unwrap() = vec![new.parent().unwrap().into()];
             fixture
                 .core
-                .refresh_runtime_check_environment(true)
+                .refresh_runtime_check_environment()
                 .await
                 .unwrap();
         }
@@ -1133,7 +1133,7 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
         "passive discovery cannot execute a version command"
     );
     for _ in 0..3 {
-        fixture.core.rescan_runtime_discovery(true).await.unwrap();
+        fixture.core.rescan_runtime_discovery().await.unwrap();
     }
     assert_eq!(
         std::fs::read_to_string(&log)
@@ -1145,7 +1145,7 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
     assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 1.0.0");
     assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
     let failure = fixture.health().await["diagnosticCode"].clone();
-    fixture.core.rescan_runtime_discovery(true).await.unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
     assert_eq!(
         fixture.health().await["diagnosticCode"],
         failure,
@@ -1161,7 +1161,7 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
     );
     fixture.program("versions", "2.0.0-upgraded", false);
     instrument(&program);
-    fixture.core.rescan_runtime_discovery(true).await.unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
     assert_eq!(
         fixture.health().await["reportedVersion"],
         "codex-cli 2.0.0-upgraded"
@@ -1181,7 +1181,7 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
         ),
     );
     std::fs::write(&program, body).unwrap();
-    fixture.core.rescan_runtime_discovery(true).await.unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
     let after = AgentProfileService::default()
         .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
         .unwrap()
@@ -1194,7 +1194,7 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
         fixture.health().await["reportedVersion"],
         "codex-cli 2.0.0-upgraded"
     );
-    fixture.core.rescan_runtime_discovery(true).await.unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
     assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 4.0.0");
     fixture.close().await;
 }
@@ -1209,7 +1209,7 @@ async fn local_saves_finish_while_environment_capture_is_held_and_never_launch_w
     let blocked = StdMutex::new(blocked);
     let captures = Arc::new(AtomicUsize::new(0));
     let count = captures.clone();
-    let fixture = Fixture::with_capture(Some(Arc::new(move |generation, _| {
+    let fixture = Fixture::with_capture(Some(Arc::new(move |generation| {
         assert_eq!(
             count.fetch_add(1, Ordering::SeqCst),
             0,
@@ -1236,7 +1236,7 @@ async fn local_saves_finish_while_environment_capture_is_held_and_never_launch_w
     }
     let refresh = {
         let core = fixture.core.clone();
-        tokio::spawn(async move { core.refresh_runtime_check_environment(true).await })
+        tokio::spawn(async move { core.refresh_runtime_check_environment().await })
     };
     ready.await.unwrap();
     let discovery = serde_json::to_value(&*fixture.core.runtime_discovery.read().await).unwrap();
@@ -1367,11 +1367,10 @@ async fn failed_environment_reader_cannot_prevent_a_local_save() {
     fixture.shutdown.take().unwrap().send(()).unwrap();
     fixture.manager.take().unwrap().await.unwrap();
     let mut core = Arc::try_unwrap(fixture.core).ok().unwrap();
-    core.runtime_search_capture = Some(Arc::new(|_, _| {
-        panic!("synthetic environment reader failure")
-    }));
+    core.runtime_search_capture =
+        Some(Arc::new(|_| panic!("synthetic environment reader failure")));
     let before = core.runtime_search_environment.read().await.summary();
-    assert!(core.refresh_runtime_check_environment(true).await.is_err());
+    assert!(core.refresh_runtime_check_environment().await.is_err());
     assert!(
         core.inspect_runtime_startup(KIND, RuntimeStartupConfiguration::default(), false)
             .await

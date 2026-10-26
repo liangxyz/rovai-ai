@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-25
+last_updated: 2026-10-26
 ---
 
 # Runtime Catalog Boundaries
@@ -217,8 +217,15 @@ Host 的程序指纹与 Native Session 的协议／存储来源分别判断，�
 细节与测试边界见
 [OpenCode V1/V2 实施记录](../versions/v1.72/opencode-v1-v2-implementation.md)。
 
-启动与 rescan 只解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity；
-不执行 `--version` 或协议深检。发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
+启动、rescan 与主动单项检查共用 Core 的基础 PATH 采集策略：macOS/Linux 使用有界交互式登录 shell，
+Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回退。主动检查即使旧入口存在也刷新，
+同次候选解析与检查进程使用该次搜索环境及 Runtime 通用配置。刷新保留已保存的路径和变量，输入比较、
+代次及并发保护沿用原机制。额外 shell 变量通过用户通用／队员配置传递，不增加版本管理器适配。
+精确范围见 [Runtime Launch v73](../contracts/runtime-launch-and-verification-v73.md)。
+
+启动只静态解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity，不运行 Runtime。
+手动 rescan 保留未知或变化程序的有界版本补读，不执行认证或协议深检；单项检查只检查选中的 Runtime。
+发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
 安装记录不伪造 Ready、认证或能力；旧健康证据只供主动诊断和模型 Picker 参考，已知版本的展示复用单独判断。
 
 已知程序版本复用现有快照保存，独立于健康状态：本次静态发现未读取版本或版本读取失败时，Core

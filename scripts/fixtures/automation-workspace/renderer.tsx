@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AgentProfile, AutomationRunSummary, AutomationView, CoreEvent, ProjectNavigationGroup, RovaiApi } from '@contracts'
+import type { AgentProfile, AutomationRunSummary, AutomationView, CoreEvent, ProjectNavigationGroup, RovaiApi, ThemeId } from '@contracts'
 import { AutomationWorkspace } from '../../../apps/desktop/src/renderer/src/AutomationWorkspace'
 import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
+import { defaultThreadNaming } from '../../../apps/desktop/src/renderer/src/automation-thread-naming'
 import { templates } from '../../../apps/desktop/src/renderer/src/automation-workspace-model'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
-import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
+import { DEFAULT_APPEARANCE, THEME_MODES } from '../../../apps/desktop/src/shared/appearance'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 // Production Renderer with deterministic, memory-only RPC responses. No Core, credentials or Runtime.
@@ -32,8 +33,8 @@ let automations: AutomationView[] = Object.entries(templates).map(([id, template
       threadId: status === 'skipped' ? null : `fixture-camp-${position}`, resultMessageId: status === 'completed' ? `message-${position}` : null,
       scheduledFor: createdAt, createdAt, endedAt: status === 'running' ? null : createdAt, notificationStatus: position === 3 ? 'failed' : 'none' }
   })
-  return { automationId: id, version: 1, name: template.name, prompt: template.prompt, schedule: template.schedule,
-    enabled: index !== 2, memberId: agents[index].agentId, projectRef: { kind: 'directory', path: projects[0].projectPath }, notifyChannels: [], appendRunDateToTitle: false,
+  return { automationId: id, version: 1, name: template.name, prompt: template.prompt, schedule: template.schedule, threadNaming: defaultThreadNaming(),
+    enabled: index !== 2, memberId: agents[index].agentId, projectRef: { kind: 'directory', path: projects[0].projectPath }, notifyChannels: [],
     nextRunAt: index === 2 ? null : '2026-09-08T01:00:00Z', lastRun: history[id][0], createdAt: now, updatedAt: now }
 })
 if (params.has('empty')) automations = []
@@ -47,9 +48,11 @@ let heldSave: Promise<void> | null = null
 let releaseSave: (() => void) | null = null
 Object.assign(window, { automationSplitterTest: {
   theme: (resolvedTheme: 'day' | 'night') => applyAppearanceSnapshot(document.documentElement, { ...DEFAULT_APPEARANCE, preference: resolvedTheme, resolvedTheme }),
+  palette: (preference: ThemeId) => applyAppearanceSnapshot(document.documentElement, { ...DEFAULT_APPEARANCE, preference, resolvedTheme: THEME_MODES[preference] }),
   failSave: () => { failNextSave = true },
   holdSave: () => { heldSave = new Promise<void>(resolve => { releaseSave = resolve }) },
   releaseSave: () => { releaseSave?.(); heldSave = null; releaseSave = null },
+  definitions: () => structuredClone(automations),
   saveCount: () => calls.filter(call => call.method === 'automations.update').length
 } })
 const callListeners = new Set<() => void>()

@@ -241,8 +241,8 @@ export function AutomationWorkspace({
             memberId: snapshot.memberId,
             projectRef: snapshot.projectRef,
             schedule: snapshot.schedule,
-            notifyChannels: snapshot.notifyChannels,
-            appendRunDateToTitle: snapshot.appendRunDateToTitle
+            threadNaming: snapshot.threadNaming,
+            notifyChannels: snapshot.notifyChannels
           }
         })
         const updated = automationFromResult(result)

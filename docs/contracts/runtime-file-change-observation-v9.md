@@ -4,7 +4,7 @@ contract: runtime-file-change-observation
 version: v9
 status: accepted
 source_version: v1.72
-last_updated: 2026-10-25
+last_updated: 2026-10-26
 ---
 
 # Runtime File Change Observation v9
@@ -18,8 +18,10 @@ last_updated: 2026-10-25
 `edit_file` 的 old/new 为 reported mutation 片段；空 old_string 且原生结果精确为
 `Created <输入同路径> (<new_string 行数> line[s])` 才以完整 new_string 发布 full-before-after/add。
 此固定原生回执只在文件不存在时产生，不将一般工具输出或模型正文解释为创建证明。
-`write_file` 的 created 文案也用于已有空文件，故它的 oldText:null 不证明新增；此类写入与不明确的
-多处替换只保留操作。失败、取消、提案不形成已发生 Diff。不补读磁盘、Git 或原生历史。
+`write_file` 成功终态的精确同路径 `File created successfully at: <输入路径>` 回执表示原先不存在
+或正文为空。非空 `content` 可按空正文到完整新正文进入 full-before-after/update，显示 `+N / −0`，
+不凭提案的 oldText:null 声称文件新增。空 content、覆盖非空文件及不明确的多处替换仍只保留操作。
+失败、取消、提案不形成已发生 Diff。不补读磁盘、Git 或原生历史。
 
 ## 成功发送输入文件排除
 

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-25
+last_updated: 2026-10-26
 ---
 
 # 测试与 Smoke Test
@@ -1238,17 +1238,20 @@ Dialog 验收，专项结果不能替代默认全套结果。
 
 ### 主动检查的环境刷新
 
-当前语义由 [Runtime Launch v42](../contracts/runtime-launch-and-verification-v42.md) 继承 v41 并拥有。
+当前语义由 [Runtime Launch v73](../contracts/runtime-launch-and-verification-v73.md) 拥有。
 `runtime_check_refresh_tests` 是 macOS/Windows Check Manager、保存 CAS、正式状态与草稿隔离的集成 owner：使用可注入的
 基础环境读取器、UUID 临时目录、私有 SQLite 和合成程序，不读取真实 Runtime 安装或账号。
-它覆盖目录变化、原路径升级、指定路径失效不回退、进程 PATH 不参与主程序选择、草稿/恢复自动不发布、
+它覆盖旧入口仍存在时主动检查刷新 PATH、未变输入不推进代次及独立检查继续执行、目录变化、原路径升级、
+指定路径失效不回退、进程 PATH 不参与主程序选择、草稿/恢复自动不发布、
 保存及新请求与旧探测交错、环境读取失败不沿用缓存。程序替换继续复用既有 identity-checked probe owner。
 恢复自动的回归在基础查找目录变化后预览并保存，直接断言保存后的正式路径与版本，不追加正式检查；
 同时验证其他 Runtime 设置保留、CAS 拒绝和环境读取失败不发布、同配置重试幂等。
 这些跨 manager/数据库的断言不能降为单独的发现函数测试；不新增第二套协议模拟或真实模型 Smoke。
+Issue #891 扩展上述 owner，旧“只有显式重扫才采集”断言随合同替换，保留配置保存、并发与过期结果案例。
+既有 shell capture owner 同时验证交互式登录参数、启动噪声、含空格 PATH、失败与超时清理；Rust 测试函数净增零。
 
 ```bash
-cargo test -p rovai-core --bin rovai-core --features slow-tests runtime_check_environment::tests
+cargo test -p rovai-core --lib --features slow-tests runtime_check_environment::tests
 pnpm exec vitest run apps/desktop/src/renderer/src/runtime-check.test.ts
 pnpm test:settings-workspace
 ```
@@ -1775,7 +1778,10 @@ owner 不经过 MCP wire，`runtime_mcp` 的原生文件 owner 也不拥有 Comm
 拒绝缺失 ID。`native_resume_consumes_only_adapter_evidence` 保留原生明确拒绝与模糊错误的分类，删除专属目录案例。
 `runtime_directory_overrides_change_native_candidates_without_explicit_refresh` 增加 Command 的四处原址发现；
 `acp_tool_events_expose_only_the_public_command_and_payload_digests` 增加 edit 新建、失败/提案/异路径、已有空文件
-和 write 回执不明确的矩阵，并检查新增内容进入共享 Diff 准入。Node Mod owner 验证过滤问卷且保留其余 active tools。
+和 write 回执矩阵，并检查内容进入共享 Diff 准入。2026-10-26 在同一 owner 补齐 write 的精确 created
+成功回执：空旧正文到非空 content 显示 update、准确增删统计，含中文空格路径及 CRLF；空 content、
+非空覆盖、未知/异路径回执、未完成与失败仍无 Diff。修复前成功 write 行数案例失败；无新增 Rust owner。
+Node Mod owner 验证过滤问卷且保留其余 active tools。
 固定官方 1.88 的 active-tools、真实文件回执、warm B 更新和 cold 同 ID 证据记录在
 [实施报告](../versions/v1.72/command-code-native-simplification.md#run-边界与原生能力补齐2026-10-25)。
 最小命令沿用 `cargo test -p rovai-core --features extended-tests --lib <owner>`、Node Mod owner 与默认 workspace。

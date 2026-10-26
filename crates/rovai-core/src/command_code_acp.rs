@@ -13,8 +13,8 @@ const BOOTSTRAP: &str = include_str!("command_code/bootstrap.mjs");
 /// Native ACP sends the proposed edit only on tool_call. Its old/new strings
 /// are matched fragments, not complete file states. Promote them only after a
 /// matching successful terminal. Only edit_file's explicit creation receipt
-/// establishes a complete new file; write_file also says "created" for an
-/// existing empty file, so its null oldText cannot establish creation.
+/// establishes a complete new file. write_file's "created" receipt also covers
+/// an existing empty file: it proves an empty previous body, not creation.
 pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
     if let Some(meta) = update.get_mut("_meta").and_then(Value::as_object_mut) {
         meta.remove("rovaiCommandMutation");
@@ -35,17 +35,31 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
         return;
     }
     let input = &initial.expect("checked initial")["rawInput"];
-    let path = input["file_path"]
+    let Some(path) = input["file_path"]
         .as_str()
-        .or_else(|| input["path"].as_str());
-    let Some((path, old, new)) = path
-        .zip(input["old_string"].as_str())
-        .zip(input["new_string"].as_str())
-        .map(|((p, o), n)| (p, o, n))
+        .or_else(|| input["path"].as_str())
+        .filter(|path| !path.trim().is_empty())
     else {
         return;
     };
-    if path.trim().is_empty() || old == new {
+    if let Some(new) = input["content"].as_str() {
+        if !new.is_empty()
+            && has_text_result(update, &format!("File created successfully at: {path}"))
+        {
+            update["content"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"type":"diff", "path":path, "oldText":"", "newText":new}));
+        }
+        return;
+    }
+    let Some((old, new)) = input["old_string"]
+        .as_str()
+        .zip(input["new_string"].as_str())
+    else {
+        return;
+    };
+    if old == new {
         return;
     }
     if old.is_empty() {
@@ -54,13 +68,7 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
             "Created {path} ({lines} {})",
             if lines == 1 { "line" } else { "lines" }
         );
-        if update["content"].as_array().is_some_and(|blocks| {
-            blocks.iter().any(|block| {
-                block["type"] == "content"
-                    && block["content"]["type"] == "text"
-                    && block["content"]["text"].as_str() == Some(receipt.as_str())
-            })
-        }) {
+        if has_text_result(update, &receipt) {
             update["content"]
                 .as_array_mut()
                 .unwrap()
@@ -76,6 +84,16 @@ pub fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
         update["_meta"] = json!({});
     }
     update["_meta"]["rovaiCommandMutation"] = mutation;
+}
+
+fn has_text_result(update: &Value, expected: &str) -> bool {
+    update["content"].as_array().is_some_and(|blocks| {
+        blocks.iter().any(|block| {
+            block["type"] == "content"
+                && block["content"]["type"] == "text"
+                && block["content"]["text"].as_str() == Some(expected)
+        })
+    })
 }
 
 /// Deliver the official Mod in Host-owned temporary storage. Native HOME,

@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-23
+last_updated: 2026-10-26
 ---
 
 # 长期接口合同
@@ -125,7 +125,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Host Web v1（历史）](host-web-v1.md) | 同一 Core 的初始只读网络入口；新会话由 v2 替代 |
 | [Current User Profile v1（当前）](current-user-profile-v1.md) | Desktop 本地名称/头像、原子保存、历史作者与结构化提及投影；不改变 Core identity、正文或模型上下文 |
 | [Domain Command Result v1（历史）](domain-command-result-v1.md) | Domain Command 结果的事务、幂等回放、专用列唯一正文、内部 marker、新旧事件双读与 schema 95 回退边界 |
-| [Scheduled Automation v3（当前）](scheduled-automation-v3.md) | occurrence 只分 started/skipped(overlap)，首消息进入普通 Delivery→claim→AgentRun 主链 |
+| [Scheduled Automation v4（当前）](scheduled-automation-v4.md) | Host 命名配置、按 occurrence 时间冻结日期/时间标题、schema 165 原子升级 |
+| [Scheduled Automation v3（历史）](scheduled-automation-v3.md) | occurrence 只分 started/skipped(overlap)，首消息进入普通 Delivery→claim→AgentRun 主链 |
 | [Scheduled Automation v2（历史）](scheduled-automation-v2.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |
 | [Scheduled Automation v1（历史）](scheduled-automation-v1.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |
 | [Single Chat v9（当前）](single-chat-v9.md) | 删除固定 singleChat facts，Manifest 42 / Facts 13，原权限与私有路由保持 |
@@ -167,7 +168,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v72（当前）](runtime-launch-and-verification-v72.md) | Command Code 1.88 原生 HOME、官方 Mod、ACP MCP、按 Binding 身份复用与启动失败材料所有权 |
+| [Runtime Launch and Verification v73（当前）](runtime-launch-and-verification-v73.md) | 统一基础 PATH 采集、主动单项检查刷新及既有通用／队员环境作用范围 |
+| [Runtime Launch and Verification v72（历史）](runtime-launch-and-verification-v72.md) | Command Code 1.88 原生 HOME、官方 Mod、ACP MCP、按 Binding 身份复用与启动失败材料所有权 |
 | [Runtime Launch and Verification v71（历史）](runtime-launch-and-verification-v71.md) | 通用 ACP Host 同时接受字符串 `error.data` 与 `error.data.error`；共用脱敏、输入确认与失败分类，不回填旧 Run |
 | [Runtime Launch and Verification v70（历史）](runtime-launch-and-verification-v70.md) | 继承环境输入规则；Claude 复用私有 settings 与进程环境，CodeBuddy 只注入后台启动变量，原生配置与 Session 保持自有边界 |
 | [Runtime Launch and Verification v69（历史）](runtime-launch-and-verification-v69.md) | 环境值直接显示；Renderer 标量转字符串、取消独立条数和名称长度限制，保留私有存储与三层合并 |

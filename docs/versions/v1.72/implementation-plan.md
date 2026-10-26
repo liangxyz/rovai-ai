@@ -8,6 +8,70 @@ last_updated: 2026-10-26
 
 # v1.72 实施与验收
 
+## 定时任务对话命名（2026-10-26）
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-issue-875-automation-title`；
+  分支 `rovai/issue-875-automation-title`，基线 `db8cd6e34aa9e0348fa750020105acf8f04869fd`；Governance：none。
+- Core 持有命名配置，创建 occurrence 时按定时/手动来源生成并持久化标题；Renderer 只提供格式预览和编辑。
+  默认日期+时间后置，支持四种日期、三种时间格式，允许完整长标题；旧对话不变。
+- Migration 215 原子新增定义配置并将当前 schema 升为 165。既有定义默认开启；不补写旧 Thread/occurrence。
+  Agent automation 输入/输出保留原形状，旧命令 canonical payload/digest 与历史回执保持兼容，
+  没有 Bootstrap、Context、Manifest 或工具目录版本变化。
+- Rust 扩展既有命名纯函数 owner、manual snapshot/replay owner、once overlap/time-source owner 和 current schema
+  admission owners。新增一个 schema-only migration owner，独立验证 DDL/receipt 回滚、旧标题保留与生产重开；
+  其他 owner 无法证明升级失败语义，不启动 Runtime。最小命令：`cargo test -p rovai-core --lib automation`，
+  `cargo test -p rovai-core --features extended-tests --lib database_contract` 和 `cargo test -p rovai-core --features extended-tests --lib current_schema_contains_required_contract_objects`。
+- 前端扩展生产 Automation fixture，覆盖保存失败保留、重试、重新进入、键盘单选、五套主题、最小宽度和缩放。
+  格式矩阵使用纯函数单测；共享表单类型检查、语言目录和通用文档门禁同步验证。
+- 已通过 Core automation 16 项扩展回归（包含旧版迁移、原子性、重放与新配置），migration admission matrix、
+  当前数据库准入/结构、旧 Team schema 升级各 1 项；`cargo check --workspace` 与 Rust 格式检查通过。
+- `pnpm typecheck`、11 项定向 Vitest、生产 Electron fixture、文档单测及基于上述基线的通用文档门禁通过。
+  fixture 使用新建的临时 userData/Skill Library，memory-only RPC，无 Core/真实 Runtime；五套主题、
+  320px 详情、700px 窗口和 125% 缩放截图已人工查看。
+- 初次全量 Vitest 与 Rust workspace 编译并行时，既有 `core-client` 启动重试的 6 秒等待超时
+  （3006 passed / 1 failed / 2 skipped）；该文件及实现与基线相同，单独复测 21 项全部通过。
+  后续完整 `pnpm test` 通过：Vitest 3007 passed / 2 skipped，Node 358 passed / 2 skipped，
+  文档、Skills 和 Electron sandbox 检查全部通过。schema fingerprint owner 已同步到 165。
+- Worktree 状态：ready；User 已授权创建 PR 并合入 main，[PR #913](https://github.com/murray17/rovai-ai/pull/913)
+  待 CI 通过后合并并清理 worktree。Issue #875 保持开启至发布；issue 回复先提供署名爱丽丝的草稿。
+
+## Runtime PATH 与主动检查一致性（2026-10-26）
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-issue-891-runtime-path`；
+  分支 `rovai/issue-891-runtime-path`，基线 `db8cd6e34aa9e0348fa750020105acf8f04869fd`；Governance：none；Status：ready（未合入）。
+- Issue #891：启动复用公共采集策略，macOS/Linux 只采集交互式登录 shell PATH；主动单项检查总是先刷新。
+  旧 `interactiveShell` 字段兼容接收，策略由 Core 决定。Windows、超时、输出处理、回退和候选排序沿用原实现。
+- 环境输入比较、未变代次、发布时重读最新配置、结果围栏和检查合并保持；普通运行不逐消息重扫，
+  不增加全局检查门禁或持久环境。额外变量继续由用户的通用／队员配置承接。
+- 更新 [Runtime Launch v73](../../contracts/runtime-launch-and-verification-v73.md) 及当前 Architecture／路由；
+  v64 已接受语义保留，由 v73 替代其检查复用规则。局部可逆修复，不新增 Version Decision。
+- 扩展既有 shell capture 与 `runtime_check_environment::tests` owners，替换旧跳过刷新断言，
+  保留原并发、配置保存、文件身份与草稿隔离；Rust 测试函数净增零。
+- 定向验证通过：`runtime_check_environment::tests` 8 项、`runtime_discovery::` 12 项、
+  `member_environment::tests` 4 项，以及 `launch_version_uses_the_frozen_program_without_blocking_ordinary_execution` 1 项。
+  使用 `cargo test -p rovai-core --features slow-tests --lib runtime_check_environment::tests -- --list`
+  确认 owner 已编译，再执行同一测试二进制的各过滤器。慢速刷新夹具默认线程栈发生溢出，
+  设置 `RUST_MIN_STACK=33554432`、`--test-threads=2` 后 8 项全部通过；没有改变生产线程栈或测试断言。
+- `pnpm test:rust:pr` 默认 workspace：477 passed / 1 ignored；`cargo check --workspace`、
+  `cargo fmt --all --check`、`pnpm typecheck`、`pnpm docs:test`、`pnpm docs:check` 及以上述基线执行的
+  `DOCS_BASE_REF=<base> pnpm docs:check:ci` 均通过。
+- 完整 `pnpm test`：256 个 Vitest 文件、3005 passed / 2 skipped；末组脚本 358 passed / 2 skipped。
+  首次执行的文件预览 watcher 用例等待通知超时，单独复跑和完整复跑均通过，未修改该功能。
+- 验收只使用既有临时数据库与合成程序；未执行用户实际 asdf 安装、Dock 重启或真实模型任务，
+  也不代表 Windows/Linux 真机验收。后续复用本 worktree；依用户偏好提交并推送任务分支，不自动创建 PR。
+- 评审后补齐 shell 采集的总期限：原实现只限制主 shell 等待，退出后的 stdout reader join 可能被
+  后台进程持有的管道拖住。采集函数改为非阻塞读取，进程退出与 EOF 共用原期限；失败时关闭管道并
+  终止采集进程组，尚未回收的主进程交后台 wait，不让收尾继续阻塞调用方。保留原输出上限、标记解析及回退。
+- 在原 `shell_path_capture_uses_interactive_login_and_bounds_failures` owner 内补入 shell 退出后
+  后台进程持有 stdout 的成功／失败场景，以及缺失标记、输出超限；不增加测试函数或环境管理机制。
+  修复前新增回归在 100 ms 期限下等待约 3.5 秒后错误返回 Captured。
+- 用同一采集函数构建隔离探针，`HOME`／`ZDOTDIR` 指向本 worktree 的临时目录，`.zshrc` 运行
+  `/bin/sleep 5 &`：`5d937a757` 返回 Captured / 5463 ms；修复后返回 TimedOut / 3000 ms，空结果交给原回退。
+  探针没有启动 App、Core 或真实 Runtime，也没有修改日常 shell 配置。
+- 追加修复复跑 `pnpm test:rust:pr`：477 passed / 1 ignored；`cargo check --workspace`、
+  `cargo fmt --all --check`、`pnpm docs:test` 与 `pnpm docs:check` 通过。本次没有前端改动，未重复前端整套回归。
+  最小复验为 `cargo test -p rovai-core --lib shell_path_capture_uses_interactive_login_and_bounds_failures`。
+
 ## Run 启动与停止展示（2026-10-26）
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-run-start-stop-ui`；
@@ -3688,7 +3752,8 @@ Host 验收使用独立临时 data、Skill Library 与 MCP 路径，不启动模
 
 ### 删除或合并的工作
 
-- 单项检查复用当前有效入口与搜索环境，无有效入口才补充搜索；显式重新检测捕获一次环境。
+- 本批原规则为单项检查复用有效入口与搜索环境、无有效入口才补充搜索；2026-10-26 已由
+  [Issue #891 修复](#runtime-path-与主动检查一致性2026-10-26)替代为主动单项检查总是先刷新。显式重新检测仍捕获一次环境。
   有效输入未变化时保留搜索 generation，同目标请求继续由既有 pending/active 队列合并。
 - 静态发现直接复用已有文件身份，原生稳定文件完整哈希为未变 0 次、首次或升级 1 次。
   必要校验与手动版本补读均留在各 Runtime 工作任务，形成既有 `VerifiedDiscoveredRuntimeEntry` 后短提交；

@@ -2,14 +2,14 @@
 document_type: architecture
 authority: scheduled-automation-architecture
 status: accepted
-last_updated: 2026-10-18
+last_updated: 2026-10-26
 ---
 
 # Scheduled Automation Architecture
 
 Scheduled Automation 是共享 Rust Host/Core 内的持久计划控制面。它拥有定义、schedule、occurrence、时间上限、结果与
 Owner 通知；消息、Delivery、AgentRun 和 Runtime 执行复用公开 Camp 的统一主链。字段合同见
-[Scheduled Automation v3](../contracts/scheduled-automation-v3.md)。
+[Scheduled Automation v4](../contracts/scheduled-automation-v4.md)。
 
 ## 组件和流程
 
@@ -37,6 +37,14 @@ claim 时只有 Delivery 等待，time limit 仍从 occurrence admission 起计�
 首条 prompt 进入 `RUN_INPUT.messages[]` 时只是 system-authored 普通消息，没有 `mission_start`/`automation` input kind，
 也不形成批次边界。后续普通消息可以与它按冻结时机合批。消息来源不会扩大 Runtime、文件、网络、Built-in 或 External
 MCP 权限。
+
+## 对话命名
+
+Automation 定义持有 `threadNaming`，Host 编辑和自动保存复用现有 CAS。Core 在 occurrence 创建事务内
+读取配置，用 scheduled_for（定时）或 admission 时间（手动）与本机时区生成完整标题，普通 Camp 创建
+同时保存标题和创建事件。配置修改不推进计划；历史标题和命令重放结果不重算。
+Renderer 只展示即时格式样例和 Core 保存后的历史标题，不拥有权威时间或历史修订。
+Agent automation 工具保留原输出形状，Host-only 配置在工具出口移除。
 
 ## 恢复和结算
 
@@ -81,7 +89,7 @@ Core 启动、定义创建／修改／关闭／删除、执行事实提交及宿
 
 ## References
 
-- [Scheduled Automation v3](../contracts/scheduled-automation-v3.md)
+- [Scheduled Automation v4](../contracts/scheduled-automation-v4.md)
 - [Public Camp Message、Delivery 与 AgentRun](public-a2a-message-delivery.md)
 - [Runtime recovery and shutdown](foundational-invariants.md#runtime-recovery-shutdown)
 - [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)

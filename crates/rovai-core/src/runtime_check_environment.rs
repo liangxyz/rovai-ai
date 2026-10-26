@@ -38,15 +38,11 @@ pub(crate) fn candidate_observation(
 }
 
 #[cfg(test)]
-pub(crate) type TestSearchCapture =
-    Arc<dyn Fn(u64, bool) -> RuntimeSearchEnvironment + Send + Sync>;
+pub(crate) type TestSearchCapture = Arc<dyn Fn(u64) -> RuntimeSearchEnvironment + Send + Sync>;
 
 impl Core {
     /// No activation, database writes, discovery events or probes. Drafts use only this half.
-    pub(crate) async fn read_runtime_check_environment(
-        &self,
-        interactive: bool,
-    ) -> Result<RuntimeSearchEnvironment> {
+    pub(crate) async fn read_runtime_check_environment(&self) -> Result<RuntimeSearchEnvironment> {
         let generation = self
             .runtime_search_environment
             .read()
@@ -59,9 +55,9 @@ impl Core {
         tokio::task::spawn_blocking(move || {
             #[cfg(test)]
             if let Some(capture) = capture {
-                return capture(generation, interactive);
+                return capture(generation);
             }
-            RuntimeSearchEnvironment::rescan(generation, interactive)
+            RuntimeSearchEnvironment::rescan(generation)
         })
         .await
         .context("Runtime Search Environment worker failed")
@@ -69,12 +65,11 @@ impl Core {
 
     pub(crate) async fn refresh_runtime_check_environment(
         &self,
-        interactive: bool,
     ) -> Result<Arc<RuntimeSearchEnvironment>> {
         // A stalled shell reader must not hold the local configuration commit lock.
         // Rebase generation and saved values at publication so an intervening Save
         // cannot be overwritten by this older capture.
-        let search = self.read_runtime_check_environment(interactive).await?;
+        let search = self.read_runtime_check_environment().await?;
         let _update = self.runtime_search_update.lock().await;
         let current = self.runtime_search_environment.read().await.clone();
         let configurations = rovai_core::runtime_startup::load_all(&*self.database.lock().await)?;

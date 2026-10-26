@@ -4166,6 +4166,15 @@ export type AutomationProjectRef =
   | { kind: 'quick_chat' }
   | { kind: 'directory'; path: string }
 
+/** Core freezes the resulting title when admitting an occurrence. */
+export interface AutomationThreadNaming {
+  includeDate: boolean
+  includeTime: boolean
+  dateFormat: 'iso' | 'slash' | 'short' | 'chinese'
+  timeFormat: '24' | '12' | 'seconds'
+  position: 'prefix' | 'suffix'
+}
+
 export interface AutomationRunSummary {
   runId: string
   status: 'running' | 'cancelling' | 'completed' | 'failed' | 'skipped'
@@ -4188,11 +4197,11 @@ export interface AutomationView {
   projectRef: AutomationProjectRef
   schedule: AutomationSchedule
   notifyChannels: AutomationNotifyChannel[]
-  appendRunDateToTitle: boolean
   nextRunAt: string | null
   lastRun: AutomationRunSummary | null
   createdAt: string
   updatedAt: string
+  threadNaming: AutomationThreadNaming
 }
 
 export interface AutomationListPage {
@@ -4214,7 +4223,7 @@ export interface CreateAutomationCommand {
   projectRef: AutomationProjectRef
   schedule: AutomationSchedule
   notifyChannels: AutomationNotifyChannel[]
-  appendRunDateToTitle?: boolean
+  threadNaming?: AutomationThreadNaming
 }
 
 export interface UpdateAutomationCommand {
@@ -4227,7 +4236,7 @@ export interface UpdateAutomationCommand {
   schedule?: AutomationSchedule
   notifyChannels?: AutomationNotifyChannel[]
   enabled?: boolean
-  appendRunDateToTitle?: boolean
+  threadNaming?: AutomationThreadNaming
 }
 
 export type CoreMethod =
