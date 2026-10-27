@@ -12669,7 +12669,46 @@ mod slow_tests {
 
     #[test]
     fn context_manifest_recovers_redacted_frozen_mcp_exposure_without_digests() {
+        // Both creation layouts must recover their frozen bytes after reopening.
+        for run_scoped in [false, true] {
+            assert_frozen_mcp_recovery(run_scoped);
+        }
+    }
+
+    fn assert_frozen_mcp_recovery(run_scoped: bool) {
         let mut fixture = fixture();
+        let config_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut effective_config: Value = serde_json::from_str(&config_json).unwrap();
+        assert_eq!(effective_config["mcpSnapshotLayout"], "run_v1");
+        if !run_scoped {
+            effective_config
+                .as_object_mut()
+                .unwrap()
+                .remove("mcpSnapshotLayout");
+            effective_config
+                .as_object_mut()
+                .unwrap()
+                .remove("configDigest");
+            effective_config["configDigest"] =
+                json!(canonical_json_digest(&effective_config).unwrap());
+        }
+        let config_json = serde_json::to_string(&effective_config).unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                params![fixture.run_id, config_json],
+            )
+            .unwrap();
         let config_store = McpConfigStore::new(fixture.directory.join("home/.rovai/mcp.json"));
         let known = ["agent_1".to_string()].into_iter().collect();
         let config = config_store.get(&known).unwrap();
@@ -12733,6 +12772,17 @@ mod slow_tests {
         let projection = projection_service
             .prepare(&fixture.database, &config_store, &projection_request)
             .unwrap();
+        let snapshot_root = fixture.directory.join("runtime/mcp").join(&fixture.run_id);
+        assert_eq!(
+            projection.canonical_path,
+            snapshot_root
+                .join(if run_scoped {
+                    "snapshot".to_string()
+                } else {
+                    fixture.execution_epoch.to_string()
+                })
+                .join("canonical.json")
+        );
         let skill_snapshot = SkillExposureSnapshot::default();
         let skill_exposure = PreparedSkillExposure {
             digest: canonical_json_digest(&serde_json::to_value(&skill_snapshot).unwrap()).unwrap(),
@@ -12773,6 +12823,30 @@ mod slow_tests {
         assert_eq!(persisted.2, None);
         assert!(!persisted.0.contains("must-not-enter-sqlite"));
 
+        let current = config_store.get(&known).unwrap();
+        let server_id = current
+            .servers
+            .iter()
+            .find(|server| server.name == "private-docs")
+            .unwrap()
+            .server_id
+            .clone();
+        assert!(matches!(
+            config_store
+                .update(
+                    crate::mcp::UpdateMcpServerParams {
+                        expected_config_digest: current.config_digest,
+                        server_id,
+                        definition_json:
+                            r#"{"mcpServers":{"private-docs":{"command":"new-global-command"}}}"#
+                                .into(),
+                    },
+                    &known
+                )
+                .unwrap(),
+            McpMutationResult::Ok { .. }
+        ));
+
         // The real Manifest writer leaves both retired digests NULL. The next
         // prepare must still recover the original private configuration.
         let repeated = projection_service
@@ -12790,7 +12864,7 @@ mod slow_tests {
         assert_eq!(reopened.snapshot, projection.snapshot);
         assert_eq!(reopened.servers, projection.servers);
 
-        // A new execution epoch copies the same Run's original projection.
+        // A new execution epoch reuses the same bytes; only legacy Runs copy them.
         let redispatched = reopened_service
             .prepare(
                 &fixture.database,
@@ -12804,6 +12878,10 @@ mod slow_tests {
         assert_eq!(redispatched.snapshot, projection.snapshot);
         assert_eq!(redispatched.servers, projection.servers);
         assert_eq!(
+            redispatched.canonical_path == projection.canonical_path,
+            run_scoped
+        );
+        assert_eq!(
             std::fs::read(&redispatched.canonical_path).unwrap(),
             std::fs::read(&projection.canonical_path).unwrap()
         );
@@ -12816,6 +12894,107 @@ mod slow_tests {
         assert_eq!(diagnostic.context_manifest.mcp_exposure_digest, None);
         assert_eq!(diagnostic.context_manifest.mcp_projection_digest, None);
         assert_eq!(diagnostic.context_manifest.attachment_digest, None);
+        let persisted_config: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted_config, config_json);
+
+        // A malformed/future marker is local to this Run, never a startup gate.
+        for unsupported in [json!("future-layout"), json!(null), json!(2)] {
+            let mut invalid = effective_config.clone();
+            invalid["mcpSnapshotLayout"] = unsupported;
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                    params![fixture.run_id, invalid.to_string()],
+                )
+                .unwrap();
+            let error = reopened_service
+                .prepare(&fixture.database, &config_store, &projection_request)
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsupported MCP snapshot layout")
+            );
+        }
+        let other_run = Uuid::new_v4().to_string();
+        assert!(
+            reopened_service
+                .prepare(
+                    &fixture.database,
+                    &config_store,
+                    &McpProjectionRequest {
+                        agent_run_id: &other_run,
+                        ..projection_request.clone()
+                    }
+                )
+                .is_ok()
+        );
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                params![fixture.run_id, config_json],
+            )
+            .unwrap();
+        assert!(
+            reopened_service
+                .prepare(&fixture.database, &config_store, &projection_request)
+                .is_ok()
+        );
+
+        // Existing maintenance removes crashed staging without retiring a live Run.
+        let staging = snapshot_root.join(".interrupted.tmp");
+        std::fs::create_dir(&staging).unwrap();
+        std::fs::write(staging.join("canonical.json"), b"partial").unwrap();
+        reopened_service
+            .cleanup_terminal_and_orphaned(&fixture.database)
+            .unwrap();
+        assert!(!staging.exists());
+        assert!(projection.canonical_path.exists());
+
+        if run_scoped {
+            assert_eq!(std::fs::read_dir(&snapshot_root).unwrap().count(), 1);
+            // Losing a frozen snapshot must not fall back to global config or
+            // import an epoch directory, even if one contains identical bytes.
+            let legacy = snapshot_root.join("99");
+            std::fs::create_dir(&legacy).unwrap();
+            let bytes = std::fs::read(&projection.canonical_path).unwrap();
+            std::fs::write(legacy.join("canonical.json"), &bytes).unwrap();
+            std::fs::remove_dir_all(projection.canonical_path.parent().unwrap()).unwrap();
+            let error = reopened_service
+                .prepare(&fixture.database, &config_store, &projection_request)
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("unavailable for frozen AgentRun")
+            );
+            assert_eq!(std::fs::read(legacy.join("canonical.json")).unwrap(), bytes);
+            assert!(!snapshot_root.join("snapshot").exists());
+        }
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'failed', ended_at = updated_at WHERE id = ?1",
+                [&fixture.run_id],
+            )
+            .unwrap();
+        reopened_service
+            .cleanup_terminal_and_orphaned(&fixture.database)
+            .unwrap();
+        assert!(!snapshot_root.exists());
         fixture.cleanup();
     }
 

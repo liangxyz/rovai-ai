@@ -1377,16 +1377,7 @@ fn claim_occurrence_in_tx(
         transaction,
         ScheduledAutomationAdmissionInput {
             automation_run_id: run_id.clone(),
-            automation_name: record.thread_naming.title(
-                &record.name,
-                (if trigger_kind == "manual" {
-                    now
-                } else {
-                    scheduled_for
-                })
-                .with_timezone(&Local)
-                .fixed_offset(),
-            ),
+            automation_name: record.name.clone(),
             prompt: record.prompt.clone(),
             member_id: record.member_id.clone(),
             project_binding_kind: record.project_ref.binding_kind(),
@@ -3054,18 +3045,9 @@ mod tests {
         assert!(replayed_run.replayed);
         assert_eq!(replayed_run.result.payload, first.result.payload);
 
-        let frozen_title: (String, String) = database.connection().query_row(
-            "SELECT camp.title, run.created_at FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [&automation_run_id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
-        assert_eq!(
-            frozen_title.0,
-            AutomationThreadNaming::default().title(
-                &derive_name(original_prompt),
-                parse_timestamp(&frozen_title.1)
-                    .unwrap()
-                    .with_timezone(&Local)
-                    .fixed_offset()
-            )
-        );
+        let frozen_title: String = database.connection().query_row(
+            "SELECT camp.title FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [&automation_run_id], |row| row.get(0)).unwrap();
+        assert_eq!(frozen_title, derive_name(original_prompt));
         assert_eq!(
             replayed_create.result.payload["threadNaming"],
             serde_json::to_value(AutomationThreadNaming::default()).unwrap()
@@ -3264,7 +3246,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            old_title, frozen_title.0,
+            old_title, frozen_title,
             "naming changes do not rewrite history"
         );
         assert_eq!(updated.result.payload["threadNaming"]["includeDate"], false);
@@ -3688,23 +3670,9 @@ mod tests {
             )
             .expect("manual run should start");
         assert_eq!(manual.result.payload["status"], "started");
-        let (manual_title, admitted): (String, String) = database.connection().query_row(
-            "SELECT camp.title, run.created_at FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [manual.result.payload["runId"].as_str().unwrap()], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-        let naming = AutomationThreadNaming::default();
-        assert_eq!(
-            manual_title,
-            naming.title(
-                &"🌸".repeat(80),
-                parse_timestamp(&admitted)
-                    .unwrap()
-                    .with_timezone(&Local)
-                    .fixed_offset()
-            )
-        );
-        assert_ne!(
-            manual_title,
-            naming.title(&"🌸".repeat(80), due.with_timezone(&Local).fixed_offset())
-        );
+        let manual_title: String = database.connection().query_row(
+            "SELECT camp.title FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [manual.result.payload["runId"].as_str().unwrap()], |row| row.get(0)).unwrap();
+        assert_eq!(manual_title, "🌸".repeat(80));
 
         let dispatches = service
             .claim_due(
@@ -3802,13 +3770,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(
-            title,
-            naming.title(
-                &"🌸".repeat(80),
-                scheduled_at.with_timezone(&Local).fixed_offset()
-            )
-        );
+        assert_eq!(title, "🌸".repeat(80));
         tx.commit().unwrap();
         remove_test_database(database, directory);
     }
@@ -3916,6 +3878,10 @@ mod tests {
                 },
             )
             .unwrap();
+        let scheduled_title: String = database.connection().query_row(
+            "SELECT camp.title FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1",
+            [&dispatches[0].automation_run_id], |row| row.get(0)).unwrap();
+        assert_eq!(scheduled_title, "Delayed tick renamed");
         assert_eq!(
             run,
             (

@@ -130,6 +130,7 @@ test('optional startup failures preserve authority RPC and can recover without r
     { id: 'mcp', path: 'mcp.json', kind: 'directory', method: 'mcp.config.get' },
     { id: 'skills', path: 'managed-skill-library/.staging', kind: 'file', method: 'skills.list' },
     { id: 'runtime.claude-code-cli', path: 'runtime-private', kind: 'file' },
+    { id: 'runtime.grok-build', path: 'runtime/grok-build/external-mcp', kind: 'file' },
     { id: 'maintenance', path: 'runtime/mcp', kind: 'file' }
   ]) {
     await t.test(scenario.id, async () => {

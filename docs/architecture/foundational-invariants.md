@@ -480,6 +480,7 @@ last_updated: 2026-10-26
 - 本机导入保留 env/Header 的原始值语义（含空值、空白和鉴权前缀），不生成新变量名或强制重复填写。引用按来源语义无损转换，并以 Core 实际启动环境判定缺项；不兼容语法明确拒绝该候选，不影响其他候选。新增仍默认停用且不分配队员；替换保留 identity、启停和分配，失败不破坏旧配置。历史生成的占位符不推测恢复，只有显式重新选取原始来源执行替换才迁移来源值。
 - 新配置从空 `mcpServers`、空管理元数据和无 Assignment 开始；产品不内置、恢复、广告或自动创建第三方 preset/受审定义。所有外部 Server 都来自用户显式创建/导入。
 - 对声明 `additive` 的 Runtime，每个 AgentRun 冻结当时已启用且分配给该成员的 server identity/revision 与经脱敏的 projection input；后续文件编辑不改写已冻结 Run。Runtime 投影只能写入 Core-owned 私有边界，不覆盖用户 Global/Project/Workspace 配置，Run 结束按进程复用与所有权规则清理。声明 `unsupported` 的 Runtime 不读取或冻结 Assignment，也不形成 projection。
+- MCP 私有快照布局在新 Run 创建时冻结；新 Run 使用固定 `snapshot/` 目录，缺少布局标记的旧 Run 保留 epoch 路径，不迁移或回填。错误限定在对应 Run 或可选 Runtime 初始化，不能反向阻断 Core authority；字段、原子发布和 Grok 新前缀清理见 [Input Snapshot Storage](../contracts/input-snapshot-storage-v1.md#mcp-snapshot-storage-layout)。
 - 外部 MCP Runtime 能力只有 `additive | unsupported`。Core 生成 projection request，Adapter 根据已验证的原生优先级和同名行为 finalise 实际配置；同名只能结构化拒绝、或在与较高优先级有效定义字节完全相同时结构化复用，不猜测 merge 或 override。不存在 Runtime-wide 降级、replacement fallback 或 transport fallback；一个 Server 失败不改变 built-in transport 或整台 Runtime 身份。
 - Pi 的 External MCP 能力固定为 `unsupported`。Core 对 Pi 静默忽略既有 Assignment，不读取或投影 server 定义，不启动
   server、不注册 proxy Tool、不建立 approval/bridge envelope，也不让 `mcp` optional subsystem 状态阻断 Pi dispatch。

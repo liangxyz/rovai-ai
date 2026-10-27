@@ -2,7 +2,7 @@
 .automation-naming-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 46px; padding: 5px 0; font-size: 12px; }
 .automation-naming-row + .automation-naming-row { border-top: 1px solid var(--line); }
 .automation-naming-row > label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
-.automation-naming-row input { width: 14px; height: 14px; margin: 0; accent-color: var(--focus); }
+.automation-naming-row input { width: 14px; height: 14px; margin: 0; accent-color: var(--conversation-action); }
 .automation-naming-row select { width: 138px; max-width: 100%; min-height: 32px; padding: 4px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--dialog-field-line); border-radius: 6px; font: inherit; }
 .automation-naming select:disabled { opacity: .45; cursor: default; }
 .automation-naming-position { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0; padding: 12px 0; border: 0; border-top: 1px solid var(--line); font-size: 12px; }
@@ -12,10 +12,8 @@
 .automation-naming-position input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 .automation-naming-position span { display: block; padding: 5px 12px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); }
 .automation-naming-position input:checked + span { border-color: var(--line); color: var(--ink); background: var(--surface); }
-.automation-naming-position input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
 .automation-naming-position:disabled { opacity: .45; }
 .automation-naming-position:disabled label { cursor: default; }
 .automation-naming-preview { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
 .automation-naming-preview > span { color: var(--muted); font-size: 11px; }
 .automation-naming-preview output { min-width: 0; color: var(--ink); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.automation-naming summary:focus-visible, .automation-naming select:focus-visible, .automation-naming-row input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

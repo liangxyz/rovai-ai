@@ -10,7 +10,7 @@ use std::io::Read;
 use std::{
     fs::{File, OpenOptions},
     io::Write,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
 };
 
 use anyhow::{Context, Result};
@@ -36,6 +36,7 @@ use crate::platform::private_storage::{
 };
 
 const MCP_PROJECTION_SCHEMA_VERSION: u32 = 2;
+pub(crate) const RUN_MCP_SNAPSHOT_LAYOUT: &str = "run_v1";
 #[cfg(any(unix, windows))]
 const MAX_PROJECTION_BYTES: u64 = 2 * 1024 * 1024;
 pub const CLAUDE_CODE_MCP_MINIMUM_VERSION: &str = "1.0.44";
@@ -143,6 +144,33 @@ pub struct McpProjectionService {
     root: PathBuf,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotLayout {
+    Epoch,
+    Run,
+}
+
+fn load_snapshot_layout(database: &Database, agent_run_id: &str) -> Result<SnapshotLayout> {
+    let config: Option<String> = database
+        .connection()
+        .query_row(
+            "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+            [agent_run_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let config: serde_json::Value = config
+        .map(|json| serde_json::from_str(&json))
+        .transpose()
+        .context("AgentRun effective config is invalid")?
+        .unwrap_or_default();
+    match config.get("mcpSnapshotLayout") {
+        None => Ok(SnapshotLayout::Epoch),
+        Some(value) if value.as_str() == Some(RUN_MCP_SNAPSHOT_LAYOUT) => Ok(SnapshotLayout::Run),
+        Some(_) => anyhow::bail!("AgentRun {agent_run_id} has an unsupported MCP snapshot layout"),
+    }
+}
+
 impl McpProjectionService {
     pub fn new(data_dir: &Path) -> Self {
         Self {
@@ -157,19 +185,29 @@ impl McpProjectionService {
         request: &McpProjectionRequest<'_>,
     ) -> Result<PreparedMcpProjection> {
         validate_request(request)?;
+        let layout = load_snapshot_layout(database, request.agent_run_id)?;
         let frozen = load_frozen_projection(database, request.agent_run_id)?;
-        let target = self.target_path(request.agent_run_id, request.execution_epoch);
+        let target = self.target_path(request.agent_run_id, request.execution_epoch, layout);
+        // Directory presence alone is not publication: load must validate its
+        // canonical file, including a winner committed during this check.
         if target.exists() {
             return self.load_and_validate(&target, request, frozen.as_ref());
         }
-        if let Some(previous) = self.find_previous(request, frozen.as_ref())? {
-            self.publish_bytes(request.agent_run_id, request.execution_epoch, &previous.0)?;
+        if layout == SnapshotLayout::Epoch
+            && let Some(previous) = self.find_previous(request, frozen.as_ref())?
+        {
+            self.publish_bytes(
+                request.agent_run_id,
+                request.execution_epoch,
+                layout,
+                &previous.0,
+            )?;
             return self.load_and_validate(&target, request, frozen.as_ref());
         }
         if let Some(frozen) = frozen.as_ref() {
             let projection = empty_legacy_projection(request);
             if frozen == &projection.exposure {
-                self.publish_projection(request, &projection)?;
+                self.publish_projection(request, layout, &projection)?;
                 return self.load_and_validate(&target, request, Some(frozen));
             }
             anyhow::bail!(
@@ -179,7 +217,7 @@ impl McpProjectionService {
         }
 
         let projection = materialize_projection(config_store, request)?;
-        self.publish_projection(request, &projection)?;
+        self.publish_projection(request, layout, &projection)?;
         self.load_and_validate(&target, request, None)
     }
 
@@ -271,19 +309,31 @@ impl McpProjectionService {
     fn publish_projection(
         &self,
         request: &McpProjectionRequest<'_>,
+        layout: SnapshotLayout,
         projection: &ProjectionFile,
     ) -> Result<()> {
         let mut bytes = serde_json::to_vec_pretty(projection)?;
         bytes.push(b'\n');
-        self.publish_bytes(request.agent_run_id, request.execution_epoch, &bytes)
+        self.publish_bytes(
+            request.agent_run_id,
+            request.execution_epoch,
+            layout,
+            &bytes,
+        )
     }
 
     #[cfg(unix)]
-    fn publish_bytes(&self, agent_run_id: &str, execution_epoch: i64, bytes: &[u8]) -> Result<()> {
+    fn publish_bytes(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        layout: SnapshotLayout,
+        bytes: &[u8],
+    ) -> Result<()> {
         ensure_or_create_private_directory(&self.root)?;
         let run_root = self.run_root(agent_run_id);
         ensure_or_create_private_directory(&run_root)?;
-        let target = self.target_path(agent_run_id, execution_epoch);
+        let target = self.target_path(agent_run_id, execution_epoch, layout);
         if target.exists() {
             return Ok(());
         }
@@ -301,7 +351,14 @@ impl McpProjectionService {
             file.sync_all()?;
             drop(file);
             File::open(&temporary)?.sync_all()?;
-            fs::rename(&temporary, &target)?;
+            if let Err(error) = fs::rename(&temporary, &target) {
+                if layout == SnapshotLayout::Run && target.join("canonical.json").exists() {
+                    // prepare still reads and validates the concurrent winner.
+                    let _ = fs::remove_dir_all(&temporary);
+                    return Ok(());
+                }
+                return Err(error.into());
+            }
             File::open(&run_root)?.sync_all()?;
             Ok(())
         })();
@@ -312,11 +369,17 @@ impl McpProjectionService {
     }
 
     #[cfg(windows)]
-    fn publish_bytes(&self, agent_run_id: &str, execution_epoch: i64, bytes: &[u8]) -> Result<()> {
+    fn publish_bytes(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        layout: SnapshotLayout,
+        bytes: &[u8],
+    ) -> Result<()> {
         ensure_or_create_private_directory(&self.root)?;
         let run_root = self.run_root(agent_run_id);
         ensure_or_create_private_directory(&run_root)?;
-        let target = self.target_path(agent_run_id, execution_epoch);
+        let target = self.target_path(agent_run_id, execution_epoch, layout);
         if target.exists() {
             ensure_private_directory(&target)?;
             return Ok(());
@@ -325,11 +388,20 @@ impl McpProjectionService {
         create_private_directory(&temporary)?;
         let result = (|| -> Result<()> {
             create_private_bytes(&temporary.join("canonical.json"), bytes)?;
-            commit_private_directory_temporary(&temporary, &target)
+            let committed = commit_private_directory_temporary(&temporary, &target);
+            if committed.is_err()
+                && layout == SnapshotLayout::Run
+                && target.join("canonical.json").exists()
+            {
+                ensure_private_directory(&target)?;
+                let _ = fs::remove_dir_all(&temporary);
+                return Ok(());
+            }
+            committed
         })();
         if result.is_err() {
             let _ = fs::remove_dir_all(&temporary);
-            if target.exists() {
+            if layout == SnapshotLayout::Epoch && target.exists() {
                 ensure_private_directory(&target)?;
                 return Ok(());
             }
@@ -342,6 +414,7 @@ impl McpProjectionService {
         &self,
         _agent_run_id: &str,
         _execution_epoch: i64,
+        _layout: SnapshotLayout,
         _bytes: &[u8],
     ) -> Result<()> {
         anyhow::bail!("private MCP projection storage is unsupported on this platform")
@@ -388,9 +461,16 @@ impl McpProjectionService {
         self.root.join(agent_run_id)
     }
 
-    fn target_path(&self, agent_run_id: &str, execution_epoch: i64) -> PathBuf {
-        self.run_root(agent_run_id)
-            .join(execution_epoch.to_string())
+    fn target_path(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        layout: SnapshotLayout,
+    ) -> PathBuf {
+        self.run_root(agent_run_id).join(match layout {
+            SnapshotLayout::Epoch => execution_epoch.to_string(),
+            SnapshotLayout::Run => "snapshot".to_string(),
+        })
     }
 }
 
@@ -854,10 +934,14 @@ fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
     if path.exists() {
         return ensure_private_directory(path);
     }
-    fs::create_dir_all(path)
+    // Set privacy at creation, so a concurrent publisher never observes the
+    // directory between mkdir and chmod and rejects otherwise valid storage.
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
         .with_context(|| format!("failed to create private MCP directory {}", path.display()))?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
+    ensure_private_directory(path)
 }
 
 #[cfg(windows)]
@@ -1078,12 +1162,79 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first.projection_digest, recovered.projection_digest);
+        assert_ne!(first.canonical_path, recovered.canonical_path);
+        assert!(first.canonical_path.exists());
+        assert!(!service.run_root(&run_id).join("snapshot").exists());
         let McpServerDefinition::Stdio { command, .. } = &recovered.servers["docs"] else {
             panic!("expected stdio");
         };
         assert_eq!(command, "old-command");
         drop(database);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(feature = "extended-tests")]
+    #[test]
+    fn concurrent_run_snapshot_publishers_reuse_one_complete_winner() {
+        // This filesystem race owns publication, independently of SQLite and
+        // Context recovery. Either configuration may win, but both must read it.
+        let root = std::env::temp_dir().join(format!("rovai-mcp-race-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let service = McpProjectionService::new(&root);
+        let run_id = Uuid::new_v4().to_string();
+        let request = request(&run_id, 1, &root, AdapterKind::CodexCli);
+        let target = service.target_path(&run_id, 1, SnapshotLayout::Run);
+        let barrier = std::sync::Barrier::new(2);
+        let winners = std::thread::scope(|scope| {
+            let publishers: Vec<_> = ["first", "second"]
+                .into_iter()
+                .map(|identity| {
+                    let service = &service;
+                    let request = &request;
+                    let target = &target;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        let mut projection = empty_legacy_projection(request);
+                        projection.exposure.config_digest = identity.to_string();
+                        barrier.wait();
+                        service
+                            .publish_projection(request, SnapshotLayout::Run, &projection)
+                            .unwrap();
+                        service.load_and_validate(target, request, None).unwrap()
+                    })
+                })
+                .collect();
+            publishers
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(winners[0].projection_digest, winners[1].projection_digest);
+        assert_eq!(winners[0].canonical_path, winners[1].canonical_path);
+        assert_eq!(fs::read_dir(service.run_root(&run_id)).unwrap().count(), 1);
+
+        // An existing invalid winner is never overwritten or silently accepted.
+        let bytes = fs::read(&winners[0].canonical_path).unwrap();
+        let other_id = Uuid::new_v4().to_string();
+        let other = McpProjectionRequest {
+            agent_run_id: &other_id,
+            ..request.clone()
+        };
+        assert!(service.load_and_validate(&target, &other, None).is_err());
+        service
+            .publish_bytes(&run_id, 2, SnapshotLayout::Run, b"replacement")
+            .unwrap();
+        assert_eq!(fs::read(&winners[0].canonical_path).unwrap(), bytes);
+        fs::write(&winners[0].canonical_path, b"invalid winner").unwrap();
+        service
+            .publish_bytes(&run_id, 2, SnapshotLayout::Run, &bytes)
+            .unwrap();
+        assert!(service.load_and_validate(&target, &request, None).is_err());
+        assert_eq!(
+            fs::read(&winners[0].canonical_path).unwrap(),
+            b"invalid winner"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

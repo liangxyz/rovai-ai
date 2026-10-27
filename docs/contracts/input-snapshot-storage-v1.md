@@ -4,7 +4,7 @@ contract: input-snapshot-storage-v1
 authority: context-snapshot-storage-and-current-database-admission
 status: accepted
 version: 1
-last_updated: 2026-10-12
+last_updated: 2026-10-26
 ---
 
 # Input snapshot storage and database admission
@@ -41,6 +41,35 @@ that identity for Runtime delivery correlation. Charter, collaboration and works
 markers still determine whether those materials are sent. Accepted/unknown inputs are not
 replayed by this change. Native Session recovery remains governed by CLI kind under
 [Runtime Launch v60](runtime-launch-and-verification-v60.md).
+
+## MCP snapshot storage layout
+
+New Runs record `mcpSnapshotLayout: "run_v1"` in their existing `effective_config_json`, in
+the Run creation transaction through the shared effective-config builder. It participates in
+the existing config digest, without changing the private MCP JSON format or its byte digest.
+This internal storage marker is not a model-input, native configuration or Host compatibility field.
+Runtime rebinding and recovery retain the original marker, including its absence.
+
+Marked Runs publish exactly one `runtime/mcp/<run-id>/snapshot/canonical.json`. Preparation,
+redispatch and interruption recovery reuse that file without scanning legacy epoch directories.
+Missing markers retain `runtime/mcp/<run-id>/<epoch>/canonical.json` and the existing epoch-copy
+recovery logic, including Runs queued before upgrade. No existing Run is backfilled, migrated,
+merged or newly retired. An unknown or malformed marker rejects only that Run's preparation;
+it does not participate in database admission or subsystem initialization.
+
+Publication retains private hidden staging directories and atomic directory commit. Directory
+presence alone is not success: the canonical file must pass the existing permission, identity,
+content and frozen-exposure checks. A concurrent loser may reuse only a validated winner;
+neither later global configuration nor a failed publisher overwrites it. Missing frozen material
+keeps the existing error and legacy-empty exception, without refreezing current global settings.
+Existing maintenance removes terminal/orphan Run roots and interrupted hidden staging directories.
+
+Grok newly generated plugins use the shared `grok-mcp-plugin-v2-` prefix. Adapter initialization
+cleans only that prefix of Grok plugin directories under its private `external-mcp`, after existing
+process recovery and before enabling Host creation. Old Grok prefixes remain untouched; other
+adapters retain their existing prefix rules. Healthy subsystems skip reinitialization; cleanup
+failure degrades only the corresponding optional Runtime subsystem. Host-held
+`EphemeralMcpConfigFile` retains normal release cleanup and lives through Host reuse.
 
 ## Database opening and upgrade
 

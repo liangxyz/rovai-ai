@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 
 const COPILOT_CONFIG_PREFIX: &str = "copilot-mcp-";
 const ADDITIVE_CONFIG_PREFIX: &str = "additional-mcp-";
-const GROK_PLUGIN_PREFIX: &str = "grok-mcp-plugin-";
+const GROK_PLUGIN_PREFIX: &str = "grok-mcp-plugin-v2-";
 const CONFIG_SUFFIX: &str = ".json";
 
 #[derive(Debug, Clone, Copy)]
@@ -341,8 +341,46 @@ mod tests {
             "rovai-runtime-grok-mcp-test-{}",
             uuid::Uuid::new_v4()
         ));
+        let external = directory.join("external-mcp");
+        let legacy = external.join("grok-mcp-plugin-legacy");
+        let unrelated = external.join("user-plugin");
+        let stale = external.join(format!("{GROK_PLUGIN_PREFIX}abandoned"));
+        for path in [&legacy, &unrelated, &stale] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join(".mcp.json"), b"retained material").unwrap();
+        }
+        // Initialization owns the cleanup; no Run completion calls it.
+        #[cfg(feature = "extended-tests")]
+        {
+            let (incoming, _receiver) = tokio::sync::mpsc::unbounded_channel();
+            let adapter = crate::acp::AcpCliRuntimeAdapter::deferred(
+                crate::agent_profile::AdapterKind::GrokBuild,
+                incoming,
+                directory.clone(),
+                std::sync::Arc::new(crate::runtime_fleet::AgentRuntimeFleetManager::new(
+                    Default::default(),
+                )),
+                crate::compaction::CompactionDetectorPolicy::Disabled,
+            );
+            adapter.initialize_storage().unwrap();
+            assert!(!stale.exists());
+        }
+        remove_stale_mcp_configs(&directory).unwrap();
+        assert!(!stale.exists());
+        for path in [&legacy, &unrelated] {
+            assert_eq!(
+                fs::read(path.join(".mcp.json")).unwrap(),
+                b"retained material"
+            );
+        }
         let plugin = write_ephemeral_grok_mcp_plugin(&directory, &external_servers()).unwrap();
         let root = plugin.path().to_path_buf();
+        assert!(
+            root.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(GROK_PLUGIN_PREFIX)
+        );
         let manifest = std::fs::read_to_string(root.join("plugin.json")).unwrap();
         let servers = std::fs::read_to_string(root.join(".mcp.json")).unwrap();
         assert!(manifest.contains("rovai-external-mcp"));

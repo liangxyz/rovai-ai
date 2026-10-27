@@ -126,58 +126,26 @@ app.whenReady().then(async () => {
     await begin(); await move(240)
     await pause(230); assert.equal((await geometry()).hidden, true, 'The App motion preference also folds while held without animation')
     await release(); assert.equal((await geometry()).hidden, true)
-    // The production editor must send, preserve on failure and reload naming settings.
+    // Naming is withdrawn from every editor surface, including saved definitions.
     await load()
-    await run('document.querySelector(".automation-naming summary").click()')
-    await frame()
-    assert.match(await run('document.querySelector(".automation-naming-preview output").textContent'), /Issue \/ PR 巡检 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
-    await run(`window.automationSplitterTest.failSave();
-      document.querySelector('.automation-naming input[type=checkbox]').click();
-      document.querySelectorAll('.automation-naming input[type=checkbox]')[1].click()`)
-    await wait(`document.querySelector('.automation-issue')?.textContent.includes('保存失败') || document.body.textContent.includes('重试保存')`)
-    assert.equal(await run('document.querySelector(".automation-naming-preview output").textContent'), 'Issue / PR 巡检')
-    assert.equal(await run('document.querySelectorAll(".automation-naming select:disabled").length'), 2)
-    assert.equal(await run('window.automationSplitterTest.definitions()[0].threadNaming.includeDate'), true, 'Failed save must not mutate the definition')
-    assert.equal(await run('document.querySelector(".automation-naming input[type=checkbox]").checked'), false, 'Failed save keeps the draft')
-    await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === '重试保存').click()`)
-    await wait('window.automationSplitterTest.definitions()[0].threadNaming.includeDate === false')
-    await run(`document.querySelector('.automation-naming input[type=checkbox]').click();
-      document.querySelectorAll('.automation-naming input[type=checkbox]')[1].click();
-      const date = document.querySelector('[aria-label="日期格式"]'); date.value = 'chinese'; date.dispatchEvent(new Event('change', {bubbles:true}));
-      const time = document.querySelector('[aria-label="时间格式"]'); time.value = 'seconds'; time.dispatchEvent(new Event('change', {bubbles:true}));
-      document.querySelector('.automation-naming input[value="prefix"]').click()`)
-    await wait('window.automationSplitterTest.definitions()[0].threadNaming.position === "prefix"')
-    assert.deepEqual(await run('window.automationSplitterTest.definitions()[0].threadNaming'), { includeDate: true, includeTime: true, dateFormat: 'chinese', timeFormat: 'seconds', position: 'prefix' })
-    // Re-enter through the real workspace navigation, which reconstructs the saved draft.
-    await run('document.querySelector(".automation-editor-toolbar button").click()'); await frame()
-    await run('document.querySelector(".automation-task-open").click()'); await frame()
-    await run('document.querySelector(".automation-naming summary").click()'); await frame()
-    assert.equal(await run('document.querySelector(".automation-naming input[value=prefix]").checked'), true)
-    assert.equal(await run('document.querySelector("[aria-label=日期格式]").value'), 'chinese')
-    await run('document.querySelector(".automation-naming input[value=prefix]").focus()')
-    await key('Right')
-    assert.equal(await run('document.querySelector(".automation-naming input[value=suffix]").checked'), true, 'Position supports native radio keyboard input')
-    await wait('window.automationSplitterTest.definitions()[0].threadNaming.position === "suffix"')
+    assert.equal(await run('document.querySelector(".automation-naming")'), null)
+    assert.equal(await run('document.querySelector(".automation-name-input").value'), 'Issue / PR 巡检')
     for (const palette of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
-      await run(`window.automationSplitterTest.palette(${JSON.stringify(palette)}); document.querySelector('.automation-naming').scrollIntoView({block:'center'})`); await frame()
-      await capture(`automation-naming-${palette}`)
+      await run(`window.automationSplitterTest.palette(${JSON.stringify(palette)})`); await frame()
+      await capture(`automation-editor-${palette}`)
     }
     await run('window.automationSplitterTest.palette("day")')
     await begin(); await move(300); await release()
-    await run('document.querySelector(".automation-naming").scrollIntoView({block:"center"})'); await frame()
-    assert.equal(await run('document.querySelector(".automation-naming-panel").scrollWidth > document.querySelector(".automation-naming-panel").clientWidth'), false)
-    await capture('automation-naming-minimum')
+    await capture('automation-editor-minimum')
     await reset()
     window.webContents.setZoomFactor(1.25); await frame()
-    await run('document.querySelector(".automation-naming").scrollIntoView({block:"center"})'); await frame()
-    await capture('automation-naming-zoom')
+    await capture('automation-editor-zoom')
     window.webContents.setZoomFactor(1)
     window.setContentSize(700, 900); await frame()
-    await run('document.querySelector(".automation-naming").scrollIntoView({block:"center"})'); await frame()
-    await capture('automation-naming-narrow')
+    await capture('automation-editor-narrow')
     assert.deepEqual(errors, [])
     console.log(JSON.stringify({ ok: true, checks: ['stable minimum and release', 'held confirmation and reversal', 'Escape', 'fast release',
-      'release without pointermove', 'keyboard restore', 'save failure preserves draft without retry loop', 'late save fenced after cancellation', 'night', 'system and App reduced motion', 'naming defaults, persistence, failure, keyboard, themes and widths'] }))
+      'release without pointermove', 'keyboard restore', 'save failure preserves draft without retry loop', 'late save fenced after cancellation', 'night', 'system and App reduced motion', 'naming controls hidden, editor themes and widths'] }))
     window.destroy(); app.quit()
   } catch (error) {
     await capture('failure'); console.error(error); console.error(errors); window.destroy(); app.exit(1)

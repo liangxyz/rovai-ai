@@ -7562,6 +7562,20 @@ mod tests {
         upgraded.model.model_id = "gpt-next-default".to_string();
         assert!(runtime_logical_identity_matches(&frozen, &upgraded));
 
+        // Rebinding only refreshes Runtime fields, including for old Runs that
+        // must never acquire the new snapshot layout during recovery.
+        for mut config in [json!({}), json!({"mcpSnapshotLayout": "run_v1"})] {
+            let layout = config.get("mcpSnapshotLayout").cloned();
+            replace_effective_runtime(&mut config, &upgraded).unwrap();
+            assert_eq!(config.get("mcpSnapshotLayout").cloned(), layout);
+            let digest = config
+                .as_object_mut()
+                .unwrap()
+                .remove("configDigest")
+                .unwrap();
+            assert_eq!(digest, canonical_json_digest(&config).unwrap());
+        }
+
         let mut different_installation = upgraded.clone();
         different_installation.installation_id = "adapter-other".to_string();
         assert!(!runtime_logical_identity_matches(
@@ -10756,6 +10770,7 @@ mod tests {
         assert_eq!(state.5, effective.executable_fingerprint);
         assert_eq!(state.6, 1);
         let effective_config: Value = serde_json::from_str(&state.7).unwrap();
+        assert_eq!(effective_config["mcpSnapshotLayout"], "run_v1");
         assert_eq!(
             effective_config["runtime"]["executableFingerprint"],
             effective.executable_fingerprint

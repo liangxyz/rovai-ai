@@ -1,45 +1,37 @@
-# Rovai AI v0.5.0
+# Rovai AI v0.5.1
 
 <!-- lang:zh-CN -->
 
-本次更新新增团队管理、会话与使命引用、撤回后重新编辑和三款主题，重新开放 Command Code 接入，并补齐 Web 端长文本附件。
+本次更新支持在创建使命时选用团队，改善会话引用与执行状态展示，并修复多项智能体运行问题。
 
-- 【功能】**新增团队管理。** 可保存常用的队员组合、队长和协作指引，创建会话时直接选用，也可设为一键创建的默认配置。指引最多支持 10,000 字；修改团队不会改变已有会话。
-- 【功能】**支持引用其他会话和使命。** 在公屏输入 `@`，可切换选择队员、会话或使命；引用支持查看来源、跳转打开，并随草稿和历史消息保留。
-- 【功能】**撤回消息后支持重新编辑。** 公屏消息撤回后两分钟内，可在当前客户端将正文和显式 @ 队员回填输入框，修改后重新发送；已有草稿时会先确认替换。
-- 【功能】**重新开放 Command Code 接入（预览）。** 支持 macOS Apple Silicon、Intel、Windows x64 和 Linux x64，要求官方 CLI 1.88.0 或更新稳定版。使用原生配置，支持模型选择、会话恢复、Skills 和 MCP。
-- 【界面】**新增“晨雾”“朝霞”“绯夜”三款主题。** 可在外观设置中切换，并同步调整窗口标题栏、滚动条、选择框和弹出菜单的配色。
-- 【交互】**查找队员支持拼音和首字母。** 在公屏、待发送草稿和使命描述中，可通过中文、拼音或首字母搜索队员名称与角色。
-- 【功能】**Web 端补齐长文本粘贴转附件。** 在公屏单次粘贴超过 10,000 个字符的纯文本，会生成保留全文的 `.txt` 附件，支持预览、刷新恢复和移除；移除未发送文件时不再阻塞其他请求。
-- 【交互】**修复面板拖动后宽度回跳。** 分隔线按松手位置保存；可折叠面板支持继续向边缘拖动收起，反向拖动展开，并改善回复详情收起后的宽度恢复。
-- 【交互】**精简输入框中的 Skills 选择列表。** 使用更紧凑的名称、说明和关联队员展示，同名 Skill 标注来源，保留搜索、键盘选择与失败重试。
-- 【修复】**修复消息中的部分文字被隐藏。** 尖括号占位符和 HTML 原文按文字显示，不再被当作标签丢弃，同时修正相关引用选文和文件链接间距。
-- 【修复】**补全 TRAE 等智能体的错误详情。** 配额不足等错误可显示服务方返回的具体原因，不再只留下笼统的 `Internal error`。
-- 【优化】**调整 Claude Code 和 CodeBuddy 的后台任务收尾。** 优先前台执行必要任务，并要求收集后台任务结果后再结束回复，减少工作尚未完成就提前收尾的情况。
-- 【修复】**修复设置页的布局问题。** 切换“世界地图”和“会话任务”时，设置行保持原位；放大界面后，默认团队选择框可换行显示，避免横向溢出。
-- 【修复】**修复 Web 端部分智能体图标无法显示的问题。** 补齐 ICO 图标资源的读取支持。
+- 【功能】**创建使命时支持选用团队。** 可直接使用已保存的队员组合、队长和协作指引，也可自定义成员。较长的指引支持展开阅读全文，描述中额外 @ 的队员也会加入使命。
+- 【交互】**优化会话与使命引用。** 长标题自动省略显示，避免撑开输入框和消息气泡，详情中仍可查看完整标题。在公屏 `@` 列表中，可用 Tab、Shift+Tab 切换队员、会话和使命，用 Enter 插入引用。
+- 【交互】**统一执行启动与停止时的提示。** 启动阶段显示“启动中”，尚未开始处理的消息显示“准备中”或“排队中”。停止时保留已有内容和执行步骤，减少重复提示。
+- 【修复】**修复 Claude Code 审批通过后可能一直显示运行中的问题。** 当原生进程已经退出、工具结果未返回时，执行会结束为中断状态，并保留操作结果未知的记录。
+- 【修复】**修复新版 Copilot CLI 无法启动的问题。** 调整启动参数，兼容 Copilot CLI 1.0.103。
+- 【修复】**修复运行时检测使用的路径不一致问题。** 应用启动、重新检测和单项检查统一使用相同的命令搜索路径；主动点击“检查”时会刷新路径，减少 macOS 从 Dock 启动后反复检测失败的情况。
+- 【修复】**补齐 Command Code 写入文件的差异展示。** 对新建文件或空文件写入内容并成功后，可查看新增行数和完整差异，不再只显示一次文件操作。
+- 【优化】**减少 MCP 配置快照的重复写入。** 同一次执行恢复时复用配置快照，并补齐 Grok 临时 MCP 插件的启动清理。
 
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.0)
+感谢 @arschlochnop 反馈的 Claude Code 审批与运行时检测问题（[#889](https://github.com/murray17/rovai-ai/issues/889)、[#891](https://github.com/murray17/rovai-ai/issues/891)）。
+
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.1)
 
 ---
 
 <!-- lang:en -->
 
-This release adds team presets, conversation and mission references, re-editing after message withdrawal, and three themes. It also reopens Command Code integration and brings long-paste attachments to Web.
+This release brings team presets to mission creation, improves conversation references and execution status, and fixes several agent runtime issues.
 
-- [Feature] **Save reusable teams.** Store a teammate lineup, lead, and collaboration guidance, then select it when creating a conversation or use it as the one-click default. Guidance supports up to 10,000 characters. Editing a team does not change existing conversations.
-- [Feature] **Reference other conversations and missions.** Type `@` in a public conversation to choose teammates, conversations, or missions. Inspect a reference, open its source, and keep it in drafts and message history.
-- [Feature] **Re-edit withdrawn messages.** Within two minutes of withdrawing a public message, restore its text and explicit teammate mentions to the input on the same client, edit, and send again. Replacing an existing draft requires confirmation.
-- [Feature] **Reopen Command Code integration in Preview.** Support macOS Apple Silicon, Intel, Windows x64, and Linux x64 with the official CLI version 1.88.0 or a newer stable release. Use native configuration with model selection, session restoration, Skills, and MCP.
-- [UI] **Add Morning Mist, Dawn Glow, and Crimson Night themes.** Choose them in Appearance settings, with matching colors for window captions, scrollbars, checkboxes, and pop-up menus.
-- [Interaction] **Find teammates by pinyin or initials.** Search teammate names and roles using Chinese text, pinyin, or initials in public inputs, pending drafts, and mission descriptions.
-- [Feature] **Support long-paste attachments on Web.** A single plain-text paste exceeding 10,000 characters in a public conversation becomes a complete `.txt` attachment. Preview, restore after refresh, and remove it. Removing an unsent file no longer blocks other requests.
-- [Interaction] **Fix panels snapping back after resizing.** Save the divider position when released. Drag collapsible panels further toward an edge to fold them, reverse the drag to expand, and restore a useful width when reopening reply details.
-- [Interaction] **Make the input's Skills picker more compact.** Show names, descriptions, and associated teammates in a smaller list. Label the sources of duplicate names while retaining search, keyboard selection, and retry.
-- [Fix] **Preserve text that was incorrectly hidden in messages.** Display angle-bracket placeholders and literal HTML as text instead of dropping them as tags. Correct related quote selection and spacing around file links.
-- [Fix] **Show more complete error details from TRAE and other agents.** Keep provider explanations for errors such as exhausted quotas instead of showing only a generic `Internal error`.
-- [Improvement] **Adjust background-task completion for Claude Code and CodeBuddy.** Favor foreground execution for required work and instruct agents to collect background results before their final reply, reducing premature completion.
-- [Fix] **Fix settings layout issues.** Toggling World Map or Conversation Tasks no longer shifts the settings layout. The default-team picker wraps at high zoom to avoid horizontal overflow.
-- [Fix] **Restore missing agent icons on Web.** Serve packaged ICO logo resources alongside the existing image formats.
+- [Feature] **Use saved teams when creating missions.** Choose an existing teammate lineup, lead, and collaboration guidance, or set up a custom roster. Expand long guidance to read it in full. Additional teammates mentioned in the description also join the mission.
+- [Interaction] **Improve conversation and mission references.** Long titles are ellipsized to fit the input and message bubble, with full titles available in the details. In the public `@` picker, use Tab or Shift+Tab to switch between teammates, conversations, and missions, then Enter to insert a reference.
+- [Interaction] **Make startup and stop feedback consistent.** Show a single startup status, distinguish preparation from queued messages, and retain existing content and execution steps while stopping, with fewer duplicate notices.
+- [Fix] **Fix Claude Code remaining in a running state after approval.** If the native process has exited without returning its tool result, finish the execution as interrupted while retaining an unknown result for the affected operation.
+- [Fix] **Restore startup with newer Copilot CLI releases.** Update launch arguments for compatibility with Copilot CLI 1.0.103.
+- [Fix] **Use consistent command search paths for runtime checks.** Startup, rediscovery, and individual checks now use the same path capture policy. Clicking Check refreshes the paths, reducing repeated detection failures when launching from the macOS Dock.
+- [Fix] **Show complete diffs for Command Code writes from empty content.** Successful writes to new or empty files now show added line counts and the full diff instead of only a file operation.
+- [Improvement] **Reduce duplicate MCP configuration snapshots.** Reuse the snapshot when recovering the same execution, and clean up abandoned temporary Grok MCP plugins at startup.
 
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.0)
+Thanks to @arschlochnop for reporting the Claude Code approval and runtime detection issues ([#889](https://github.com/murray17/rovai-ai/issues/889), [#891](https://github.com/murray17/rovai-ai/issues/891)).
+
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.1)

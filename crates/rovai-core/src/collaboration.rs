@@ -5090,6 +5090,7 @@ pub(crate) fn build_effective_config(
         );
     let mut snapshot = json!({
         "schemaVersion": 3,
+        "mcpSnapshotLayout": crate::mcp_projection::RUN_MCP_SNAPSHOT_LAYOUT,
         "agentId": agent_id,
         "agentProfileVersion": agent_profile_version,
         "campMemberVersion": camp_member_version,

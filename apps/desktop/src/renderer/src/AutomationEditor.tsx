@@ -7,7 +7,6 @@ import { AutomationGlyph, type AutomationIcon } from './AutomationControls'
 import { dateTimeLabel, projectValue, projectFromValue, runStatus, scheduleKinds, scheduleWithKind, weekdays, type AutomationDraft } from './automation-workspace-model'
 import { readErrorMessage } from './error-message'
 import { automationScheduleError } from './automation-schedule-validation'
-import { AutomationNamingControls } from './AutomationNamingControls'
 import { AutomationDatePicker, AutomationTimePicker } from './AutomationSchedulePickers'
 import { runtimeAdapterDisplayLabel } from '../../shared/execution-presentation'
 import { UiText, uiAttribute } from './interface-language'
@@ -179,7 +178,6 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       {automation?.nextRunAt && <p className="automation-next-run"><UiText zh={"下次 "} /><time dateTime={automation.nextRunAt}>{dateTimeLabel(automation.nextRunAt)}</time><span><UiText zh={"本地时间"} /></span></p>}
       {automation && !automation.enabled && <p className="automation-next-run"><UiText zh={"已关闭，可在任务操作中运行一次。"} /></p>}
     </section>
-    <AutomationNamingControls name={draft.name} prompt={draft.prompt} value={draft.threadNaming} disabled={busy} onChange={(threadNaming) => onChange((current) => ({ ...current, threadNaming }))} />
     <details className="automation-channel-disclosure" onToggle={(event) => setChannelsOpen(event.currentTarget.open)}>
       <summary><span className="automation-channel-symbol"><AutomationGlyph name="channel" /></span><span><strong><UiText zh={"通知到渠道"} /></strong><small><UiText zh={"由当前队员的渠道 Bot 发送结果"} /></small></span><span className="automation-channel-count">{draft.notifyChannels.length ? draft.notifyChannels.map((channel) => uiAttribute(CHANNEL_PROVIDER_BRANDS[channel].name)).join('、') : uiAttribute("未选择")}</span><AutomationGlyph name="chevron" /></summary>
       <fieldset className="automation-channel-options"><legend className="sr-only"><UiText zh={"完成后通知"} /></legend>

@@ -40,11 +40,11 @@ MCP 权限。
 
 ## 对话命名
 
-Automation 定义持有 `threadNaming`，Host 编辑和自动保存复用现有 CAS。Core 在 occurrence 创建事务内
-读取配置，用 scheduled_for（定时）或 admission 时间（手动）与本机时区生成完整标题，普通 Camp 创建
-同时保存标题和创建事件。配置修改不推进计划；历史标题和命令重放结果不重算。
-Renderer 只展示即时格式样例和 Core 保存后的历史标题，不拥有权威时间或历史修订。
-Agent automation 工具保留原输出形状，Host-only 配置在工具出口移除。
+日期标题功能暂时停用，Desktop/Web 不展示“对话命名”设置。Core 在 occurrence 创建事务内
+直接将当前任务名交给普通 Camp 创建路径，手动和定时运行均不附加日期、时间或分隔符；
+`camp.title` 与创建事件使用同一个名称。名称为空时沿用既有 Prompt 派生规则。
+已有 `threadNaming` 字段不参与标题生成，schema 165 保持不变；本次不增加迁移、回填或兼容分支。
+历史标题和命令重放结果不重算。Agent automation 工具保留原输出形状。
 
 ## 恢复和结算
 
