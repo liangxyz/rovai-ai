@@ -128,6 +128,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::ZcodeApp => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
         | AdapterKind::ClineCli
+        | AdapterKind::HermesCli
         | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::DeepseekHarness
@@ -152,7 +153,8 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         AdapterKind::GrokBuild => "ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY",
         AdapterKind::ZcodeApp => "ROVAI_INTERNAL_ZCODE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::AntigravityApp => "ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY",
-        AdapterKind::CodexCli
+        AdapterKind::HermesCli
+        | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClaudeCodeCli
@@ -809,6 +811,7 @@ pub(crate) fn pending_redelivery_revision_connection(
             FROM bootstrap_redelivery_requirement
             WHERE native_binding_id = ?1 AND native_binding_generation = ?2
               AND requested_revision > acknowledged_revision
+              AND adapter_kind <> 'hermes-cli'
             "#,
             params![native_binding_id, native_binding_generation],
             |row| row.get::<_, i64>(0),
@@ -906,7 +909,7 @@ fn qualified_admission(
     admission_point: &str,
 ) -> bool {
     match adapter_kind {
-        AdapterKind::ClineCli => false,
+        AdapterKind::HermesCli | AdapterKind::ClineCli => false,
         AdapterKind::CopilotCli => {
             source_signal == "preCompact" && admission_point == "imminent_edge"
         }
@@ -992,6 +995,29 @@ mod tests {
 
     #[test]
     fn release_policy_matrix_keeps_protected_and_antigravity_disabled() {
+        assert_eq!(
+            admitted_hook_compaction_signal(AdapterKind::HermesCli, "post_compaction", "summarize"),
+            None
+        );
+        for trigger in [
+            "started",
+            "failed",
+            "cancelled",
+            "prune_tool_results",
+            "provider_native",
+            "",
+        ] {
+            assert!(
+                admitted_hook_compaction_signal(AdapterKind::HermesCli, "post_compaction", trigger)
+                    .is_none()
+            );
+        }
+
+        assert_eq!(
+            release_default_policy(AdapterKind::HermesCli),
+            CompactionDetectorPolicy::Disabled
+        );
+
         // Keep Cline in startup reconciliation to fence the previous
         // first_payload observer when upgrading to the protected System Rule.
         assert_eq!(

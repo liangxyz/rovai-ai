@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-10-25
+last_updated: 2026-10-27
 ---
 
 # Rovai-ai 开发者指南
@@ -205,10 +205,13 @@ ThreadWorkspace、Lexical 与 CSS，覆盖确认跨期、刷新／重启不续�
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | macOS App/DMG、Windows unpacked/NSIS package、verifier 与安装验收输出 |
 
-不同 worktree 默认各自拥有这些生成目录。开发工作已完成时，应按
-[Worktree 清理流程](worktrees.md#工作收口与安全清理)删除整个 worktree；仍在开发的 worktree
-若只需处理 Rust 缓存异常，则按[常见问题排查](troubleshooting.md#target-占用异常增长或磁盘不足)
-选择性清理，不把每日 `cargo clean` 当作常规维护。
+不同 worktree 默认各自拥有这些生成目录。本地仅保留当前开发代码及活跃任务所需的构建产物。
+
+- 新版本验证通过后，清理不再使用的旧产物；任务合入或放弃后，按
+  [Worktree 清理流程](worktrees.md#工作收口与安全清理)移除对应工作区。
+- 活跃开发保留增量缓存；版本收尾或体积异常时按
+  [缓存排障流程](troubleshooting.md#target-占用异常增长或磁盘不足)清理，不在每次构建前执行 `cargo clean`。
+- 清理前停止相关进程；保留源码、Git 历史、必要验收记录和用户数据。
 
 Camp、运行、事件和审批数据位于 Electron `userData`。诊断中心和 v5 导出不再显示或输出绝对
 `userData` / SQLite 路径；需要制作数据库副本时，应从已退出的隔离验收环境或 Electron 开发日志取得精确位置，

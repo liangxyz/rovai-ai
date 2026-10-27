@@ -12,18 +12,8 @@ export function automationTitlePreview(name: string, prompt: string, naming: Aut
   const pad = (value: number): string => String(value).padStart(2, '0')
   const month = pad(at.getMonth() + 1)
   const day = pad(at.getDate())
-  const date = {
-    iso: `${at.getFullYear()}-${month}-${day}`,
-    slash: `${at.getFullYear()}/${month}/${day}`,
-    short: `${month}-${day}`,
-    chinese: `${at.getMonth() + 1}月${at.getDate()}日`
-  }[naming.dateFormat]
-  const hour = at.getHours()
-  const time = {
-    '24': `${pad(hour)}:${pad(at.getMinutes())}`,
-    '12': `${hour < 12 ? '上午' : '下午'} ${hour % 12 || 12}:${pad(at.getMinutes())}`,
-    seconds: `${pad(hour)}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
-  }[naming.timeFormat]
+  const date = `${at.getFullYear()}-${month}-${day}`
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`
   const stamp = [naming.includeDate ? date : '', naming.includeTime ? time : ''].filter(Boolean).join(' ')
   if (!stamp) return base
   return naming.position === 'prefix' ? `${stamp} · ${base}` : `${base} · ${stamp}`

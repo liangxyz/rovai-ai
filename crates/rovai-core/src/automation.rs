@@ -1324,7 +1324,7 @@ fn claim_occurrence_in_tx(
     record: &AutomationRecord,
     scheduled_for: DateTime<Utc>,
     trigger_kind: &str,
-    _scheduled: bool,
+    scheduled: bool,
     _user_id: &str,
     quick_chat_path: &Path,
 ) -> Result<ClaimedOccurrence> {
@@ -1377,7 +1377,12 @@ fn claim_occurrence_in_tx(
         transaction,
         ScheduledAutomationAdmissionInput {
             automation_run_id: run_id.clone(),
-            automation_name: record.name.clone(),
+            automation_name: record.thread_naming.title(
+                &record.name,
+                (if scheduled { scheduled_for } else { now })
+                    .with_timezone(&Local)
+                    .fixed_offset(),
+            ),
             prompt: record.prompt.clone(),
             member_id: record.member_id.clone(),
             project_binding_kind: record.project_ref.binding_kind(),
@@ -2895,45 +2900,42 @@ mod tests {
             derive_name("一二三四五六七八九十一二三四五六七八九十一"),
             "一二三四五六七八九十一二三四五六七八九十…"
         );
-        // Extend the existing naming owner: Unicode and calendar formatting need no DB.
-        use crate::automation_naming::{
-            AutomationDateFormat as D, AutomationDatePosition as P, AutomationTimeFormat as T,
-        };
+        // One pure owner covers all checkbox/position combinations and fixed formats.
+        use crate::automation_naming::AutomationDatePosition as P;
         let at = DateTime::parse_from_rfc3339("2026-10-26T15:04:09+08:00").unwrap();
-        let mut naming = AutomationThreadNaming::default();
-        for (format, expected) in [
-            (D::Iso, "2026-10-26"),
-            (D::Slash, "2026/10/26"),
-            (D::Short, "10-26"),
-            (D::Chinese, "10月26日"),
+        for (date, time, stamp) in [
+            (true, true, "2026-10-26 15:04"),
+            (true, false, "2026-10-26"),
+            (false, true, "15:04"),
+            (false, false, ""),
         ] {
-            naming.date_format = format;
-            naming.include_time = false;
-            assert_eq!(naming.title("周报", at), format!("周报 · {expected}"));
+            for position in [P::Prefix, P::Suffix] {
+                let naming = AutomationThreadNaming {
+                    include_date: date,
+                    include_time: time,
+                    position,
+                    ..Default::default()
+                };
+                let expected = if stamp.is_empty() {
+                    "周报".to_string()
+                } else if position == P::Prefix {
+                    format!("{stamp} · 周报")
+                } else {
+                    format!("周报 · {stamp}")
+                };
+                assert_eq!(naming.title("周报", at), expected);
+            }
         }
-        naming.include_date = false;
-        naming.include_time = true;
-        naming.position = P::Prefix;
-        for (format, expected) in [
-            (T::TwentyFour, "15:04"),
-            (T::Twelve, "下午 3:04"),
-            (T::Seconds, "15:04:09"),
-        ] {
-            naming.time_format = format;
-            assert_eq!(naming.title("周报", at), format!("{expected} · 周报"));
-        }
-        naming.time_format = T::Twelve;
         for (input, expected) in [
-            ("2026-01-01T00:01:00+08:00", "上午 12:01 · 周报"),
-            ("2026-01-01T12:01:00+08:00", "下午 12:01 · 周报"),
+            ("2026-01-01T00:01:00+08:00", "周报 · 2026-01-01 00:01"),
+            ("2026-01-01T12:01:00+08:00", "周报 · 2026-01-01 12:01"),
         ] {
             assert_eq!(
-                naming.title("周报", DateTime::parse_from_rfc3339(input).unwrap()),
+                AutomationThreadNaming::default()
+                    .title("周报", DateTime::parse_from_rfc3339(input).unwrap()),
                 expected
             );
         }
-        naming.include_time = false;
-        assert_eq!(naming.title("周报", at), "周报");
         let long_name = "🌸".repeat(80);
         assert_eq!(
             AutomationThreadNaming::default().title(&long_name, at),
@@ -2970,6 +2972,11 @@ mod tests {
         );
         for (key, bad) in [
             ("dateFormat", json!("unix")),
+            ("dateFormat", json!("slash")),
+            ("dateFormat", json!("short")),
+            ("dateFormat", json!("chinese")),
+            ("timeFormat", json!("12")),
+            ("timeFormat", json!("seconds")),
             ("includeTime", json!("yes")),
             ("extra", json!(true)),
         ] {
@@ -3045,9 +3052,19 @@ mod tests {
         assert!(replayed_run.replayed);
         assert_eq!(replayed_run.result.payload, first.result.payload);
 
-        let frozen_title: String = database.connection().query_row(
-            "SELECT camp.title FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [&automation_run_id], |row| row.get(0)).unwrap();
-        assert_eq!(frozen_title, derive_name(original_prompt));
+        let (frozen_title, created_at): (String, String) = database.connection().query_row(
+            "SELECT camp.title, run.created_at FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [&automation_run_id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(
+            frozen_title,
+            format!(
+                "{} · {}",
+                derive_name(original_prompt),
+                parse_timestamp(&created_at)
+                    .unwrap()
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M")
+            )
+        );
         assert_eq!(
             replayed_create.result.payload["threadNaming"],
             serde_json::to_value(AutomationThreadNaming::default()).unwrap()
@@ -3670,9 +3687,27 @@ mod tests {
             )
             .expect("manual run should start");
         assert_eq!(manual.result.payload["status"], "started");
-        let manual_title: String = database.connection().query_row(
-            "SELECT camp.title FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [manual.result.payload["runId"].as_str().unwrap()], |row| row.get(0)).unwrap();
-        assert_eq!(manual_title, "🌸".repeat(80));
+        let (manual_title, created_at): (String, String) = database.connection().query_row(
+            "SELECT camp.title, run.created_at FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1", [manual.result.payload["runId"].as_str().unwrap()], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(
+            manual_title,
+            format!(
+                "{} · {}",
+                "🌸".repeat(80),
+                parse_timestamp(&created_at)
+                    .unwrap()
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M")
+            )
+        );
+        assert_ne!(
+            manual_title,
+            format!(
+                "{} · {}",
+                "🌸".repeat(80),
+                due.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+            )
+        );
 
         let dispatches = service
             .claim_due(
@@ -3770,7 +3805,14 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(title, "🌸".repeat(80));
+        assert_eq!(
+            title,
+            format!(
+                "{} · {}",
+                "🌸".repeat(80),
+                scheduled_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+            )
+        );
         tx.commit().unwrap();
         remove_test_database(database, directory);
     }
@@ -3881,7 +3923,13 @@ mod tests {
         let scheduled_title: String = database.connection().query_row(
             "SELECT camp.title FROM automation_run run JOIN camp ON camp.id=run.camp_id WHERE run.id=?1",
             [&dispatches[0].automation_run_id], |row| row.get(0)).unwrap();
-        assert_eq!(scheduled_title, "Delayed tick renamed");
+        assert_eq!(
+            scheduled_title,
+            format!(
+                "Delayed tick renamed · {}",
+                due.with_timezone(&Local).format("%Y-%m-%d")
+            )
+        );
         assert_eq!(
             run,
             (

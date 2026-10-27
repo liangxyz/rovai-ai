@@ -68,9 +68,30 @@ describe('first-run onboarding flow', () => {
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('https://code.claude.com/docs/en/setup')
     expect(markup).not.toContain('Cline')
+    expect(markup).not.toContain('Hermes')
     expect(markup).toContain('Command Code')
     expect(markup).not.toContain('onboarding-runtime-list')
     expect(markup).not.toContain('onboarding-model-panel')
+
+    // A Ready record from an internal Hermes build must not expose a hidden Runtime.
+    const runtimeKind = 'hermes-cli' as const
+    const staleHealth = healthWithRuntime(
+      { ...readyAvailability(), runtimeKind },
+      { ...qualifiedAdmission(), runtimeKind }
+    )
+    const staleInstallation: AdapterInstallation = {
+      ...codexInstallation(),
+      adapterKind: runtimeKind,
+      memberRuntimeDefaults: {
+        adapterKind: runtimeKind,
+        model: { mode: 'runtime_default' },
+        permissions: { adapterKind: runtimeKind, schemaVersion: 1, values: {} }
+      }
+    }
+    expect(onboardingHasUsableRuntime('ready', staleHealth, [staleInstallation])).toBe(false)
+    const staleMarkup = renderOnboarding(snapshot('runtime'), 'ready', staleHealth, [staleInstallation])
+    expect(staleMarkup).toContain('暂未找到可用的智能体')
+    expect(staleMarkup).not.toContain('Hermes')
   })
 
   it('keeps the normal Runtime selection when at least one Runtime can continue', () => {
@@ -85,13 +106,14 @@ describe('first-run onboarding flow', () => {
     expect(markup).not.toContain('暂未找到可用的智能体')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
+    expect(markup).not.toContain('Hermes')
     expect(markup).toContain('Command Code')
     expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
     expect(onboardingHasUsableRuntime('error', health, [installation])).toBe(false)
     expect(onboardingHasUsableRuntime('ready', emptyHealth(), [])).toBe(false)
   })
 
-  it.each(['ready', 'light_ready'] as const)('keeps incomplete qualification detail visible for a %s Runtime', (status) => {
+  it.each(['ready', 'light_ready'] as const)('keeps a %s preview Runtime selectable without qualification notices', (status) => {
     for (const runtimeKind of ['codex-cli', 'command-code-cli'] as const) {
       for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
         const admission = { ...previewAdmission(), runtimeKind, platform }
@@ -104,8 +126,7 @@ describe('first-run onboarding flow', () => {
         const markup = renderOnboarding(snapshot('runtime'), 'ready', health, [installation])
         expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
         expect(onboardingRuntimeCanContinue('ready', onboardingRuntimeSelectionFor(runtimeKind, [installation]), availability, installation, admission)).toBe(true)
-        expect(markup).toContain('<small>当前平台已开放使用，完整的平台资格验证记录尚未齐备。')
-        expect(markup).not.toMatch(/测试|试运行|实验性/)
+        expect(markup).not.toMatch(/测试|试运行|实验性|资格验证记录/)
       }
     }
   })

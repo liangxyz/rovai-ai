@@ -208,7 +208,7 @@ describe('Runtime user status projection', () => {
     expect(result.label).toBe('Windows 尚未验证')
   })
 
-  it('keeps preview admission usable while disclosing missing qualification evidence', () => {
+  it('keeps preview admission usable with only the actual machine status', () => {
     const admission: RuntimePlatformAdmission = {
       runtimeKind: 'pi',
       platform: 'macos-arm64',
@@ -221,7 +221,7 @@ describe('Runtime user status projection', () => {
     expect(runtimeProductPresentation(admission, availability('ready', 'pi'))).toEqual({
       status: 'available',
       label: '可用',
-      detail: '当前平台已开放使用，完整的平台资格验证记录尚未齐备。'
+      detail: null
     })
     for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64'] as const) {
       for (const status of ['preview', 'qualified'] as const) {
@@ -230,7 +230,8 @@ describe('Runtime user status projection', () => {
             { ...admission, runtimeKind: 'zcode-app', platform, status },
             availability(state, 'zcode-app')
           )
-          expect(`${result.label} ${result.detail}`).not.toMatch(/测试|试运行|实验性/)
+          expect(result).toEqual(runtimeAvailabilityPresentation(availability(state, 'zcode-app')))
+          expect(`${result.label} ${result.detail}`).not.toMatch(/测试|试运行|实验性|资格验证记录/)
           if (state === 'ready') {
             expect(result.status).toBe('available')
             expect(result.label).toBe('可用')

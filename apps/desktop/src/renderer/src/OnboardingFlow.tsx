@@ -1,3 +1,4 @@
+import hermesLogo from './assets/runtime-logos/hermes.png'
 import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
 import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import { useState, type KeyboardEvent } from 'react'
@@ -75,6 +76,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'cursor-agent': cursorLogo,
   'kimi-code-cli': kimiLogo,
   'minimax-code-cli': minimaxLogo,
+  'hermes-cli': hermesLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
   'cline-cli': clineLogo,
@@ -97,6 +99,7 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'cursor-agent': 'Cursor Agent',
   'kimi-code-cli': 'Kimi Code',
     'minimax-code-cli': 'MiniMax Code',
+    'hermes-cli': 'Hermes Agent',
   'grok-build': 'Grok Build',
   'deepseek-harness': 'DeepSeek Harness',
   'cline-cli': 'Cline',
@@ -431,12 +434,11 @@ function RuntimeStep({
     ?? runtimeChoices.find((row) => row.selectable)?.kind
   const primaryChoices = runtimeChoices.filter((row, index) => index < 3 || row.selectable || row.experimental || row.kind === selection?.adapterKind)
   const otherChoices = runtimeChoices.filter((row) => !primaryChoices.includes(row))
-  const renderRuntimeChoice = ({ kind, presentation, experimental, selectable }: typeof runtimeChoices[number]) => (
+  const renderRuntimeChoice = ({ kind, presentation, selectable }: typeof runtimeChoices[number]) => (
     <RuntimeRow
       key={kind}
       kind={kind}
       presentation={presentation}
-      experimental={experimental}
       checked={selection?.adapterKind === kind}
       tabIndex={focusRuntime === kind ? 0 : -1}
       disabled={provisioning || !selectable}
@@ -661,7 +663,6 @@ function RuntimeScanProgress({ phase }: { phase: OnboardingRuntimePhase }): Reac
 function RuntimeRow({
   kind,
   presentation,
-  experimental,
   checked,
   tabIndex,
   disabled,
@@ -670,7 +671,6 @@ function RuntimeRow({
 }: {
   kind: AdapterKind
   presentation: RuntimeStatusPresentation
-  experimental: boolean
   checked: boolean
   tabIndex: number
   disabled: boolean
@@ -693,7 +693,7 @@ function RuntimeRow({
       <span className="onboarding-radio-check" aria-hidden="true" />
       <span className="onboarding-runtime-logo"><img src={RUNTIME_LOGOS[kind]} alt="" /></span>
       <span className="onboarding-runtime-copy"><strong>{RUNTIME_LABELS[kind]}</strong>
-        {(experimental || (presentation.status !== 'available' && presentation.status !== 'not_installed')) && <small>{t(runtimeRowDetail(presentation))}</small>}
+        {presentation.status !== 'available' && presentation.status !== 'not_installed' && <small>{t(runtimeRowDetail(presentation))}</small>}
       </span>
       <RuntimeState presentation={presentation} />
     </button>

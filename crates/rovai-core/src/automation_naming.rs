@@ -1,5 +1,5 @@
 //! Formatting at occurrence admission. The resulting Thread title is stored once.
-use chrono::{DateTime, Datelike, FixedOffset, Timelike};
+use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -7,9 +7,6 @@ use serde::{Deserialize, Serialize};
 pub enum AutomationDateFormat {
     #[default]
     Iso,
-    Slash,
-    Short,
-    Chinese,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,10 +14,6 @@ pub enum AutomationTimeFormat {
     #[default]
     #[serde(rename = "24")]
     TwentyFour,
-    #[serde(rename = "12")]
-    Twelve,
-    #[serde(rename = "seconds")]
-    Seconds,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,24 +54,10 @@ impl AutomationThreadNaming {
     pub fn title(&self, name: &str, at: DateTime<FixedOffset>) -> String {
         let mut parts = Vec::with_capacity(2);
         if self.include_date {
-            parts.push(match self.date_format {
-                AutomationDateFormat::Iso => at.format("%Y-%m-%d").to_string(),
-                AutomationDateFormat::Slash => at.format("%Y/%m/%d").to_string(),
-                AutomationDateFormat::Short => at.format("%m-%d").to_string(),
-                AutomationDateFormat::Chinese => format!("{}月{}日", at.month(), at.day()),
-            });
+            parts.push(at.format("%Y-%m-%d").to_string());
         }
         if self.include_time {
-            parts.push(match self.time_format {
-                AutomationTimeFormat::TwentyFour => at.format("%H:%M").to_string(),
-                AutomationTimeFormat::Seconds => at.format("%H:%M:%S").to_string(),
-                AutomationTimeFormat::Twelve => format!(
-                    "{} {}:{:02}",
-                    if at.hour() < 12 { "上午" } else { "下午" },
-                    at.hour12().1,
-                    at.minute()
-                ),
-            });
+            parts.push(at.format("%H:%M").to_string());
         }
         if parts.is_empty() {
             return name.to_string();

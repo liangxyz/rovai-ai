@@ -207,7 +207,8 @@ logo, machine-state badge and action. Expanded guides and failure details may gr
 `preview` remains an admitted Product Runtime state, distinct from a Renderer-only `待支持` preview. It enters
 normal availability checks, selection, diagnostics and execution. Like qualified rows, its subtitle contains only
 the reported version and its badge remains the real checking/available/login/install/error result. Check feedback
-may explain the incomplete qualification record; the catalog adds no testing, trial or experimental labels. Pi no longer uses this state: its
+and onboarding omit qualification notices; all Runtime surfaces retain actionable machine failures without
+Preview, testing, trial or experimental labels. Pi no longer uses this state: its
 three shipped platforms are qualified by platform-specific immutable evidence and follow the ordinary machine flow
 without experimental disclosure.
 

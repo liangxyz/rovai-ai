@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-10-20
+last_updated: 2026-10-27
 ---
 
 # Built-in Tool Runtime Architecture
@@ -11,9 +11,9 @@ last_updated: 2026-10-20
 人类用户的主称呼、双别名、结构化搜索与冻结投影边界见 [User Naming v1](../contracts/user-naming-v1.md)。
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v43](../contracts/builtin-tool-transport-v43.md)、
+[Built-in Tool Transport v44](../contracts/builtin-tool-transport-v44.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
-[Camp History v15](../contracts/camp-history-v15.md)、
+[Camp History v16](../contracts/camp-history-v16.md)、
 [Durable Task v6](../contracts/durable-task-v6.md) 和
 [Camp Message Send v29](../contracts/camp-message-send-v29.md)、
 [Current User Attention v8](../contracts/current-user-attention-v8.md)与
@@ -130,7 +130,8 @@ membership version；这一统一 Router fence 覆盖整个 catalog，而不是�
 Local IPC 的外部 seam 只有 `LocalIpcEndpoint` 与异步 byte stream。macOS Adapter 使用 Unix Socket；Windows
 Adapter 使用在创建时带 protected DACL、拒绝 remote client 的 Named Pipe。Raw `SECURITY_ATTRIBUTES`、listener
 补位与 Pipe instance 生命周期只存在于 Windows transport implementation；Router、Catalog、receipt 和 replay
-不感知端点类型。OS ACL 永不替代 process/lease token。
+不感知端点类型。上下文文件来源传递 process/lease token；Hermes 原生来源由 Core 解析当前执行并在内部
+取得同一 ActiveLease，仍走共享校验，不向 CLI 返回凭据。OS ACL 本身不建立业务 Run 权限。
 
 ## Catalog 与 Agent command
 
@@ -161,7 +162,7 @@ create/update 的 `avatarFile` 由 CLI 原样传入；Core 在 Run 认证后复�
 用冻结的 `execution_root` 解析相对路径，绝对路径原样保留。路径 helper 与 Agent 附件共用，
 头像继续直接导入 immutable asset，不创建附件记录或新增路径授权机制。
 内置素材与 managed 图片在授权 Run tmp 中物化，复用 lease 清理；每次 get 重验权限和重取文件。
-完整字段、裁切及错误见 [Transport v43](../contracts/builtin-tool-transport-v43.md)。
+完整字段、裁切及错误见 [Transport v44](../contracts/builtin-tool-transport-v44.md)。
 
 Mission read uses a distinct global read seam: every effective authenticated AgentRun may list all Missions or
 read one opaque internal `rvm_...` ID, including saved structured attachment paths. Omitted-ID `get` resolves only the
@@ -306,12 +307,16 @@ Agent 可控的 envelope output mode、环境变量、隐藏 flag 或 `--full`�
 <a id="runtime-process-lease-and-camp-scope"></a>
 ## Runtime process、Lease 与 Thread scope
 
-每个受管 Runtime 根进程拥有稳定 process identity 和私有 CLI context path。Fleet acquire 为
+每个受管 Runtime 根进程拥有稳定 process identity；CLI 文件输出是可选投影。Fleet acquire 为
 当前 `(agentRunId, executionEpoch)` 轮换 active lease，Core 在输入投递前完成绑定和 CLI preflight。
 Codex、ACP、Pi 的 process context 只在 Fleet 确认需要新进程后的 spawn future 内创建，且在 CLI
 启动前准备好无 active lease 的 `context.json` 与 `run-tmp`。复用已有 Host 不创建候选目录；每轮仍对
 Host 持有的原 context 轮换授权并重置 `run-tmp`。恢复失败后的替换进程同样获得全新 process identity
 和目录，不能复用已退役的 context。
+Hermes 的原生 Session CLI 没有文件消费者，因此不创建 `context.json`，绑定、Task 刷新/重试、解绑与
+撤权也不写文件。它使用同一注册表的内存 ActiveLease、Run/epoch 和 Binding，保留实际使用的 `run-tmp`。
+macOS 安装版 App 初始化负责固定 CLI 链接；Hermes Run 不再安装或检查该入口。实例端点 `connection.json`
+继续用于 CLI 寻找 Core；它不是每进程上下文或会话映射。其他 Runtime 的文件投影和失败语义不变。
 Fleet 只在短临界区 Reserve/Commit；计入容量的 Starting reservation 将进程创建、协议 handshake 与必要
 health 检查移到锁外，并由 Fleet-owned Startup Operation 推进到唯一终态；任意 acquire waiter 被 drop 不影响
 operation。相同 Run/epoch 等待同一 completion，不同 Run/Runtime 可并发启动；shutdown、Thread 删除或成员永久移除
@@ -355,6 +360,12 @@ Thread 并使用调用时 sequence boundary；ContextManifest history catalog �
 4. Core 按 Profile 选择并由 Formatter 形成 Model Context Projection，再冻结 ContextManifest；
 5. Core 建立 Runtime Input Delivery，将 Manifest 绑定到 execution epoch/Binding generation 后投递；
 6. Agent 使用固定命令和 command-local `--help`；Router 从 lease 解析当前 Run 与 Thread。
+
+普通 Run 绑定后的 Task CLI discovery 只刷新本进程；用户保存全局 Task 设置（含同值修复）及既有失败
+重试仍刷新所有活动进程。刷新先取得既有 invocation gate，再读取最新任务设置；定向刷新在 processes
+锁内核对 process/Run/execution epoch，并使用当前 ActiveLease 写入。已解绑或换绑的旧目标跳过，不能
+写回早先捕获的 lease。设置保存先提交并释放数据库事务，再进入刷新；投影失败只记录诊断，不撤销已绑定
+lease 或取消任务。绑定本身与 Task 投影仍允许各写一次当前进程的小文件，不建立跨请求缓存。
 
 ### Resume / Resident process reuse
 
@@ -605,6 +616,10 @@ revision 轮换。新 Session 才冻结新模板，既有 Evidence 保持原 byt
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
+Hermes 的运输/证据例外见 [Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md)：
+完整 Core Bootstrap 在 user 层首次或更新输入中投递，完整 B digest 与最终正文 Managed Blob
+随既有输入账本冻结；接受回执决定去重，身份更新不新建 Session。此例外不改变其他 Runtime。
+
 public Context Formatter v28 的 `COLLABORATION_STATE` 投影 只描述 peers。Core 从 stable current
 ThreadMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
@@ -710,10 +725,10 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
 系统不声称能够证明模型主观意图。
 
 - CLI 从 direct flags、JSON stdin/heredoc 或 `--input-file` 构造一个对象。Send 文件按
-  [Transport v43](../contracts/builtin-tool-transport-v43.md)分流，只有正文文件可与除 `--body` 外的发送参数组合；
+  [Transport v44](../contracts/builtin-tool-transport-v44.md)分流，只有正文文件可与除 `--body` 外的发送参数组合；
   完整请求文件和其他 operation 保持来源互斥。所有来源共用
   catalog canonical input Schema validator，只有通过后才加载 lease/context 并发送 IPC。`thread.read`
-  直接发送 `messageId | thread | before | limit` 的合法组合，不补写模式或方向，也不接受旧字段。
+  直接发送 `threadId`、`messageId`、`replyChain`、互斥的 `before/after` 与 `limit` 的合法组合，不补写模式或方向，也不接受旧字段。
   Core 继续拥有默认 limit、cursor 与组合约束的权威校验。Send 的可选 `sendInputFilePath` 单独进入
   内部 IPC 和现有执行 Evidence，作为文件卡片排除来源；业务输入对象和 Agent Output 保持。来源不用于
   读取文件或扩展权限，没有来源时不推测；
@@ -725,11 +740,20 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   其他 parse、IPC/lease/catalog preflight 失败继续使用安全
   通用 structured error，退出码 `2`；
 - Core 业务拒绝：完整 Envelope 记录在 Core/Evidence，Agent stdout 输出业务 `error`，退出码 `1`；
-- 响应丢失：CLI 对同一 request identity 有界重试，Core 执行 Replay；Projection 不暴露 request
-  identity；
+- 响应丢失：上下文文件来源对同一 request identity 有界重试，Core 执行 Replay；Hermes 原生会话来源
+  单次派发，未知结果不重新定位后继 Run。Projection 不暴露 request identity；
 - 无法证明 mutation 结果：Agent 只收到无 request identity 的 `builtin_tool.outcome_indeterminate`，
   退出码 `3`，必须先确认当前状态；
 - `thread.message.send` 的内部 Thread 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
 - macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v21 command、projection、replay、
   fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。
+
+
+## Hermes 的原生会话定位入口
+
+Hermes 在共享 Gateway 的工具侧取得逻辑 Session ID，CLI 不依赖 ACP 进程传递逐 Run 环境。
+一次业务请求进入 Core，现有 Conversation → 活动 Run → ActiveLease 提供内部上下文，再复用本架构的
+Router、领域校验、回复和回执。没有额外映射表、逐 Session 文件或凭据查询握手。
+当前 Run 在调用受理时固定；旧后台命令首次调用可归后继 Run。未找到唯一活动执行就拒绝。
+其他 Runtime 继续 context.json/lease 运输，细节见 [运输合同](../contracts/builtin-tool-transport-v43.md#hermes-原生会话来源)。

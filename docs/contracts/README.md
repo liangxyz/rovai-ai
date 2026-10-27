@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # 长期接口合同
@@ -13,6 +13,10 @@ User 的主称呼、结构化提及及冻结恢复见 [User Naming v1](user-nami
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
 
+## Hermes Runtime
+
+- [Hermes Managed Runtime v1](hermes-managed-runtime-v1.md)：官方 ACP、原生 Home、会话定位 CLI、user 层规则及共享 Gateway 边界。
+
 ## Team 与启动指引
 
 - [Team Templates v2（当前）](team-templates-v2.md)：Thread/Mission 创建预设、独立 Custom 默认值与不可变指引。
@@ -22,7 +26,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 ## 会话 Task 能力（当前）
 
 - [Durable Task v6](durable-task-v6.md)
-- [Built-in Tool Transport v43](builtin-tool-transport-v43.md)：成功 Send 输入来源与文件卡片排除；[v42（历史）](builtin-tool-transport-v42.md) 保留原 Task 发现边界。
+- [Built-in Tool Transport v44](builtin-tool-transport-v44.md)：Thread read 正向分页输入与精简教学；继承 [v43（历史）](builtin-tool-transport-v43.md) 的 Send 输入来源和 [v42（历史）](builtin-tool-transport-v42.md) 的 Task 发现边界。
 - [ContextManifest Evidence v40 / v42](context-manifest-evidence-v42.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
 - [Run Facts v10](run-facts-v10.md)
@@ -91,7 +95,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp History v12（历史）](camp-history-v12.md)：mentions 统一，作者字段保留原始身份。
 - [ContextManifest v34（历史）](context-manifest-evidence-v34.md)：路由投影精简，public 34/11/9、non-batch 35/12/6，旧输入原格式恢复。
 - [ContextManifest v33（历史）](context-manifest-evidence-v33.md)：新 Run Mention 字段、原版本恢复和现有预算/摘要。
-- [Camp History v15（当前）](camp-history-v15.md)：新 Run 实时目录、消息发送时间排序、撤回回退与独立正文边界；继承 v13 发送者输出。
+- [Camp History v16（当前）](camp-history-v16.md)：after 排他正向分页、同方向续页及按范围增量读取；继承 [v15](camp-history-v15.md) 的引用正文投影与既有实时读取边界。
 - [Camp History v13（历史）](camp-history-v13.md)：read/search 统一发送者，Agent Output 12；历史回执保持。
 
 ## 生命周期
@@ -125,7 +129,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Host Web v1（历史）](host-web-v1.md) | 同一 Core 的初始只读网络入口；新会话由 v2 替代 |
 | [Current User Profile v1（当前）](current-user-profile-v1.md) | Desktop 本地名称/头像、原子保存、历史作者与结构化提及投影；不改变 Core identity、正文或模型上下文 |
 | [Domain Command Result v1（历史）](domain-command-result-v1.md) | Domain Command 结果的事务、幂等回放、专用列唯一正文、内部 marker、新旧事件双读与 schema 95 回退边界 |
-| [Scheduled Automation v4（当前）](scheduled-automation-v4.md) | Host 命名配置、按 occurrence 时间冻结日期/时间标题、schema 165 原子升级 |
+| [Scheduled Automation v5（当前）](scheduled-automation-v5.md) | 日期/时间勾选、固定格式和前后位置，按 occurrence 时间冻结标题 |
+| [Scheduled Automation v4（历史）](scheduled-automation-v4.md) | 暂停命名入口与日期标题，保留 schema 165 |
 | [Scheduled Automation v3（历史）](scheduled-automation-v3.md) | occurrence 只分 started/skipped(overlap)，首消息进入普通 Delivery→claim→AgentRun 主链 |
 | [Scheduled Automation v2（历史）](scheduled-automation-v2.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |
 | [Scheduled Automation v1（历史）](scheduled-automation-v1.md) | Desktop/Core 本机计划、冻结快照、原子 Camp 派发、恢复收口、唯一公共结果与独立 Owner 通知 |

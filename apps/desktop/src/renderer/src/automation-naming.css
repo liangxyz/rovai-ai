@@ -1,17 +1,16 @@
-.automation-naming-panel { margin: 4px 6px 8px; padding: 0 12px; border: 1px solid var(--dialog-field-line); border-radius: 10px; background: var(--input); }
-.automation-naming-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 46px; padding: 5px 0; font-size: 12px; }
+.automation-naming-panel { margin: 2px 6px 6px; padding: 0 12px; border: 1px solid var(--dialog-field-line); border-radius: 10px; background: var(--input); }
+.automation-naming-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; min-height: 46px; margin: 0; padding: 7px 0; border: 0; font-size: 12px; }
+.automation-naming-row legend { float: left; padding: 0; line-height: 32px; }
 .automation-naming-row + .automation-naming-row { border-top: 1px solid var(--line); }
-.automation-naming-row > label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
-.automation-naming-row input { width: 14px; height: 14px; margin: 0; accent-color: var(--conversation-action); }
-.automation-naming-row select { width: 138px; max-width: 100%; min-height: 32px; padding: 4px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--dialog-field-line); border-radius: 6px; font: inherit; }
-.automation-naming select:disabled { opacity: .45; cursor: default; }
-.automation-naming-position { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0; padding: 12px 0; border: 0; border-top: 1px solid var(--line); font-size: 12px; }
-.automation-naming-position legend { float: left; padding: 0; line-height: 32px; }
-.automation-naming-position > div { display: flex; padding: 2px; border: 1px solid var(--dialog-field-line); border-radius: 7px; background: var(--surface-subtle); }
-.automation-naming-position label { position: relative; cursor: pointer; }
-.automation-naming-position input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
-.automation-naming-position span { display: block; padding: 5px 12px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); }
-.automation-naming-position input:checked + span { border-color: var(--line); color: var(--ink); background: var(--surface); }
+.automation-naming-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 22px; }
+.automation-naming-options label { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; cursor: pointer; }
+.automation-naming-options input { width: 14px; height: 14px; margin: 0; flex: 0 0 auto; accent-color: var(--conversation-action); cursor: inherit; }
+.automation-naming-segments { display: flex; padding: 3px; border-radius: 7px; background: var(--surface-subtle); }
+.automation-naming-segments label { position: relative; cursor: pointer; }
+.automation-naming-segments input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
+.automation-naming-segments span { display: grid; min-height: 28px; place-items: center; padding: 4px 10px; border-radius: 5px; color: var(--muted); line-height: 20px; }
+.automation-naming-segments input:checked + span { color: var(--ink); background: var(--surface-selected); }
+.automation-naming-segments label:hover span { color: var(--ink); }
 .automation-naming-position:disabled { opacity: .45; }
 .automation-naming-position:disabled label { cursor: default; }
 .automation-naming-preview { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }

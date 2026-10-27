@@ -19,7 +19,7 @@ Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)。
 
 Team 指引采用 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md)：仅从 Thread 创建时固定的
-非空文本恢复，Team 编辑/删除不触发补发；Single Chat 省略。下述 Runtime 投递矩阵保持不变。
+非空文本恢复，Team 编辑/删除不触发补发；Single Chat 省略。Hermes 的 user 层例外见下文。
 
 ## 两个独立生命周期
 
@@ -56,6 +56,7 @@ pending。
 | Qwen Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY` |
 | Antigravity | `unavailable_no_qualified_signal` | `disabled` | `ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY`；v0.48 不允许 enable |
 | TRAE CLI CN | `not_observed_no_qualified_signal` | `disabled` | 无；`0.120.52` manual/auto ACP 与 Hook Probe 未见结构化完成边界，状态不是 `Unsupported` |
+| Hermes | `disabled`，仅首次/真实更新 | 不准入压缩补发 | 无 |
 | Claude Code | `protected_instruction_layer` | 不适用 | 无 |
 | Codex CLI | `protected_instruction_layer` | 不适用 | 无 |
 
@@ -229,6 +230,15 @@ digest。
 只有 selected Delivery 获得 Runtime accepted ACK，才将 acknowledged revision 推进到该冻结值。
 send failure、`delivery_unknown` 和 process loss 不消费 Requirement；ACK 较旧 revision 也不能清除
 Gate 后到达的更高 requested revision。
+
+## Hermes 完成通知与下一普通输入
+
+Hermes 已按 [R2](../versions/v1.72/model-context-change-hermes-first-input.md) 取消压缩补发。
+不注册 Hook、不准入 Hermes observer/完成事件、不消费旧 pending；历史要求不伪造为 acknowledged。
+下一普通输入仅在完整 B 实际变化时携带更新块，否则只提交 P。冷恢复也不重复首次规则。
+不保证多次原生压缩后完整 B 仍存在，不以隐藏提醒替代补发。其他 Runtime 的本架构不变。
+历史 envelope/冻结输入保持可读，当前字段语义见
+[Hermes 合同](../contracts/hermes-managed-runtime-v1.md#session-与输入)。
 
 ## 长期约束
 

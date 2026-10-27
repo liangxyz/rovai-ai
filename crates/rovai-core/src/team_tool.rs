@@ -835,8 +835,10 @@ impl TeamToolService {
         let frozen_installation_id = frozen_installation_id
             .context("Team Tool AgentRun has no frozen Runtime installation")?;
         anyhow::ensure!(
-            adapter_kind.as_deref() == Some(AdapterKind::CommandCodeCli.as_str())
-                || frozen_compatibility_digest.is_some(),
+            matches!(
+                adapter_kind.as_deref(),
+                Some("command-code-cli" | "hermes-cli")
+            ) || frozen_compatibility_digest.is_some(),
             "Team Tool AgentRun has no frozen Native Binding compatibility digest"
         );
         let frozen_installation_generation = frozen_installation_generation

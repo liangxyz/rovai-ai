@@ -5,7 +5,7 @@ authority: camp-cancellation-business-terminal-and-runtime-cleanup
 status: accepted
 version: 2
 source_version: v1.37
-last_updated: 2026-10-09
+last_updated: 2026-10-25
 ---
 
 # Cancellation Settlement v2
@@ -54,3 +54,7 @@ cleanup ACK 不改写；普通 Recovery Blocker resolution 和 Runtime terminal 
 Windows 的 Runtime 清理使用一次总计五秒的预算；本次有效 Job 成功查询 `ActiveProcesses == 0`
 后立即 ACK 并主动唤醒 Delivery。预算耗尽或查询持续失败进入既有局部重试，不修改已经提交的
 业务终态，也不重投旧输入；启动私有临时文件删除失败不延迟 cleanup ACK。
+
+Hermes 使用 [原生共享 Gateway](hermes-managed-runtime-v1.md#安装与进程) 时，cleanup 的所有权范围只有
+本次 ACP 客户端。该 ACK 不证明 Gateway 或已经提交的工具停止；业务取消及已有未知效果证据保留。
+后继输入恢复原 Session 并遵循原生状态，不通过杀共享 Gateway、自动重放或换 Session 绕过。

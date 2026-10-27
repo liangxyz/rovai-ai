@@ -265,6 +265,7 @@ describe('User Automation transport', () => {
         }
       }
     ])
+
   })
 
   it('rejects mismatched Runtime permission adapters before calling Core', async () => {

@@ -4,7 +4,7 @@ contract: skills-rebuild-v2
 authority: skills-source-configuration-selection-and-model-index
 status: accepted
 version: 2
-last_updated: 2026-09-27
+last_updated: 2026-10-25
 ---
 
 # Skills Rebuild v2
@@ -16,6 +16,18 @@ last_updated: 2026-09-27
 每个 Core 实例在现有发现模块内按规范化 Skills 目录路径共享原始元数据和扫描错误；存在的目录解析到实际路径，不存在的目录使用规范化绝对路径。缓存不保存 Camp、队员、Runtime 过滤结果或 Skill 正文。容量上限为 128 个目录，LRU 淘汰，扫描完成后 300 秒过期；空目录和部分失败沿用现有 `skills/errors` 返回形状。过期只在下一次读取时重扫，请求等待结果，同目录在途扫描只执行一次。
 
 Runtime 来源目录顺序、用户／项目范围和禁用配置每次重新计算；Skill 的原始入口路径用于展示和执行，规范文件路径用于来源身份与目录复用。一次 Camp 手动刷新在请求内记住已扫描目录，每个目录至多强制扫描一次；并发请求复用在途扫描。Settings 和 Camp 选择器仍按需请求，普通启动、项目切换和 Camp 打开不触发原生发现；来源登记与执行前重新验证继续按 v1 合同执行。
+
+## Hermes 固定目录候选
+
+Hermes 文件发现使用与官方 ACP 启动相同的 Host 用户 Home。设置页只扫描 `~/.hermes/skills` 与
+`~/.agents/skills`；会话 `/` 在已有当前项目根下追加 `.hermes/skills` 与 `.agents/skills`，没有项目
+则只扫描用户级。非 Git 项目同样适用，不枚举历史项目或向上寻找根目录。
+
+这条来源不解释原生配置、禁用、平台或信任状态，也不追踪任意 `external_dirs` / `create_dir`。
+公共扫描器继续处理分类目录、不可读/异常文件、真实文件去重和同名不同来源身份。文件候选不代表
+Hermes 已启用或加载；用户可以显式引用某个原生未启用的文档，输入仍只携带其选择的精确文件。
+不新增来源状态、表、缓存或配置开关；其他 Runtime 的目录及过滤语义保持。具体运行边界见
+[Hermes 合同](hermes-managed-runtime-v1.md#模型权限skills-与-mcp)。
 
 ## Windows 无 observation 的旧入口
 

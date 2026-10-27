@@ -768,7 +768,8 @@ try {
       await b.capture(join(out,`card-stopping-${windowed ? 'web' : 'desktop'}-${theme}.png`))
     }
     await b.evaluate('__presence.controls.holdStop=false')
-    await b.wait(`document.querySelector('${card} .execution-run-status')?.textContent === '已取消'`)
+    await b.wait(`document.querySelector('${card} .execution-run-status')?.textContent === '已停止'`)
+    assert.equal(await b.evaluate(`!!document.querySelector('${card} .execution-process-node.state-stopped svg > circle') && !!document.querySelector('${card} .execution-process-node.state-stopped svg > rect')`), true)
     assert.deepEqual((await cardState()).font,queued.font)
     assert.equal(await b.evaluate(`document.querySelector('${card}').innerText.includes('正在停止')`),false)
   }

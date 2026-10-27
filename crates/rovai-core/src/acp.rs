@@ -1281,6 +1281,7 @@ pub(crate) struct AcpRpcError {
     message: String,
     provider_detail: Option<String>,
     minimax_steer_pre_delivery_rejection: bool,
+    hermes_session_missing: bool,
 }
 
 impl std::fmt::Debug for AcpRpcError {
@@ -1306,6 +1307,7 @@ impl AcpRpcError {
             .and_then(|data| {
                 data.as_str()
                     .or_else(|| data.get("error").and_then(Value::as_str))
+                    .or_else(|| data.get("details").and_then(Value::as_str))
             })
             .and_then(|detail| sanitize_public_runtime_error(detail, &[]))
             .filter(|detail| detail != &message);
@@ -1339,6 +1341,8 @@ impl AcpRpcError {
                         })
                 })
                 .map(str::to_string),
+            hermes_session_missing: value["code"] == -32603
+                && value["data"]["details"] == "not_found",
             minimax_steer_pre_delivery_rejection: value["code"] == -32602
                 && matches!(
                     message.as_str(),
@@ -1376,6 +1380,7 @@ impl AcpRpcError {
                     && self.session_id.as_deref() == Some(session_id)
                     && self.project_root.as_deref() == Some(cwd)
             }
+            AdapterKind::HermesCli => self.hermes_session_missing,
             // The official bridge emits this only for the native resume call,
             // not a later subscribe, model, permission or MCP operation.
             AdapterKind::ZcodeApp => self.code == Some(-32004),
@@ -1839,8 +1844,13 @@ impl AcpHost {
         if let Some(environment) = &frozen_runtime.environment {
             environment.apply(&mut command)?;
         }
-        if let Some(config) = &builtin_tools {
-            config.configure_command(&mut command)?;
+        if frozen_runtime.adapter_kind != AdapterKind::HermesCli {
+            if let Some(config) = &builtin_tools {
+                config.configure_command(&mut command)?;
+            }
+        }
+        if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
+            crate::hermes::configure_command(&mut command)?;
         }
         let ephemeral_config = configure_runtime_command(
             &mut command,
@@ -1905,7 +1915,11 @@ impl AcpHost {
         command.current_dir(&process_working_directory);
         let spec = ManagedProcessLaunchSpec::capture(
             &command,
-            ManagedProcessPurpose::RuntimeHost,
+            if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
+                ManagedProcessPurpose::RuntimeConnection
+            } else {
+                ManagedProcessPurpose::RuntimeHost
+            },
             ManagedStdinPolicy::Piped,
             ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
@@ -2105,14 +2119,17 @@ impl AcpHost {
             initialize_params["clientCapabilities"]["_meta"] =
                 json!({"opencode/child-session-updates": true});
         }
-        // V1 installs plugin dependencies in the background during catalog
-        // discovery. If that short-lived process exits first, its native lock
-        // expires after 60 seconds. Allow that bounded cold-start recovery;
-        // never delete native locks or resend an accepted prompt to recover.
-        let initialize_timeout = if host.adapter_kind == AdapterKind::OpencodeCli
+        let initialize_timeout = if host.adapter_kind == AdapterKind::HermesCli {
+            // Cover private Home preparation, the launcher's 55-second Gateway
+            // readiness budget, and the subsequent official ACP import/handshake.
+            Duration::from_secs(90)
+        } else if host.adapter_kind == AdapterKind::OpencodeCli
             && crate::opencode_compat::Generation::from_version(host.reported_version.as_deref())
                 == Some(crate::opencode_compat::Generation::V1)
         {
+            // V1 installs plugin dependencies during catalog discovery. If that
+            // process exits first, its native lock expires after 60 seconds.
+            // Allow recovery without deleting locks or resending accepted input.
             Duration::from_secs(90)
         } else {
             Duration::from_secs(45)
@@ -2134,6 +2151,14 @@ impl AcpHost {
                     bail!(
                         "OpenCode initialize identity conflicts with the prepared launch contract (reported {version}); task input was not sent"
                     );
+                }
+                if host.adapter_kind == AdapterKind::HermesCli
+                    && !crate::hermes::supported_version(
+                        result.pointer("/agentInfo/version").and_then(Value::as_str),
+                    )
+                {
+                    host.shutdown().await;
+                    bail!("Rovai requires Hermes >= 0.22.4");
                 }
                 if host.adapter_kind == AdapterKind::CommandCodeCli {
                     let ready = {
@@ -2695,6 +2720,13 @@ impl AcpHost {
                 session_id,
                 prompt_id,
             } => {
+                let hermes_failed = self.adapter_kind == AdapterKind::HermesCli
+                    && message
+                        .pointer("/error/data/details")
+                        .and_then(Value::as_str)
+                        == Some("admitted_turn_failed");
+                let hermes_uncertain = self.adapter_kind == AdapterKind::HermesCli
+                    && crate::hermes::input_acceptance_uncertain(&message);
                 // An undrained Qwen callback item has never crossed stdin.
                 let mut queued = self.qwen_steering.lock().await;
                 let ids: Vec<_> = queued
@@ -2714,7 +2746,7 @@ impl AcpHost {
                     }
                 }
                 drop(queued);
-                let native_response_succeeded = response.is_ok();
+                let native_response_succeeded = response.is_ok() && !hermes_uncertain;
                 let cline_observations = if self.adapter_kind == AdapterKind::ClineCli {
                     match self
                         .capture_cline_observations(&session_id, &prompt_id, response.as_ref().ok())
@@ -2782,7 +2814,11 @@ impl AcpHost {
                     active_prompt
                 {
                     match (&response, response_error.as_ref()) {
-                        (Ok(_), _) if should_emit_input_disposition => {
+                        (Ok(_), _)
+                            if should_emit_input_disposition
+                                && (native_response_succeeded
+                                    || active_prompt.prompt_activity_observed) =>
+                        {
                             let _ = self.incoming.send(owner.input_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -2792,7 +2828,7 @@ impl AcpHost {
                         }
                         (Err(_), Some(_))
                             if should_emit_input_disposition
-                                && active_prompt.prompt_activity_observed =>
+                                && (active_prompt.prompt_activity_observed || hermes_failed) =>
                         {
                             // A matching terminal response alone may be a pre-execution
                             // rejection. Prompt-scoped activity observed before that matching
@@ -2805,7 +2841,9 @@ impl AcpHost {
                                 &active_prompt,
                             ));
                         }
-                        (Err(error), Some(response_error)) if should_emit_input_disposition => {
+                        (Err(error), Some(response_error))
+                            if should_emit_input_disposition && !hermes_uncertain =>
+                        {
                             let _ = self.incoming.send(owner.input_not_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -2816,12 +2854,16 @@ impl AcpHost {
                         }
                         _ => {}
                     }
-                    let input_disposition =
-                        if native_response_succeeded || active_prompt.prompt_activity_observed {
-                            "accepted"
-                        } else {
-                            "not_accepted"
-                        };
+                    let input_disposition = if native_response_succeeded
+                        || active_prompt.prompt_activity_observed
+                        || hermes_failed
+                    {
+                        "accepted"
+                    } else if hermes_uncertain {
+                        "unknown"
+                    } else {
+                        "not_accepted"
+                    };
                     if self.adapter_kind == AdapterKind::ClineCli && !cline_observations.is_empty()
                     {
                         for record in &cline_observations {
@@ -3454,6 +3496,7 @@ impl AcpHost {
                         | AdapterKind::KiroCli
                         | AdapterKind::TraeCnCli
                         | AdapterKind::MinimaxCodeCli
+                        | AdapterKind::HermesCli
                 ) && !active_prompt.acceptance_emitted
                     && (matches!(
                         message
@@ -4315,15 +4358,13 @@ impl AcpHost {
         prepared: &AcpPreparedPrompt,
         text: &str,
     ) -> Result<()> {
+        let params = json!({"sessionId": session_id, "prompt": [{"type":"text", "text":text}]});
         if let Err(error) = self
             .send(json!({
                 "jsonrpc": "2.0",
                 "method": "session/prompt",
                 "id": prepared.request_id,
-                "params": {
-                    "sessionId": session_id,
-                    "prompt": [{"type": "text", "text": text}]
-                }
+                "params": params
             }))
             .await
         {
@@ -4641,6 +4682,12 @@ impl AcpSessionPermissions {
     fn from_frozen(frozen: &FrozenAgentRuntimeConfig) -> Result<Self> {
         let values = &frozen.permissions.values;
         let mode = match frozen.adapter_kind {
+            AdapterKind::HermesCli => Some(
+                values["permission_mode"]
+                    .as_str()
+                    .filter(|mode| matches!(*mode, "default" | "accept_edits" | "dont_ask"))
+                    .context("Hermes requires valid file edit policy")?,
+            ),
             AdapterKind::MinimaxCodeCli => Some(
                 values["permission_mode"]
                     .as_str()
@@ -4762,6 +4809,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::MinimaxCodeCli
             | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
+            | AdapterKind::HermesCli
     )
 }
 
@@ -5242,7 +5290,22 @@ impl AcpRuntime {
                 ));
             }
         }
-        if model_source == "explicit" {
+        if model_source == "explicit" && self.host.adapter_kind == AdapterKind::HermesCli {
+            anyhow::ensure!(
+                model_options
+                    .as_object()
+                    .is_some_and(|options| options.is_empty()),
+                "Hermes ACP does not support generic per-Session model options"
+            );
+            // Compare native provider forms locally; pass a changed choice intact.
+            let current = session_result
+                .as_ref()
+                .and_then(|session| session.pointer("/models/currentModelId"))
+                .and_then(Value::as_str);
+            if !crate::hermes::model_selection_matches(model, current) {
+                self.set_model(&session_id, model).await?;
+            }
+        } else if model_source == "explicit" {
             if self.host.adapter_kind == AdapterKind::DeepseekHarness {
                 let root = self
                     .host
@@ -5374,7 +5437,7 @@ impl AcpRuntime {
         if model_source == "explicit"
             && !matches!(
                 self.host.adapter_kind,
-                AdapterKind::KiroCli | AdapterKind::GrokBuild
+                AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::HermesCli
             )
             && let Some(options) = model_options.as_object()
         {
@@ -5451,16 +5514,49 @@ impl AcpRuntime {
                 .await?;
             }
         }
+        if self.host.adapter_kind == AdapterKind::HermesCli {
+            let mode = self
+                .session_permissions
+                .mode
+                .as_deref()
+                .context("Hermes edit approval mode missing")?;
+            let current = session_result
+                .as_ref()
+                .and_then(|session| session.pointer("/modes/currentModeId"))
+                .and_then(Value::as_str);
+            if current != Some(mode) {
+                self.host
+                    .rpc(
+                        "session/set_mode",
+                        json!({"sessionId":session_id,"modeId":mode}),
+                    )
+                    .await?;
+            }
+        }
+        self.finish_session_attachment(&session_id, prebound_session)
+            .await?;
+        Ok(session_id)
+    }
+
+    async fn finish_session_attachment(
+        &self,
+        session_id: &str,
+        prebound_session: bool,
+    ) -> Result<()> {
         if prebound_session {
             self.host
-                .settle_loading_replay(&session_id, &self.owner)
+                .settle_loading_replay(session_id, &self.owner)
                 .await?;
         } else {
             self.host
-                .bind_session(&session_id, &self.owner, AcpSessionPhase::Ready)
+                .bind_session(session_id, &self.owner, AcpSessionPhase::Ready)
                 .await?;
         }
-        let previous_session_id = self.session_id.write().await.replace(session_id.clone());
+        let previous_session_id = self
+            .session_id
+            .write()
+            .await
+            .replace(session_id.to_string());
         if let Some(previous_session_id) = previous_session_id
             && previous_session_id != session_id
         {
@@ -5468,7 +5564,7 @@ impl AcpRuntime {
                 .unbind_session(&previous_session_id, &self.owner)
                 .await;
         }
-        Ok(session_id)
+        Ok(())
     }
 
     pub async fn session_capabilities(&self) -> AcpSessionCapabilities {
@@ -5529,19 +5625,19 @@ impl AcpRuntime {
         if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
             let options = result["configOptions"]
                 .as_array()
-                .context("MiniMax did not return configuration state")?;
+                .context("Runtime did not return configuration state")?;
             ensure!(
                 options
                     .iter()
                     .any(|option| option["id"] == config_id && option["currentValue"] == value),
-                "MiniMax did not confirm requested configuration"
+                "Runtime did not confirm requested configuration"
             );
             let mut selected = self
                 .session_result
                 .read()
                 .await
                 .clone()
-                .context("MiniMax Session has no option state")?;
+                .context("Runtime Session has no option state")?;
             selected["configOptions"] = result["configOptions"].clone();
             *self.session_result.write().await = Some(selected.clone());
             self.host
@@ -6641,10 +6737,13 @@ impl AcpCliRuntimeAdapter {
         // Fleet reuses a Host launched under a previous member configuration.
         let session_permissions = AcpSessionPermissions::from_frozen(frozen_runtime)?;
         let execution_root = PathBuf::from(&workspace.execution_root).canonicalize()?;
-        let (compatibility, mcp_projection_digest) = if self.kind == AdapterKind::CommandCodeCli {
+        let (compatibility, mcp_projection_digest) = if matches!(
+            self.kind,
+            AdapterKind::CommandCodeCli | AdapterKind::HermesCli
+        ) {
             anyhow::ensure!(
                 runtime_compatibility_digest.is_none(),
-                "Command Code uses Native Binding identity"
+                "This Runtime uses Native Binding identity"
             );
             (
                 RuntimeCompatibilityKey::native_binding(
@@ -6693,7 +6792,11 @@ impl AcpCliRuntimeAdapter {
         let spawn_workspace = workspace.clone();
         let mut spawn_frozen_runtime = frozen_runtime.clone();
         let spawn_environment_source = rovai_core::member_environment::launch_source();
-        let spawn_builtin_tool_factory = builtin_tool_factory.clone();
+        let spawn_builtin_tool_factory = if self.kind == AdapterKind::HermesCli {
+            builtin_tool_factory.clone().without_context_file()
+        } else {
+            builtin_tool_factory.clone()
+        };
         let spawn_external_mcp_servers = external_mcp_servers.clone();
         let spawn_attachment_access_root = attachment_access_root.to_path_buf();
         let spawn_private_runtime_dir = self.private_runtime_dir.clone();
@@ -6906,10 +7009,12 @@ impl AcpCliRuntimeAdapter {
 fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
     if matches!(
         adapter_kind,
-        AdapterKind::KiroCli | AdapterKind::CursorAgent
+        AdapterKind::KiroCli | AdapterKind::CursorAgent | AdapterKind::HermesCli
     ) {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
         // process. Cursor Host reuse remains outside the current contract.
+        // Hermes closes only its ACP client after each Run. Its shared native
+        // Gateway and original Session retain their own lifecycle.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -6923,7 +7028,10 @@ pub(crate) fn runtime_compatibility_digest(
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     attachment_authorization: &ThreadOutputDirectory,
 ) -> Result<Option<String>> {
-    if frozen_runtime.adapter_kind == AdapterKind::CommandCodeCli {
+    if matches!(
+        frozen_runtime.adapter_kind,
+        AdapterKind::CommandCodeCli | AdapterKind::HermesCli
+    ) {
         return Ok(None);
     }
     let execution_root = PathBuf::from(&workspace.execution_root)
@@ -7223,6 +7331,13 @@ fn configure_runtime_command(
         .as_object()
         .context("ACP permission configuration must be an object")?;
     match runtime.adapter_kind {
+        AdapterKind::HermesCli => {
+            ensure!(
+                permission_semantics != PermissionSemantics::CoreEnforcedV1
+                    || workspace.access != "read_only",
+                "Hermes cannot enforce a read-only workspace"
+            );
+        } // official native ACP entry already configured
         AdapterKind::MinimaxCodeCli => {
             health::configure_acp_command(
                 command,
@@ -8541,6 +8656,7 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
         AdapterKind::MinimaxCodeCli => permissions["permission_mode"] == "bypassPermissions",
+        AdapterKind::HermesCli => false,
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
@@ -8768,6 +8884,38 @@ pub fn classify_permission_request(
     let tool = &request["toolCall"];
     let meta = &tool["_meta"];
     let valid = match adapter_kind {
+        AdapterKind::HermesCli
+            if tool["toolCallId"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("clarify-")) =>
+        {
+            // Official ACP falls back to a permission card when form elicitation
+            // is unavailable. An open question has no choices, only Skip.
+            tool["toolCallId"].as_str().unwrap().len() > "clarify-".len()
+                && tool["kind"] == "other"
+                && tool["rawInput"]["question"]
+                    .as_str()
+                    .is_some_and(|question| !question.trim().is_empty())
+                && tool["title"] == tool["rawInput"]["question"]
+                && tool["rawInput"]["choices"]
+                    .as_array()
+                    .is_some_and(|choices| {
+                        options.is_some_and(|options| {
+                            options.len() == choices.len() + 1
+                                && choices.iter().zip(options).enumerate().all(
+                                    |(index, (choice, option))| {
+                                        choice.as_str().is_some()
+                                            && option["optionId"] == format!("choice-{index}")
+                                            && option["kind"] == "allow_once"
+                                            && option["name"] == *choice
+                                    },
+                                )
+                                && options.last().is_some_and(|option| {
+                                    option["optionId"] == "skip" && option["kind"] == "reject_once"
+                                })
+                        })
+                    })
+        }
         AdapterKind::KimiCodeCli if tool["title"] == "AskUserQuestion" => {
             // kimi-code 2.1.1's ACP fallback exposes only the first question.
             options.is_some_and(|options| {
@@ -8943,9 +9091,13 @@ pub fn completed_action(
         "locations": update.get("locations"),
     }))?;
     let effect_disposition = acp_effect_disposition(succeeded, &native_kind);
-    let public_file_changes = (succeeded && adapter_kind != AdapterKind::MinimaxCodeCli)
-        .then(|| public_acp_file_changes(update.get("content")))
-        .flatten();
+    let public_file_changes = (succeeded
+        && !matches!(
+            adapter_kind,
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+        ))
+    .then(|| public_acp_file_changes(update.get("content")))
+    .flatten();
     let public_file_operation_path = (succeeded
         && matches!(native_kind.as_str(), "read" | "edit" | "write"))
     .then(|| single_public_acp_location_path(update.get("locations")))
@@ -9027,7 +9179,10 @@ fn reconcile_completed_action(
     }
     if matches!(completion.outcome, ActionResultOutcome::Succeeded)
         && completion.public_file_changes.is_none()
-        && adapter_kind != AdapterKind::MinimaxCodeCli
+        && !matches!(
+            adapter_kind,
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+        )
     {
         completion.public_file_changes = observed.public_file_changes;
     }
@@ -9109,7 +9264,10 @@ fn reconcile_completed_action(
     .map(str::to_string);
     if matches!(completion.outcome, ActionResultOutcome::Succeeded)
         && completion.public_file_changes.is_none()
-        && adapter_kind != AdapterKind::MinimaxCodeCli
+        && !matches!(
+            adapter_kind,
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+        )
         && completion.native_kind == "edit"
         && let Some(path) = completion.public_file_operation_path.as_deref()
     {
@@ -10079,6 +10237,25 @@ mod tests {
             (AdapterKind::KimiCodeCli, -32002, json!({}), false),
             (AdapterKind::QwenCode, -32602, json!({}), false),
             (AdapterKind::CopilotCli, -32603, json!({}), false),
+            (
+                AdapterKind::HermesCli,
+                -32603,
+                json!({"details":"not_found"}),
+                true,
+            ),
+            (
+                AdapterKind::HermesCli,
+                -32603,
+                json!({"details":"connection_lost"}),
+                false,
+            ),
+            (
+                AdapterKind::HermesCli,
+                -32001,
+                json!({"code":"HERMES_SESSION_NOT_FOUND","sessionId":"old"}),
+                false,
+            ),
+            (AdapterKind::HermesCli, -32603, json!({}), false),
             (AdapterKind::ZcodeApp, -32004, json!({}), true),
             (AdapterKind::ZcodeApp, -32000, json!({}), false),
             (
@@ -10671,7 +10848,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -10824,7 +11001,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -11478,7 +11655,7 @@ done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -12040,7 +12217,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -12434,7 +12611,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             workspace_root.clone(),
             Some(attachments.clone()),
@@ -12493,7 +12670,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             workspace_root.clone(),
             Some(attachments.clone()),
@@ -12789,7 +12966,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             cold_host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             workspace_root,
             Some(attachments),
@@ -13001,7 +13178,7 @@ while IFS= read -r ignored; do :; done
                 let runtime = AcpRuntime::from_test_host(
                     owner,
                     host.clone(),
-                    "compat".into(),
+                    "compat".to_owned(),
                     "mcp".into(),
                     root.clone(),
                     Some(exact_attachment_root(&root)),
@@ -13293,7 +13470,7 @@ while IFS= read -r ignored; do :; done
                     execution_epoch: 1,
                 },
                 host.clone(),
-                "sha256:compatibility".to_string(),
+                "sha256:compatibility".to_owned(),
                 "sha256:mcp".to_string(),
                 root.clone(),
                 Some(exact_attachment_root(&root)),
@@ -13414,7 +13591,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -13551,7 +13728,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -13608,7 +13785,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn real_acp_session_catalog_rejects_a_missing_explicit_model_without_fallback() {
+    async fn real_acp_session_model_selection_respects_native_adapter_boundaries() {
         for configuration_rejected in [false, true] {
             let root = std::env::temp_dir().join(format!(
                 "rovai-acp-live-model-validation-{}",
@@ -13655,7 +13832,7 @@ while IFS= read -r ignored; do :; done
                     execution_epoch: 1,
                 },
                 host.clone(),
-                "sha256:compatibility".to_string(),
+                "sha256:compatibility".to_owned(),
                 "sha256:mcp".to_string(),
                 root.clone(),
                 Some(exact_attachment_root(&root)),
@@ -13700,6 +13877,265 @@ while IFS= read -r ignored; do :; done
 
             host.shutdown().await;
             std::fs::remove_dir_all(root).unwrap();
+        }
+        // The same Host seam must allow Hermes to decide selections outside its
+        // picker, while preserving strict catalog behavior for the adapter above.
+        // A fresh Host per attachment covers both new and cold resume responses.
+        for resume in [false, true] {
+            for (case, source, current_model, current_mode, target, failure, expected) in [
+                (
+                    "default-missing",
+                    "runtime_default",
+                    None,
+                    None,
+                    "native-default",
+                    None,
+                    vec!["session/set_mode"],
+                ),
+                (
+                    "same-without-catalog",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec![],
+                ),
+                (
+                    "outside-catalog",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("default"),
+                    "provider-a/other",
+                    None,
+                    vec!["session/set_model", "session/set_mode"],
+                ),
+                (
+                    "custom-provider-omitted",
+                    "explicit",
+                    Some("custom:model"),
+                    Some("dont_ask"),
+                    "custom:sub2api:model",
+                    None,
+                    vec![],
+                ),
+                (
+                    "custom-model-changed",
+                    "explicit",
+                    Some("custom:model"),
+                    Some("dont_ask"),
+                    "custom:sub2api:other",
+                    None,
+                    vec!["session/set_model"],
+                ),
+                (
+                    "different-provider",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-b/model",
+                    None,
+                    vec!["session/set_model"],
+                ),
+                (
+                    "unknown-state",
+                    "explicit",
+                    None,
+                    None,
+                    "provider-b/model",
+                    None,
+                    vec!["session/set_model", "session/set_mode"],
+                ),
+                (
+                    "model-rejected",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-b/model",
+                    Some("session/set_model"),
+                    vec!["session/set_model"],
+                ),
+                (
+                    "mode-rejected",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("default"),
+                    "provider-a/model",
+                    Some("session/set_mode"),
+                    vec!["session/set_mode"],
+                ),
+            ] {
+                let root = std::env::temp_dir()
+                    .join(format!("rovai-hermes-model-{}", uuid::Uuid::new_v4()));
+                std::fs::create_dir_all(&root).unwrap();
+                let executable = root.join("hermes.py");
+                let log = root.join("requests.jsonl");
+                let mut session = json!({"sessionId":"hermes-session"});
+                if let Some(model) = current_model {
+                    session["models"] = json!({"currentModelId":model});
+                    if case != "same-without-catalog" {
+                        session["models"]["availableModels"] =
+                            json!([{"modelId":"provider-a/model","name":"A"}]);
+                    }
+                }
+                if let Some(mode) = current_mode {
+                    session["modes"] = json!({"currentModeId":mode});
+                }
+                std::fs::write(
+                    executable.with_extension("json"),
+                    serde_json::to_vec(&json!({
+                        "session": session, "failure":failure,
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                make_executable(
+                    &executable,
+                    r#"#!/usr/bin/env python3
+import json, pathlib, sys
+root = pathlib.Path(__file__).parent
+config = json.loads(pathlib.Path(__file__).with_suffix('.json').read_text())
+model = config['session'].get('models', {}).get('currentModelId') or 'provider-a/model'
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    params = request.get('params', {})
+    if method == 'session/set_model' and method != config['failure']:
+        model = params['modelId']
+    if method == 'session/prompt':
+        request['executedModel'] = model
+    with (root / 'requests.jsonl').open('a') as output:
+        output.write(json.dumps(request) + '\n')
+    response = {'jsonrpc':'2.0', 'id':request['id']}
+    if method == config['failure']:
+        response['error'] = {'code':-32602, 'message':'native configuration refused'}
+    elif method == 'initialize':
+        response['result'] = {'protocolVersion':1,'agentInfo':{'version':'0.22.4'},'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
+    elif method in ('session/new', 'session/resume'):
+        response['result'] = config['session']
+    elif method == 'session/prompt':
+        response['result'] = {'stopReason':'end_turn'}
+    elif method in ('session/set_model', 'session/set_mode', 'audit/terminal-barrier'):
+        response['result'] = {}
+    else:
+        response['error'] = {'code':-32601,'message':'unexpected method'}
+    print(json.dumps(response), flush=True)
+"#,
+                );
+                let mut frozen = frozen_trae_runtime(&executable);
+                frozen.adapter_kind = AdapterKind::HermesCli;
+                frozen.reported_version = Some("0.22.4".into());
+                frozen.permissions.adapter_kind = AdapterKind::HermesCli;
+                frozen.permissions.values = json!({"permission_mode":"dont_ask"});
+                let workspace =
+                    AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into());
+                let (incoming, mut receiver) = mpsc::unbounded_channel();
+                let host = AcpHost::spawn(
+                    &root,
+                    &workspace,
+                    PermissionSemantics::RuntimeManagedV2,
+                    &frozen,
+                    incoming,
+                    Some(exact_builtin_tools(&root)),
+                    CompactionDetectorPolicy::Disabled,
+                    true,
+                    &BTreeMap::new(),
+                    &root.join("private"),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                let runtime = AcpRuntime::from_test_host(
+                    AcpRuntimeOwner {
+                        agent_run_id: "hermes-model-run".into(),
+                        execution_epoch: 1,
+                    },
+                    host.clone(),
+                    "compat".into(),
+                    "mcp".into(),
+                    root.clone(),
+                    Some(exact_attachment_root(&root)),
+                    "runtime_managed".into(),
+                    AcpSessionPermissions {
+                        mode: Some("dont_ask".into()),
+                        ..Default::default()
+                    },
+                    None,
+                );
+                let result = runtime
+                    .start_or_resume_session(
+                        resume.then_some("hermes-session"),
+                        AcpSessionCapabilities {
+                            can_resume: true,
+                            can_load_history: false,
+                        },
+                        source,
+                        target,
+                        &json!({}),
+                        &BTreeMap::new(),
+                    )
+                    .await;
+                if failure.is_some() {
+                    let error = result.expect_err("native rejection must stop attachment");
+                    assert!(format!("{error:#}").contains("native configuration refused"));
+                    assert!(
+                        !error.is::<AcpSessionRestoreError>(),
+                        "do not replace the Session after a setting error"
+                    );
+                } else {
+                    assert_eq!(result.unwrap(), "hermes-session", "{case}, resume={resume}");
+                    runtime
+                        .start_prompt("model-delivery", "TASK")
+                        .await
+                        .unwrap();
+                    receive_through_prompt_completion(&mut receiver).await;
+                }
+                host.rpc("audit/terminal-barrier", json!({})).await.unwrap();
+                let requests = std::fs::read_to_string(&log)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                    .collect::<Vec<_>>();
+                let methods = requests
+                    .iter()
+                    .map(|request| request["method"].as_str().unwrap())
+                    .collect::<Vec<_>>();
+                let mut expected_methods = vec![
+                    "initialize",
+                    if resume {
+                        "session/resume"
+                    } else {
+                        "session/new"
+                    },
+                ];
+                expected_methods.extend(&expected);
+                if failure.is_none() {
+                    expected_methods.push("session/prompt");
+                }
+                expected_methods.push("audit/terminal-barrier");
+                assert_eq!(methods, expected_methods, "{case}, resume={resume}");
+                for request in &requests {
+                    if request["method"] == "session/set_model" {
+                        assert_eq!(request["params"]["modelId"], target);
+                    }
+                    if request["method"] == "session/set_mode" {
+                        assert_eq!(request["params"]["modeId"], "dont_ask");
+                    }
+                    if request["method"] == "session/prompt" {
+                        assert_eq!(
+                            request["executedModel"],
+                            if expected.contains(&"session/set_model") {
+                                target
+                            } else {
+                                current_model.unwrap_or("provider-a/model")
+                            }
+                        );
+                    }
+                }
+                host.shutdown().await;
+                std::fs::remove_dir_all(root).unwrap();
+            }
         }
     }
 
@@ -13978,7 +14414,7 @@ while IFS= read -r ignored; do :; done
                     execution_epoch: 1,
                 },
                 host.clone(),
-                "sha256:compatibility".to_string(),
+                "sha256:compatibility".to_owned(),
                 "sha256:mcp".to_string(),
                 root.clone(),
                 Some(exact_attachment_root(&root)),
@@ -14521,7 +14957,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -14695,7 +15131,7 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 1,
             },
             host.clone(),
-            "sha256:compatibility".to_string(),
+            "sha256:compatibility".to_owned(),
             "sha256:mcp".to_string(),
             root.clone(),
             Some(exact_attachment_root(&root)),
@@ -15537,6 +15973,15 @@ while IFS= read -r ignored; do :; done
         );
         assert_eq!(
             select_acp_session_continuation(
+                AdapterKind::HermesCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::HistoryRestore
+        );
+        assert_eq!(
+            select_acp_session_continuation(
                 AdapterKind::GrokBuild,
                 false,
                 Some("session-1"),
@@ -15601,6 +16046,21 @@ while IFS= read -r ignored; do :; done
         make_executable(&executable, "#!/bin/sh\nexit 0\n");
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let frozen = frozen_trae_runtime(&executable);
+        let mut hermes = frozen.clone();
+        hermes.adapter_kind = AdapterKind::HermesCli;
+        hermes.permissions.adapter_kind = AdapterKind::HermesCli;
+        assert!(
+            runtime_compatibility_digest(
+                &hermes,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &BTreeMap::new(),
+                &attachment_authorization
+            )
+            .unwrap()
+            .is_none()
+        );
+
         let mut opencode = frozen.clone();
         opencode.adapter_kind = AdapterKind::OpencodeCli;
         opencode.permissions.adapter_kind = AdapterKind::OpencodeCli;
@@ -16073,6 +16533,10 @@ while IFS= read -r ignored; do :; done
                 AdapterKind::QwenCode,
                 include_str!("../tests/fixtures/runtime-questionnaire/qwen-0.25.0.json"),
             ),
+            (
+                AdapterKind::HermesCli,
+                include_str!("../tests/fixtures/runtime-questionnaire/hermes-0.22.4.json"),
+            ),
         ] {
             let question: Value = serde_json::from_str(fixture).unwrap();
             if adapter == AdapterKind::QwenCode {
@@ -16109,13 +16573,42 @@ while IFS= read -r ignored; do :; done
                 AcpPermissionRequestKind::MalformedQuestionnaire
             );
             let mut conflicting = question.clone();
-            conflicting["toolCall"]["_meta"] =
-                json!({"toolName":"write_file","qwenInteractionKind":"user_question"});
+            if adapter == AdapterKind::HermesCli {
+                conflicting["toolCall"]["kind"] = json!("execute");
+            } else {
+                conflicting["toolCall"]["_meta"] =
+                    json!({"toolName":"write_file","qwenInteractionKind":"user_question"});
+            }
             assert_eq!(
                 classify_permission_request(adapter, &conflicting),
                 AcpPermissionRequestKind::MalformedQuestionnaire
             );
-            for params in [&question, &malformed, &conflicting] {
+            let mut questions = vec![question.clone(), malformed, conflicting];
+            if adapter == AdapterKind::HermesCli {
+                let mut open = question.clone();
+                open["toolCall"]["rawInput"]["choices"] = json!([]);
+                open["options"] = json!([question["options"].as_array().unwrap().last().unwrap()]);
+                assert_eq!(
+                    classify_permission_request(adapter, &open),
+                    AcpPermissionRequestKind::Questionnaire
+                );
+                questions.push(open);
+                for pointer in [
+                    "/toolCall/rawInput/question",
+                    "/toolCall/rawInput/choices",
+                    "/options/0/optionId",
+                    "/options/0/name",
+                ] {
+                    let mut missing = question.clone();
+                    *missing.pointer_mut(pointer).unwrap() = Value::Null;
+                    assert_eq!(
+                        classify_permission_request(adapter, &missing),
+                        AcpPermissionRequestKind::MalformedQuestionnaire
+                    );
+                    questions.push(missing);
+                }
+            }
+            for params in &questions {
                 for approved in [false, true] {
                     assert_eq!(
                         legacy_approval_result(adapter, params, approved).unwrap(),
@@ -16140,6 +16633,7 @@ while IFS= read -r ignored; do :; done
             let mut ordinary = question.clone();
             ordinary["toolCall"]["title"] = json!("Question about a command");
             ordinary["toolCall"]["_meta"] = json!({"toolName":"run_shell_command"});
+            ordinary["toolCall"]["toolCallId"] = json!("tc-ordinary");
             assert_eq!(
                 classify_permission_request(adapter, &ordinary),
                 AcpPermissionRequestKind::Execution
@@ -16643,6 +17137,13 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn successful_terminal_acp_diff_content_is_kept_for_evidence_projection_only() {
+        for kind in [AdapterKind::HermesCli, AdapterKind::MinimaxCodeCli] {
+            let proposed = completed_action(kind, &json!({"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"preview","status":"completed","kind":"edit",
+                "content":[{"type":"diff","path":"a.txt","oldText":"before","newText":"after"}]
+            }})).unwrap().unwrap();
+            assert!(proposed.public_file_changes.is_none(), "{kind:?}");
+        }
         let completion = completed_action(
             AdapterKind::CursorAgent,
             &json!({

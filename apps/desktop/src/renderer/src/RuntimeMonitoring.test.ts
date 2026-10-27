@@ -113,6 +113,7 @@ describe('RuntimeMonitoring', () => {
     expect(markup).not.toContain('Tool 耗时')
     expect(markup).not.toContain('Clean break')
     expect(markup).not.toContain('value="cline-cli"')
+    expect(markup).not.toContain('value="hermes-cli"')
     expect(markup).toContain('value="command-code-cli"')
   })
 
@@ -128,7 +129,7 @@ describe('RuntimeMonitoring', () => {
     expect(markup).toContain('USD 1.25')
     expect(markup).toContain('Codex')
     // Hiding new-use selectors must not erase persisted usage labels.
-    for (const [kind, label] of [['cline-cli', 'Cline'], ['command-code-cli', 'Command Code']] as const) {
+    for (const [kind, label] of [['cline-cli', 'Cline'], ['hermes-cli', 'Hermes Agent'], ['command-code-cli', 'Command Code']] as const) {
       value.byRuntime[0].runtimeKind = kind
       expect(renderToStaticMarkup(createElement(RuntimeUsageView, { snapshot: value }))).toContain(label)
     }

@@ -6,10 +6,20 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Thread read 正向增量读取（2026-10-22）
+
+新增 `rovai thread read --after N`，按排他序列号从最早未覆盖消息向后分页；0 可从最早消息起读。
+默认最新 20、before、单条详情和返回字段保持。按已确认的三处清单更新 description/help、示例和
+history reference，校正旧 mentions/目录教学。完整前后文本、确认及验证见
+[方案与实施记录](model-context-change-thread-read-after.md)。当前规范为
+[History v16](../../contracts/camp-history-v16.md) 与 [Transport v44](../../contracts/builtin-tool-transport-v44.md)。
+跨版本影响见方案的九项表；无数据库迁移、UI、Runtime Activity、Native Binding 或版本切换。
+
 
 ## MCP Run 快照与 Grok 启动清理（2026-10-26）
 
@@ -23,11 +33,13 @@ last_updated: 2026-10-26
 
 ## 定时任务对话命名（2026-10-26）
 
-Issue #875 的初次实现已合入；按 User 后续确认，暂时撤下对话命名入口并停用日期标题，
-手动和定时运行均恢复直接使用任务名。交互稿改良另行讨论；不新增历史数据兼容逻辑。
-当前合同见 [Scheduled Automation v4](../../contracts/scheduled-automation-v4.md)，
-范围与验证见[实施记录](implementation-plan.md#定时任务对话命名2026-10-26)。
-已有 Core schema 165 / migration 215 保持不变；没有模型输入模板或发布版本变化。局部可逆停用不新增 Version Decision。
+Issue #875 经 PR #916 暂停后，User 于 2026-10-27 确认简化交互稿并授权实现及合入。
+Desktop/Web 恢复命名入口，日期/时间只保留勾选，固定格式并保留名称前后位置与实时预览；
+Core 恢复使用定时 occurrence 的计划时间或手动实际触发时间生成标题。
+当前合同见 [Scheduled Automation v5](../../contracts/scheduled-automation-v5.md)，
+范围与验证见[实施记录](implementation-plan.md#简化对话命名恢复2026-10-27)。
+沿用 Core schema 165 / migration 215，没有历史数据回填、旧格式兼容或模型输入模板变化。
+局部交互简化与恢复不新增 Version Decision，也不改变发布版本。
 
 ## Runtime PATH 与主动检查一致性（2026-10-26）
 
@@ -42,6 +54,19 @@ Issue #891 按 User 确认的范围统一启动／重新检测／主动检查的
 停止时移除有色提示与重复停止按钮，状态图标保留时间线。无 Core 字段、状态机或调度变更。
 当前规则见 [Run Process Detail Surface v56](../../contracts/run-process-detail-surface-v56.md)，
 实施与验证见[实施记录](implementation-plan.md#run-启动与停止展示2026-10-26)。
+
+## Hermes Runtime（2026-10-25）
+
+按 User sequence 56/60 直接替换未上线实验：官方 ACP、用户原生 Home、共享 Gateway；
+通过逻辑 Session 在 Core 定位当前 Run，普通 CLI 不增加参数、表或上下文交换。
+FirstPayload 保留首次/真实更新，取消压缩补发；ACP 清理不拥有原生执行端。
+当前规范见 [Hermes 合同](../../contracts/hermes-managed-runtime-v1.md)，理由见 [D67](decisions.md#v1-72-d67)，
+正文确认见 [R2](model-context-change-hermes-first-input.md)，验证见 [实施记录](hermes-first-input-implementation.md)。
+最低版本 0.22.4。2026-10-27 按 User sequence 122 暂缓全部平台公开，取代 sequence 113 的
+macOS 开放决定。macOS 两架构、Windows x64、Linux x64 均为 NotQualified；用户入口完全隐藏，
+普通发现、检查、配置与执行关闭。内部实现和已有记录保留，状态见[平台准入](../../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+按同 Thread sequence 116，所有 Runtime 的引导、成员配置及检查反馈移除 Preview 资格说明小字，
+只呈现实际机器状态和可处理的错误；内部准入与诊断证据保留。
 
 ## 撤回消息两分钟重新编辑（2026-10-23）
 

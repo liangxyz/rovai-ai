@@ -92,7 +92,8 @@ pub async fn run_bounded_command_with_input(
     } else {
         ManagedStdinPolicy::Null
     };
-    let mut child = spawn_managed_probe(command, stdin_policy)?;
+    let mut child =
+        spawn_managed_probe(command, stdin_policy, ManagedProcessPurpose::RuntimeProbe)?;
     let mut stdin = if input.is_some() {
         Some(
             child
@@ -179,8 +180,22 @@ impl RuntimeProbeProcess {
         stderr_bytes: usize,
         cleanup_timeout: Duration,
     ) -> Result<Self> {
+        Self::spawn_with_purpose(
+            command,
+            stderr_bytes,
+            cleanup_timeout,
+            ManagedProcessPurpose::RuntimeProbe,
+        )
+    }
+
+    pub fn spawn_with_purpose(
+        command: &mut Command,
+        stderr_bytes: usize,
+        cleanup_timeout: Duration,
+        purpose: ManagedProcessPurpose,
+    ) -> Result<Self> {
         let max_frame_bytes = protocol_frame_bytes()?;
-        let mut child = spawn_managed_probe(command, ManagedStdinPolicy::Piped)?;
+        let mut child = spawn_managed_probe(command, ManagedStdinPolicy::Piped, purpose)?;
         let stdin = child
             .take_stdin()
             .context("runtime_probe_stdin_unavailable")?;
@@ -347,6 +362,7 @@ impl<R: AsyncRead + Unpin> BoundedLineReader<R> {
 fn spawn_managed_probe(
     command: &Command,
     stdin_policy: ManagedStdinPolicy,
+    purpose: ManagedProcessPurpose,
 ) -> Result<ManagedProcess> {
     let ownership = format!(
         "runtime-probe:{}",
@@ -354,7 +370,7 @@ fn spawn_managed_probe(
     );
     let spec = ManagedProcessLaunchSpec::capture(
         command,
-        ManagedProcessPurpose::RuntimeProbe,
+        purpose,
         stdin_policy,
         ManagedWindowsArgvDialect::MicrosoftCrt,
         ownership,

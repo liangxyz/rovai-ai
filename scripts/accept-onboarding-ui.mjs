@@ -92,7 +92,7 @@ try {
   await waitForSelector(running.cdp, '.onboarding-member-layout', 5_000)
   const memberPage = await evaluate(running.cdp, `(() => ({
     rows: document.querySelectorAll('.onboarding-member-row').length,
-    portraits: document.querySelectorAll('.onboarding-selected-portrait').length,
+    portraits: document.querySelectorAll('.onboarding-selected-avatar').length,
     hasSkip: ['跳过', 'Skip'].some((text) => document.body.textContent?.includes(text)),
     hasStepNavigation: Boolean(document.querySelector('.onboarding-step, .onboarding-progress button, .onboarding-progress a')),
     horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
@@ -146,8 +146,13 @@ try {
       label: row.querySelector('strong')?.textContent?.trim(),
       status: row.querySelector('.onboarding-runtime-state')?.textContent?.trim(),
       className: row.querySelector('.onboarding-runtime-state')?.className,
+      detail: row.querySelector('small')?.textContent?.trim() ?? null,
+      title: row.title,
       disabled: row.disabled
     }))`)
+  assert(runtimeAvailability.every((runtime) => !/资格验证记录|qualification record|Preview|实验性|试运行/i.test(
+    `${runtime.label} ${runtime.status} ${runtime.detail} ${runtime.title}`
+  )), 'Runtime onboarding still exposes a Preview qualification notice')
   captures.runtimeReadyDay = join(outputDir, '05-runtime-ready-day-1040x700.png')
   await capture(running.cdp, captures.runtimeReadyDay)
   await setTheme(running.cdp, 'night')
@@ -258,8 +263,9 @@ try {
         `Initial member ${profile.agentId} ${field} does not match the ${initialLanguage} preset: ${JSON.stringify(profile[field])}`)
     }
     const runtimeConfigured = profile.runtimeConfiguration !== null
-    assert(runtimeConfigured === (profile.agentId === completed.memberAgentId),
-      `Unexpected Runtime configuration on initial member ${profile.agentId}`)
+    assert(runtimeConfigured
+      && JSON.stringify(profile.runtimeConfiguration) === JSON.stringify(member.runtimeConfiguration),
+      `Initial member ${profile.agentId} did not inherit the selected Runtime configuration`)
     report.initialMembers.push({
       agentId: profile.agentId,
       displayName: profile.displayName,
@@ -267,7 +273,7 @@ try {
       runtimeConfigured
     })
   }
-  const beforeProjection = await request(running.cdp, 'camps.open', {
+  const beforeProjection = await request(running.cdp, 'threads.open', {
     traceId: randomUUID(),
     threadId: completed.quickChatThreadId
   })
@@ -351,7 +357,7 @@ try {
   await waitForExpression(running.cdp,
     `JSON.parse(window.localStorage.getItem('rovai.camp-composer-draft.v1:' + ${JSON.stringify(completed.quickChatThreadId)}) || 'null')?.body === ${JSON.stringify(expectedStarter)}`,
     10_000)
-  const afterProjection = await request(running.cdp, 'camps.open', {
+  const afterProjection = await request(running.cdp, 'threads.open', {
     traceId: randomUUID(),
     threadId: completed.quickChatThreadId
   })
@@ -396,7 +402,7 @@ try {
     `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(expectedStarter)}`,
     10_000)
   const restarted = await onboardingGet(running.cdp)
-  const restartedProjection = await request(running.cdp, 'camps.open', {
+  const restartedProjection = await request(running.cdp, 'threads.open', {
     traceId: randomUUID(),
     threadId: completed.quickChatThreadId
   })

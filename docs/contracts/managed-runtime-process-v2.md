@@ -255,3 +255,12 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 - [Windows Job Completion Notifications](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_associate_completion_port)
 - [Windows Object Lifecycle](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/life-cycle-of-an-object)
 - [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)
+
+
+## 原生共享执行端的连接进程
+
+`RuntimeConnection` 仅拥有本次启动的客户端根进程。Hermes 正式 ACP 与 ACP 探测使用此 purpose，
+不收集 descendant ledger、不向进程组或后代发送清理信号；原生共享 Gateway 可继续运行。
+即使客户端首次启动 Gateway，后者也不变为 Run 私有资源。其他 purpose 的树所有权不变。
+当前该连接模式仅在 Unix 实现，Hermes Windows 尚未准入；不降低其他 Windows Runtime 的 Job 保证。
+根进程退出只证明连接结束，原生执行未知仍按任务合同处理。用户授权取消通过官方协议进行。

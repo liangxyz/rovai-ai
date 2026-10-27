@@ -8317,7 +8317,7 @@ function userMessageRunStatusLabel(run: AgentRunView | null): string {
   if (run.status === 'running') return uiAttribute("处理中")
   if (run.status === 'waiting') return uiAttribute("等待中")
   if (run.status === 'succeeded') return uiAttribute("已完成")
-  if (run.status === 'failed') return uiAttribute("未完成")
+  if (run.status === 'failed') return uiAttribute("执行失败")
   return uiAttribute("已停止")
 }
 
@@ -8352,7 +8352,8 @@ function UserMessageDeliveryReceipt({
     // its target Run later finishes; ordinary targets describe execution.
     const status = delivery?.requestedMode === 'steer' && delivery.inputDeliveryStatus === 'accepted' ? 'steered'
       : delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
-      : delivery?.status === 'failed' || delivery?.status === 'cancelled' || run?.status === 'failed' || run?.status === 'cancelled' ? 'incomplete'
+      : delivery?.status === 'failed' || run?.status === 'failed' ? 'failed'
+      : delivery?.status === 'cancelled' || run?.status === 'cancelled' ? 'stopped'
       : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? delivery.dispatchPhase === 'attempting' ? 'steerSending' : 'steerPending'
       : run?.status === 'succeeded' || (!run && delivery?.status === 'settled') ? 'completed'
       : run && agentRunIsStarting(run) ? 'starting'
@@ -8367,10 +8368,11 @@ function UserMessageDeliveryReceipt({
   const starting = ordered.filter(item => item.status === 'starting')
   const pending = ordered.filter(item => item.status === 'pending')
   const inProgress = ordered.filter(item => item.status === 'inProgress')
-  const incomplete = ordered.filter(item => item.status === 'incomplete')
+  const stopped = ordered.filter(item => item.status === 'stopped')
+  const failed = ordered.filter(item => item.status === 'failed')
   const canWithdraw = message.canWithdraw && Boolean(onWithdraw)
     && deliveries.every(delivery => delivery.status === 'waiting')
-  const receiptLabel = [
+  const ordinaryLabels = [
     steered.length ? (ordered.length === 1 ? uiAttribute('已插话') : uiAttribute('已插话 {0}', String(steered.length))) : '',
     steerPending.length ? (ordered.length === 1 ? uiAttribute('待插话') : uiAttribute('待插话 {0}', String(steerPending.length))) : '',
     steerSending.length ? (ordered.length === 1 ? uiAttribute('发送中') : uiAttribute('发送中 {0}', String(steerSending.length))) : '',
@@ -8378,14 +8380,16 @@ function UserMessageDeliveryReceipt({
     inProgress.length ? uiAttribute('处理中 {0}', String(inProgress.length)) : '',
     pending.length ? uiAttribute('待处理 {0}', String(pending.length)) : '',
     unknown.length ? uiAttribute('待核对 {0}', String(unknown.length)) : '',
-    incomplete.length ? uiAttribute('未完成 {0}', String(incomplete.length)) : ''
-  ].filter(Boolean).join(' · ')
+    stopped.length ? (ordered.length === 1 ? uiAttribute('已停止') : uiAttribute('已停止 {0}', String(stopped.length))) : ''
+  ].filter(Boolean)
+  const failureLabel = failed.length ? (ordered.length === 1 ? uiAttribute('执行失败') : uiAttribute('执行失败 {0}', String(failed.length))) : ''
+  const receiptLabel = [...ordinaryLabels, failureLabel].filter(Boolean).join(' · ')
   if (!receiptLabel) return null
   const presentation = {
-    className: unknown.length ? 'is-unknown' : incomplete.length ? 'is-incomplete' : steerSending.length ? 'is-sending' : inProgress.length || starting.length ? 'is-progress' : pending.length || steerPending.length ? 'is-queued' : 'is-confirmed',
+    className: unknown.length ? 'is-unknown' : failed.length ? 'is-failed' : steerSending.length ? 'is-sending' : inProgress.length || starting.length ? 'is-progress' : pending.length || steerPending.length ? 'is-queued' : stopped.length ? 'is-stopped' : 'is-confirmed',
     label: receiptLabel
   }
-  const hasMixedStatus = [steered, steerPending, steerSending, starting, inProgress, pending, unknown, incomplete].filter(items => items.length > 0).length > 1
+  const hasMixedStatus = ordinaryLabels.length + Number(Boolean(failureLabel)) > 1
   return (
     <div className="user-message-receipt-row">
       {canWithdraw && <button className="user-message-withdraw" type="button" aria-label={uiAttribute("撤回尚未领取的消息")} title={uiAttribute("撤回消息")} onClick={onWithdraw}>
@@ -8399,12 +8403,18 @@ function UserMessageDeliveryReceipt({
             aria-label={uiAttribute("查看消息处理状态，{0}", String(presentation.label))}
           >
             {['is-progress', 'is-sending'].includes(presentation.className) ? <ExecutionIcon />
+              : presentation.className === 'is-stopped' ? <ExecutionStatusGlyph status="stopped" />
+              : presentation.className === 'is-failed' ? <ExecutionStatusGlyph status="failed" />
               : presentation.className === 'is-confirmed' ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6" /></svg>
-              : presentation.className === 'is-unknown' || presentation.className === 'is-incomplete' ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2 6 11H2Z" /><path d="M8 6v3m0 2h.01" /></svg>
+              : presentation.className === 'is-unknown' ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2 6 11H2Z" /><path d="M8 6v3m0 2h.01" /></svg>
               : <svg viewBox="0 0 16 16" aria-hidden="true">
                   <circle cx="8" cy="8" r="5.6" /><path d="M8 4.7V8l2.2 1.4" />
                 </svg>}
-            <span>{presentation.label}</span>
+            <span>
+              {ordinaryLabels.join(' · ')}
+              {ordinaryLabels.length > 0 && failureLabel && <span aria-hidden="true"> · </span>}
+              {failureLabel && <span className="user-message-receipt-failure">{failureLabel}</span>}
+            </span>
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
@@ -8413,9 +8423,16 @@ function UserMessageDeliveryReceipt({
             {ordered.map(({ agentId, run, delivery, status }) => {
               const member = memberById.get(agentId)
               const displayName = member?.displayName ?? agentId
+              const statusLabel = status === 'failed' ? uiAttribute('执行失败')
+                : status === 'stopped' ? uiAttribute('已停止')
+                : delivery?.requestedMode === 'steer'
+                  ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收')
+                    : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('是否送达待核对')
+                    : status === 'steerPending' ? uiAttribute('待插话') : uiAttribute('发送中')
+                  : userMessageRunStatusLabel(run)
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
-                <span><strong>{displayName}</strong><small>{delivery?.requestedMode === 'steer' ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收') : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('是否送达待核对') : ['failed','cancelled'].includes(delivery.status) ? uiAttribute(delivery.status === 'cancelled' ? '已停止' : '未完成') : status === 'steerPending' ? uiAttribute('待插话') : uiAttribute('发送中') : !run && delivery?.status === 'failed' ? uiAttribute('未完成') : !run && delivery?.status === 'cancelled' ? uiAttribute('已停止') : userMessageRunStatusLabel(run)}</small></span>
+                <span><strong>{displayName}</strong><small>{statusLabel}</small></span>
                 {delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
                   setChecking(delivery.id); setCheckResult(null)
                   try {
@@ -10065,9 +10082,12 @@ function MessageActions({
 function MessageReplyIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2" />
-      <path d="m15.2 9.2-3.6 3.5 3.6 3.5" />
-      <path d="M11.8 12.7h8.7" />
+      <path d="M6.4 5.3h11.2a1.9 1.9 0 0 1 1.9 1.9v7a1.9 1.9 0 0 1-1.9 1.9h-6.4l-4.5 2.8v-2.8h-.3a1.9 1.9 0 0 1-1.9-1.9v-7a1.9 1.9 0 0 1 1.9-1.9Z" />
+      <g fill="currentColor" stroke="none">
+        <circle cx="8" cy="10.7" r=".7" />
+        <circle cx="12" cy="10.7" r=".7" />
+        <circle cx="16" cy="10.7" r=".7" />
+      </g>
     </svg>
   )
 }

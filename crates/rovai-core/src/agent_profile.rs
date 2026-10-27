@@ -50,6 +50,7 @@ pub enum AdapterKind {
     CursorAgent,
     KimiCodeCli,
     MinimaxCodeCli,
+    HermesCli,
     GrokBuild,
     DeepseekHarness,
     ZcodeApp,
@@ -100,7 +101,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
@@ -117,6 +118,7 @@ impl AdapterKind {
         Self::CursorAgent,
         Self::KimiCodeCli,
         Self::MinimaxCodeCli,
+        Self::HermesCli,
         Self::GrokBuild,
         Self::DeepseekHarness,
         Self::ZcodeApp,
@@ -139,6 +141,7 @@ impl AdapterKind {
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi-code-cli",
             Self::MinimaxCodeCli => "minimax-code-cli",
+            Self::HermesCli => "hermes-cli",
             Self::GrokBuild => "grok-build",
             Self::DeepseekHarness => "deepseek-harness",
             Self::ZcodeApp => "zcode-app",
@@ -163,6 +166,7 @@ impl AdapterKind {
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi",
             Self::MinimaxCodeCli => "mcode",
+            Self::HermesCli => "hermes",
             Self::GrokBuild => "grok",
             Self::DeepseekHarness => "dsh",
             Self::ZcodeApp => "ZCode",
@@ -181,6 +185,7 @@ impl AdapterKind {
             Self::Pi => &["pi"],
             Self::KimiCodeCli => &["kimi"],
             Self::MinimaxCodeCli => &["mcode"],
+            Self::HermesCli => &["hermes"],
             Self::GrokBuild => &["grok"],
             Self::DeepseekHarness => &["dsh"],
             Self::ZcodeApp => &["ZCode"],
@@ -216,6 +221,7 @@ impl AdapterKind {
             Self::CursorAgent => "Cursor Agent",
             Self::KimiCodeCli => "Kimi Code",
             Self::MinimaxCodeCli => "MiniMax Code",
+            Self::HermesCli => "Hermes Agent",
             Self::GrokBuild => "Grok Build",
             Self::DeepseekHarness => "DeepSeek Harness",
             Self::ZcodeApp => "ZCode",
@@ -238,6 +244,7 @@ impl AdapterKind {
                 | Self::CursorAgent
                 | Self::KimiCodeCli
                 | Self::MinimaxCodeCli
+                | Self::HermesCli
                 | Self::GrokBuild
                 | Self::DeepseekHarness
                 | Self::ZcodeApp
@@ -261,6 +268,7 @@ impl AdapterKind {
             Self::CursorAgent => "ROVAI_CURSOR_BIN",
             Self::KimiCodeCli => "ROVAI_KIMI_BIN",
             Self::MinimaxCodeCli => "ROVAI_MINIMAX_CODE_BIN",
+            Self::HermesCli => "ROVAI_HERMES_BIN",
             Self::GrokBuild => "ROVAI_GROK_BIN",
             Self::DeepseekHarness => "ROVAI_DEEPSEEK_HARNESS_BIN",
             Self::ZcodeApp => "ROVAI_ZCODE_BIN",
@@ -290,6 +298,7 @@ impl AdapterKind {
             | Self::CursorAgent
             | Self::KimiCodeCli
             | Self::MinimaxCodeCli
+            | Self::HermesCli
             | Self::GrokBuild
             | Self::DeepseekHarness
             | Self::ZcodeApp
@@ -316,6 +325,7 @@ impl AdapterKind {
             | Self::TraeCnCli
             | Self::KimiCodeCli
             | Self::MinimaxCodeCli
+            | Self::HermesCli
             | Self::GrokBuild
             | Self::DeepseekHarness
             | Self::ZcodeApp
@@ -345,6 +355,7 @@ impl FromStr for AdapterKind {
             "cursor-agent" => Ok(Self::CursorAgent),
             "kimi-code-cli" => Ok(Self::KimiCodeCli),
             "minimax-code-cli" => Ok(Self::MinimaxCodeCli),
+            "hermes-cli" => Ok(Self::HermesCli),
             "grok-build" => Ok(Self::GrokBuild),
             "deepseek-harness" => Ok(Self::DeepseekHarness),
             "zcode-app" => Ok(Self::ZcodeApp),
@@ -4419,6 +4430,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli
         | AdapterKind::MinimaxCodeCli
+        | AdapterKind::HermesCli
         | AdapterKind::GrokBuild
         | AdapterKind::DeepseekHarness
         | AdapterKind::CommandCodeCli => "acp-v1",
@@ -4922,7 +4934,10 @@ fn resolve_frozen_runtime_binding_with_snapshot(
         config_digest: String::new(),
     };
     if let Some(api) = &frozen.custom_api
-        && adapter_kind != AdapterKind::CommandCodeCli
+        && !matches!(
+            adapter_kind,
+            AdapterKind::CommandCodeCli | AdapterKind::HermesCli
+        )
     {
         let identity = api.identity()?;
         frozen.host_config_digest = Some(canonical_json_digest(&json!({

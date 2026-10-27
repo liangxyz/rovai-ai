@@ -77,6 +77,7 @@ app.whenReady().then(async () => {
     const runtimeOptions = await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(element => element.textContent)')
     assert.ok(runtimeOptions.some(label => label.includes('Codex CLI')))
     assert.ok(runtimeOptions.every(label => !label.includes('Cline')))
+    assert.ok(runtimeOptions.every(label => !label.includes('Hermes')))
     assert.ok(runtimeOptions.some(label => label.includes('Command Code')))
     await key('Escape')
     assert.equal(await run('document.activeElement.hasAttribute("data-member-runtime-select")'), true)

@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # 当前规范与决定理由导航
@@ -13,13 +13,13 @@ Team 创建模板与启动指引：[Team Templates v1](../contracts/team-templat
 队员单文件头像当前规范：[Member Avatar v4](../contracts/member-avatar-v4.md)、[队员身份 UI](../ui/components/member-identity.md)；取舍见 [V1.72-D42](../versions/v1.72/decisions.md#v1-72-d42)。
 
 成员路由与职责扩容当前规范：[Collaboration State v4](../contracts/collaboration-state-v4.md)、
-[Built-in Transport v43](../contracts/builtin-tool-transport-v43.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
+[Built-in Transport v44](../contracts/builtin-tool-transport-v44.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
 分层与保持 resume 的取舍见 [V1.72-D40](../versions/v1.72/decisions.md#v1-72-d40)。
 
 
-内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v43](../contracts/builtin-tool-transport-v43.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
+内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v44](../contracts/builtin-tool-transport-v44.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
 
-Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v43](../contracts/builtin-tool-transport-v43.md)和
+Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v44](../contracts/builtin-tool-transport-v44.md)和
 [Built-in 运输不变量](../architecture/foundational-invariants.md#skills-builtin-transport)；单入口与精简教学的取舍见
 [V1.72-D33](../versions/v1.72/decisions.md#v1-72-d33)。
 
@@ -35,11 +35,13 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Public Camp 消息与多输入 AgentRun
 
+- Thread read 正向增量分页：[History v16](../contracts/camp-history-v16.md)；已确认输入与提示词前后对照见 [实施方案](../versions/v1.72/model-context-change-thread-read-after.md)。
+
 - 对话与使命引用：[Thread Reference v1](../contracts/thread-reference-v1.md)、[Composer 架构](../architecture/camp-composer-draft.md)；理由见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。
 
 - Claude 受管执行回执与启动期待插话：[Delivery v18](../contracts/message-delivery-v18.md)；取舍见 [V1.72-D49](../versions/v1.72/decisions.md#v1-72-d49)。
-- 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v15](../contracts/camp-history-v15.md)、[Manifest v42](../contracts/context-manifest-evidence-v42.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
-- 模型 Mention 统一：[Message Mentions v1](../contracts/message-mentions-v1.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)、[Camp History v15](../contracts/camp-history-v15.md)；仅合并两处元数据、按 Run 冻结的取舍见 [V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)。
+- 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v16](../contracts/camp-history-v16.md)、[Manifest v42](../contracts/context-manifest-evidence-v42.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
+- 模型 Mention 统一：[Message Mentions v1](../contracts/message-mentions-v1.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)、[Camp History v16](../contracts/camp-history-v16.md)；仅合并两处元数据、按 Run 冻结的取舍见 [V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)。
 
 - 当前主链：[Public Camp Message/Delivery 架构](../architecture/public-a2a-message-delivery.md)、
   [Message Delivery v15](../contracts/message-delivery-v15.md)、[Camp Message Send v23](../contracts/camp-message-send-v23.md)；
@@ -61,7 +63,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
   [V1.60-D04](../versions/v1.60/decisions.md#v1-60-d04) 与
   [V1.68-D01](../versions/v1.68/decisions.md#v1-68-d01)。
 - Channel/Automation 复用普通消息：[Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)、
-  [Scheduled Automation v4](../contracts/scheduled-automation-v4.md)；理由：
+  [Scheduled Automation v5](../contracts/scheduled-automation-v5.md)；理由：
   [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)。
 - Delivery-first 终态注意力：[Notification Episode v12](../contracts/notification-episode-v12.md)、
   [Current User Attention v10](../contracts/current-user-attention-v10.md)；理由：
@@ -207,7 +209,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Scheduled Automation
 
-- 当前规范：[Scheduled Automation 不变量](../architecture/foundational-invariants.md#scheduled-automation)、[Scheduled Automation Architecture](../architecture/scheduled-automation.md)、[Scheduled Automation v4](../contracts/scheduled-automation-v4.md)、[Automation 工作区](../ui/components/automation-workspace.md)和[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)。
+- 当前规范：[Scheduled Automation 不变量](../architecture/foundational-invariants.md#scheduled-automation)、[Scheduled Automation Architecture](../architecture/scheduled-automation.md)、[Scheduled Automation v5](../contracts/scheduled-automation-v5.md)、[Automation 工作区](../ui/components/automation-workspace.md)和[Built-in Tool Transport v32](../contracts/builtin-tool-transport-v32.md)。
 - 原子领取、新 Camp 派发与不可恢复重派发的理由：[V1.54-D01](../versions/v1.54/decisions.md#v1-54-d01)；执行和渠道通知分离的理由：[V1.54-D02](../versions/v1.54/decisions.md#v1-54-d02)。
 
 ## Evidence、Runtime Activity 与 Usage
@@ -342,7 +344,7 @@ v62 移除原生会话重建提示和展示查询，保留恢复及审计行为�
 
 - 执行记录保存与删除回收：[Execution Record Storage v3](../contracts/execution-record-storage-v3.md)；理由见 [V1.72-D43](../versions/v1.72/decisions.md#v1-72-d43)。
 
-- 实时目录与独立正文边界：[Camp History v15](../contracts/camp-history-v15.md)；理由见 [V1.72-D44](../versions/v1.72/decisions.md#v1-72-d44)。
+- 实时目录与独立正文边界：[Camp History v16](../contracts/camp-history-v16.md)；理由见 [V1.72-D44](../versions/v1.72/decisions.md#v1-72-d44)。
 
 - 新操作与活动统一保存的理由见 [V1.72-D45](../versions/v1.72/decisions.md#v1-72-d45)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
 - 新操作预览预算与结果摘要分离的理由见 [V1.72-D46](../versions/v1.72/decisions.md#v1-72-d46)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
@@ -357,3 +359,13 @@ MiniMax Code 的 ACP、Host 与精确恢复边界由[当前架构](../architectu
 
 环境 JSON 直接显示、标量转字符串与简化限制的理由：[V1.72-D56](../versions/v1.72/decisions.md#v1-72-d56)；
 当前规范：[Runtime Launch v71](../contracts/runtime-launch-and-verification-v71.md)。
+
+## Hermes 进程所有权
+
+当前规范：[Hermes Runtime](../contracts/hermes-managed-runtime-v1.md)、
+[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#hermes-受管-acp)、
+[内置工具运输](../contracts/builtin-tool-transport-v43.md)、[Managed Process](../contracts/managed-runtime-process-v2.md)。
+原生 Home、共享 Gateway 与调用时活动 Run 的取舍见 [V1.72-D67](../versions/v1.72/decisions.md#v1-72-d67)。
+Hermes 初始/真实更新的 user 层规则与取消压缩补发见 [R2](../versions/v1.72/model-context-change-hermes-first-input.md)
+和 [补发边界](../architecture/native-session-bootstrap-redelivery.md#hermes-完成通知与下一普通输入)。
+D62–D66 保留历史理由，其私有启动/补发/维护路径不再是当前规范。

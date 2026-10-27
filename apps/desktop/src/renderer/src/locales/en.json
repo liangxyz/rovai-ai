@@ -188,6 +188,7 @@
   "等待中": "Waiting",
   "未完成": "Not completed",
   "已停止": "Stopped",
+  "已停止 {0}": "Stopped {0}",
   "已移除": "Removed",
   "当前版本无法读取移出影响。": "Current version cannot read removal impact.",
   "文件超过 25 MiB": "File exceeds 25 MiB",
@@ -350,6 +351,7 @@
   "待审批": "Pending approval",
   "有操作等待你审批": "Actions waiting for your approval",
   "执行失败": "Execution failed",
+  "执行失败 {0}": "Execution failed {0}",
   "本轮执行失败，请查看详情": "Execution failed this round, please see details",
   "执行未完成": "Execution not completed",
   "本轮未完成，请查看详情": "This round not completed, please see details",
@@ -1745,6 +1747,7 @@
   "项目名称": "Project name",
   "使用目录名": "Use directory name",
   "查看各智能体的 Skills。": "View the Skills available to each Agent.",
+  "此处展示约定目录中发现的技能文件，不代表 Hermes 当前已启用或加载。": "Skill files found in the standard directories are shown here. This does not mean Hermes has enabled or loaded them.",
   "搜索 Skills": "Search Skills",
   "搜索 Skill": "Search Skill",
   "执行端暂不可读：": "Not readable at execution end:",
@@ -2230,7 +2233,6 @@
   "尚无最近一次检查结果，系统将在后台继续确认。": "No recent check result is available. Checking will continue in the background.",
   "已找到可执行文件，但轻度启动验证尚未形成有效结果。": "An executable was found, but the basic startup check has not produced a valid result.",
   "旧安装尚未形成轻度启动证据；请重新检测或检查状态。": "This older installation has no basic startup evidence. Scan again or check its status.",
-  "当前平台已开放使用，完整的平台资格验证记录尚未齐备。": "Available on this platform; the full platform qualification record is not yet complete.",
   "已加载本机原生配置并连接成功；本次检查未调用模型，生成能力、余额和高级能力将在实际任务中确认。": "Local configuration loaded and connection established. This check did not call a model. Generation, balance, and advanced capabilities will be verified during a task.",
   "请检查该智能体的登录状态或凭据配置。": "Check this Agent’s sign-in status or credentials.",
   "该智能体已停用。": "This Agent is disabled.",
@@ -2305,6 +2307,7 @@
   "文件系统访问": "Filesystem access",
   "审批策略": "Approval policy",
   "权限模式": "Permission mode",
+  "文件编辑审批": "File edit approval",
   "执行模式": "Execution mode",
   "终端沙箱": "Terminal sandbox",
   "工具权限": "Tool permissions",
@@ -4179,5 +4182,7 @@
   "日期时间位置": "Date/time position",
   "名称前": "Before name",
   "名称后": "After name",
-  "标题预览": "Title preview"
+  "标题预览": "Title preview",
+  "添加内容": "Include",
+  "显示位置": "Position"
 }

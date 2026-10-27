@@ -40,6 +40,7 @@ export type AdapterKind =
   | 'cursor-agent'
   | 'kimi-code-cli'
   | 'minimax-code-cli'
+  | 'hermes-cli'
   | 'grok-build'
   | 'zcode-app'
   | 'deepseek-harness'
@@ -3731,6 +3732,7 @@ export type SkillDeliveryGroupKey =
   | 'cursor'
   | 'kimi'
   | 'minimax'
+  | 'hermes'
   | 'grok'
   | 'zcode'
   | 'dsh'
@@ -4170,8 +4172,8 @@ export type AutomationProjectRef =
 export interface AutomationThreadNaming {
   includeDate: boolean
   includeTime: boolean
-  dateFormat: 'iso' | 'slash' | 'short' | 'chinese'
-  timeFormat: '24' | '12' | 'seconds'
+  dateFormat: 'iso'
+  timeFormat: '24'
   position: 'prefix' | 'suffix'
 }
 

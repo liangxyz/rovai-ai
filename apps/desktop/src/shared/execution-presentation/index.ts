@@ -293,9 +293,7 @@ export function agentRunPresentation(
       ? 'Runtime 权限配置无效' : code.startsWith('runtime_model_') ? 'Runtime 模型配置无效' : '失败'), tone: 'danger' }
   }
   if (run.status === 'cancelled') {
-    return run.terminalReasonCode === 'planned_shutdown_cancelled'
-      ? { label: '已停止', tone: 'neutral' }
-      : { label: '已取消', tone: 'neutral' }
+    return { label: '已停止', tone: 'neutral' }
   }
   return {
     label: ({

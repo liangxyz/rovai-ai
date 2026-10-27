@@ -53,6 +53,8 @@ pub enum ManagedProcessPurpose {
     RuntimeProbe,
     RuntimeHost,
     RuntimeOneShot,
+    /// Client connection to a native shared executor; owns only this process.
+    RuntimeConnection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -536,6 +538,7 @@ pub struct ManagedProcess {
     #[cfg(windows)]
     child: windows::WindowsManagedProcess,
     tree_termination_requested: bool,
+    owns_descendants: bool,
 }
 
 /// Keeps the actual child reachable if ownership capture fails after spawn.
@@ -595,6 +598,7 @@ impl ManagedProcess {
     ) -> std::result::Result<Self, ManagedProcessSpawnFailure> {
         #[cfg(unix)]
         {
+            let owns_descendants = spec.purpose != ManagedProcessPurpose::RuntimeConnection;
             let mut command = command_from_spec(&spec);
             command.as_std_mut().process_group(0);
             let child = command.spawn().with_context(|| {
@@ -620,23 +624,31 @@ impl ManagedProcess {
             Ok(Self {
                 child,
                 #[cfg(not(target_os = "macos"))]
-                process_group_id,
+                process_group_id: process_group_id.filter(|_| owns_descendants),
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
                 owned_tree,
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
-                descendants_captured: false,
+                descendants_captured: !owns_descendants,
                 #[cfg(target_os = "macos")]
                 descendant_capture_failed: false,
                 tree_termination_requested: false,
+                owns_descendants,
             })
         }
 
         #[cfg(windows)]
         {
+            if spec.purpose == ManagedProcessPurpose::RuntimeConnection {
+                return Err(anyhow::anyhow!(
+                    "connection-only Runtime ownership is not admitted on Windows"
+                )
+                .into());
+            }
             let child = windows::WindowsManagedProcess::spawn(&spec)?;
             Ok(Self {
                 child,
                 tree_termination_requested: false,
+                owns_descendants: true,
             })
         }
 
@@ -810,7 +822,11 @@ impl ManagedProcess {
 
     #[cfg(target_os = "macos")]
     pub(crate) fn track_descendants(&mut self, directory: &Path) -> io::Result<()> {
-        self.owned_tree.track(directory)
+        if self.owns_descendants {
+            self.owned_tree.track(directory)
+        } else {
+            Ok(())
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -837,6 +853,9 @@ impl ManagedProcess {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn capture_descendants(&mut self) -> io::Result<()> {
         self.descendants_captured = true;
+        if !self.owns_descendants {
+            return Ok(());
+        }
         let capture = self.owned_tree.capture();
         #[cfg(target_os = "macos")]
         if capture.is_err() {
@@ -852,7 +871,11 @@ impl ManagedProcess {
         if !self.descendants_captured {
             return Ok(());
         }
-        let capture = self.owned_tree.capture();
+        let capture = if self.owns_descendants {
+            self.owned_tree.capture()
+        } else {
+            Ok(())
+        };
         let signal = self.owned_tree.signal(signal);
         capture.and(signal)
     }
@@ -1364,6 +1387,41 @@ mod tests {
         );
         control.kill().await.unwrap();
         control.wait().await.unwrap();
+
+        // A native ACP client does not own its execution server, even if it
+        // starts that server itself. Exercise both capture and forced cleanup.
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 120 & printf '%s\\n' \"$!\"; read -r finish"]);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeConnection,
+            ManagedStdinPolicy::Piped,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "connection:test",
+        )
+        .unwrap();
+        let mut connection = ManagedProcess::spawn(spec).unwrap();
+        let mut reader = BufReader::new(connection.take_stdout().unwrap());
+        let mut line = String::new();
+        tokio::time::timeout(Duration::from_secs(3), reader.read_line(&mut line))
+            .await
+            .unwrap()
+            .unwrap();
+        let server_pid: i32 = line.trim().parse().unwrap();
+        connection.capture_descendants().unwrap();
+        connection.force_terminate_tree().unwrap();
+        tokio::time::timeout(Duration::from_secs(3), connection.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(connection.captured_tree_is_empty().unwrap());
+        assert_eq!(
+            unsafe { libc::kill(server_pid, 0) },
+            0,
+            "shared execution server must survive client cleanup"
+        );
+        // This test alone owns the simulated server.
+        assert_eq!(unsafe { libc::kill(server_pid, libc::SIGKILL) }, 0);
     }
 
     #[cfg(windows)]

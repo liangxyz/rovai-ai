@@ -3099,6 +3099,8 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   white-space: nowrap;
 }
 .user-message-receipt.is-progress svg { stroke-width: 1.65; }
+.user-message-receipt.is-failed > svg,
+.user-message-receipt-failure { color: var(--danger); }
 .user-message-receipt svg,
 .user-message-withdraw svg {
   width: 14px;

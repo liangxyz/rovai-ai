@@ -1,7 +1,7 @@
 ---
 document_type: user-guide
 authority: installation-guide
-last_updated: 2026-08-23
+last_updated: 2026-10-25
 ---
 
 # 安装指南
@@ -27,6 +27,10 @@ Windows x64 安装包当前未签名，SmartScreen 可能显示“未知发布�
 也可以改为其他当前用户可写目录。该安装器不会请求管理员权限，因此不要选择需要管理员写入权限的系统目录。
 
 ## 第一次启动
+
+桌面包已包含供智能体使用的 `rovai` 命令行工具，无需另行下载。macOS 安装版启动时会在
+`~/.local/bin/rovai` 建立指向 App 内工具的链接；已有用户文件或其他安装的同名入口会保留，
+冲突写入启动诊断。这个动作只提供 Rovai 自带的命令行入口，不修改 Shell 配置，也不在每轮任务中重复执行。
 
 第一次打开 Rovai AI 时，会依次完成一次简短的初次训练：
 

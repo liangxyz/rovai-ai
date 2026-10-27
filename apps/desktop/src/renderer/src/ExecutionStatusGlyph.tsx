@@ -9,7 +9,7 @@ export type ExecutionStatusShape =
   | 'cancelling'
   | 'recorded'
 
-/** One status-shape grammar shared by tool rows, Run history, and the execution console. */
+/** One status-shape grammar shared by tool rows, message receipts, Run history, and the execution console. */
 export function ExecutionStatusGlyph({ status }: { status: string }): React.JSX.Element {
   switch (status) {
     case 'running':

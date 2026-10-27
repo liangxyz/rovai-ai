@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:84fb23954417904c573e0cb96a2b3470afd897aff7c030a29194ffd552aab988";
+    "sha256:065f420712e9f99b0721dba110a8b6a2684aadf3a1fbd7b9e1dcbabf3d91a31c";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -363,7 +363,9 @@ mod tests {
                                 })
                             );
                         }
-                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
+                        AdapterKind::CursorAgent
+                        | AdapterKind::ClineCli
+                        | AdapterKind::HermesCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -466,6 +468,7 @@ mod tests {
                     | AdapterKind::ClineCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
+                    | AdapterKind::HermesCli
                     | AdapterKind::ZcodeApp
                     | AdapterKind::DeepseekHarness
             ) {
@@ -503,6 +506,20 @@ mod tests {
     #[test]
     fn macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
+        for platform in HostPlatformKey::ALL {
+            let hermes = registry.platform_admission(AdapterKind::HermesCli, platform);
+            assert_eq!(
+                hermes.status(),
+                RuntimePlatformAdmissionStatus::NotQualified
+            );
+            assert!(hermes.evidence_revision().is_none());
+            assert!(!hermes.is_qualified());
+            assert!(!hermes.allows_runtime_use());
+            assert_eq!(
+                hermes.blocker_code(),
+                Some("runtime_platform_not_qualified")
+            );
+        }
 
         assert_eq!(
             registry
@@ -572,6 +589,7 @@ mod tests {
                     | AdapterKind::ClineCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
+                    | AdapterKind::HermesCli
                     | AdapterKind::Pi
                     | AdapterKind::GrokBuild
                     | AdapterKind::ZcodeApp

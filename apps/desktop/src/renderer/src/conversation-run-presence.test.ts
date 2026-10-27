@@ -197,7 +197,7 @@ describe('conversation Run presence', () => {
     // A reconnect can still have earlier evidence; it must describe the new initialization.
     expect(runPresencePreview({ ...initializing, executionEpoch: 2 }, [text, command]).text).toEqual(connecting)
     expect(runPresencePreview({ ...initializing, cancelRequestedAt: 'now' }, [text, command]).text).toBe('正在停止…')
-    expect(runPresencePreview({ ...initializing, status: 'cancelled', cancelRequestedAt: 'now' }, [text, command]).text).toBe('已取消')
+    expect(runPresencePreview({ ...initializing, status: 'cancelled', cancelRequestedAt: 'now' }, [text, command]).text).toBe('已停止')
     expect(runPresencePreview({ ...initializing, status: 'failed' }, [text, command]).kind).toBe('error')
     expect(runPresencePreview({ ...initializing, status: 'waiting', waitReason: 'approval' }, [text, command]).text).toBe('等待审批')
   })

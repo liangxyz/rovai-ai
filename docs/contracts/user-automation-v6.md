@@ -24,3 +24,10 @@ Judge 变更后仍须重新登记与绑定。取消、App 关闭、父进程消�
 本次真实终态回执。等待器无固定 55 分钟截止，仅解释匹配 Camp 与工作区的回执，不能使用上次报告替代。
 
 `rovai app` 的受管 Runtime 防误调用保持不变；登记须由用户普通终端执行，不通过清除环境标记绕过。
+
+## Hermes 显式恢复
+
+未上线的 hermes-inspect/hermes-discard 及私有恢复 RPC 已退出生产接线，不保留兼容分支。
+原生 unknown 保留事实，按官方入口明确处理，不自动换 Session 或重放任务。
+Hermes 原生会话 CLI 环境仍禁止用户级 `rovai app`。
+详见 [Hermes 未知执行合同](hermes-managed-runtime-v1.md#用户明确处理未知执行)。

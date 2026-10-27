@@ -80,6 +80,7 @@ const ADAPTER_KINDS: readonly AdapterKind[] = [
   'cursor-agent',
   'kimi-code-cli',
   'minimax-code-cli',
+  'hermes-cli',
   'grok-build',
   'deepseek-harness',
   'zcode-app',

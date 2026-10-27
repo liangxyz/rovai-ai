@@ -1,10 +1,27 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-27 Hermes 暂缓公开
+
+按 User sequence 122，Hermes 在 macOS arm64/x64、Windows x64、Linux x64 全部撤回公开入口，
+采用既有 NotQualified 准入并从所有新使用入口隐藏，不显示待支持或实验提示。内部实现与历史证据保留；
+两轮真实模型文件生成/修改通过并不等于完成全部能力或平台验收。已知 Diff、压缩观测、逐 Run 用量、
+同轮插话和 MCP 清空确认的边界不通过额外封装掩盖。此决定取代下面同日早期开放记录。
+当前边界见 [平台准入合同](contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+
+## 2026-10-27 Hermes macOS 入口开放（已撤回）
+
+按 User sequence 113，Hermes 在 macOS arm64 与 x64 均采用 Preview，允许正常发现、检查、配置与执行；
+两架构均不绑定完整资格 evidence revision。Windows x64 与 Linux x64 仍未开放。
+现有真实 Hermes 执行证据来自下方记录的 arm64 环境，Intel 入口开放不代表完成 Intel 目标机实测。
+本次不改变官方 ACP、原生 Home、原 Session resume、CLI 归属或既有能力限制。
+同 Thread sequence 116 统一移除所有 Runtime 的 Preview 资格提示小字，内部资格与机器检查不变。
+当前边界见 [平台准入合同](contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
 
 ## 2026-10-26 Copilot ACP 启动参数兼容
 
@@ -24,6 +41,53 @@ ACP `buildBootOptions` 也不传递 remote/export/sync 开关。因此本次只�
 owner，不新增 Rust 测试函数；真实二进制验证只覆盖本次启动兼容，不扩大模型或平台资格。
 官方语义见 [CLI 命令参考](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
 及 [ACP 启动方式](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server)。
+
+## 2026-10-25 Hermes 原生会话定位
+
+当前生产代码已替换私有 Home/专用 Gateway/Hook；用户原生 Home + 官方 ACP + Core 调用时 Run 解析。
+历史条目的旧控制入口、进程树回收与补发保证不再适用。现行边界见
+[合同](contracts/hermes-managed-runtime-v1.md)，本轮验证结果见 [实施记录](versions/v1.72/hermes-first-input-implementation.md)。
+macOS arm64 保持 Preview；不使用下面历史路径的通过结果补全本轮未验证能力。
+同日[原生 ACP 观测验证](research/hermes-runtime/README.md#原生-acp-观测验证2026-10-25)确认当前
+官方 0.22.4 未暴露实时压缩完成，usage 是可重置的驻留 Agent 累计值且失败响应缺失；这两项尚未
+端到端接通，不能用旧控制器的压缩/消费验收替代。原生会话与生产接入方式保持不变。
+
+## 2026-10-23 Hermes 显式 unknown 恢复补修
+
+Ready 目录已与 FirstPayload 对齐：首条 user 规则、signal-driven/best-effort 压缩连续性，移除旧 system
+注入与原生永久保留声明。旧 Ready 快照在发现阶段失效，显式重新检查后保留模型参数和权限能力。
+生产 Core 与官方 0.22.4 的受控验收通过旧快照升级、Core 强杀、精确检查/确认、跨重启幂等与原 Session 新任务。
+真实 Sub2API `gpt-6.1-sol` 验收通过强杀 Gateway/Core 后的 unknown 显式处理；原 Run 保持失败，
+旧输入不重放，原 Session 接受新任务，没有重复公开 Send，受管后代全部回收。
+入口为用户 CLI `hermes-inspect` / `hermes-discard --acknowledge-effects`，未新增聊天恢复按钮。
+证据与失败尝试分别记录在[脱敏恢复摘要](research/hermes-runtime/explicit-unknown-recovery-2026-10-23.json)
+和[实施验证](versions/v1.72/hermes-first-input-implementation.md#合入前补修与显式恢复)。Hermes 仍为 Preview。
+
+## 2026-10-23 Hermes 首次输入规则
+
+当前 user 层规则投递与完成通知后的下一普通输入恢复，见
+[实施验证](versions/v1.72/hermes-first-input-implementation.md)。下节系统层压缩资格属于调整前路径，
+不能转移为首条 user 规则永久保留的保证。进程、取消、文件与 usage 的既有证据仍各自保留。
+该阶段真实 Core 的 Steer/取消/Send 通过；强杀后的原生 admission 为 unknown，续轮被安全拒绝。
+该次崩溃续接仍不计通过，保留[原始脱敏记录](research/hermes-runtime/first-input-core-recovery-2026-10-23.json)；
+后续显式恢复验证独立记录于上节，不改写这次失败。
+
+## 2026-10-23 Hermes 初始接入
+
+官方 source install 0.22.4 / commit `4d04303818b61bf3aa09278af48356315515965b`，macOS arm64。
+真实 Sub2API `gpt-6.1-sol` 验证原生系统绑定、暖轮 Usage、精确冷恢复、压缩后指令、MCP 与 Skill；
+隔离 Core 验证公开 Send、文件操作和真实 patch 证据。完整结果与保留边界见
+[Hermes 验证记录](research/hermes-runtime/README.md)。平台为 Preview，不能等同其他平台或完整能力轴资格。
+同日增量：兼容策略改为 >=0.22.4；原生 272000/204000 窗口/阈值自动压缩、压缩后与冷恢复连续性通过。
+早期进程内路径的完整文件状态与 Desktop 验证已完成，Desktop 覆盖 effort 保存、错误模型原生详情、
+同一 Run 的 Steer ACK 与修正后 Send，Skills 区分用户与受信项目来源。新版本/其他平台未因最低版本策略自动取得资格。
+
+同日官方入口切换：未修改的官方 ACP＋专用 Gateway，每 Run 精确冷恢复并更新 B/CLI lease；原生阈值
+自动压缩、精确 Steer/取消、错误与 turn usage、MCP 增改撤销/同名优先/发现失败拒绝通过。文件证据现为
+原生成功结果的 reported_mutation 片段，早期完整快照资格不转移到新路径。图片 bytes 到达原生媒体缓存，
+但本次 Sub2API 模型在 auto 预解析与 native pixels 模式均未正确识别四色图，识图准确性不记通过。
+生产 Core 的强杀/重启验收也通过：受管 Gateway/终端全部回收，已接受输入不自动重放，显式下一轮精确
+恢复同一原生 Session 并使用新 CLI lease 发送，没有重复公开消息。
 
 ## 2026-10-20 ZCode 与 OpenCode V2 原生问卷禁用
 

@@ -2,14 +2,14 @@
 document_type: architecture
 authority: scheduled-automation-architecture
 status: accepted
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # Scheduled Automation Architecture
 
 Scheduled Automation 是共享 Rust Host/Core 内的持久计划控制面。它拥有定义、schedule、occurrence、时间上限、结果与
 Owner 通知；消息、Delivery、AgentRun 和 Runtime 执行复用公开 Camp 的统一主链。字段合同见
-[Scheduled Automation v4](../contracts/scheduled-automation-v4.md)。
+[Scheduled Automation v5](../contracts/scheduled-automation-v5.md)。
 
 ## 组件和流程
 
@@ -40,11 +40,13 @@ MCP 权限。
 
 ## 对话命名
 
-日期标题功能暂时停用，Desktop/Web 不展示“对话命名”设置。Core 在 occurrence 创建事务内
-直接将当前任务名交给普通 Camp 创建路径，手动和定时运行均不附加日期、时间或分隔符；
-`camp.title` 与创建事件使用同一个名称。名称为空时沿用既有 Prompt 派生规则。
-已有 `threadNaming` 字段不参与标题生成，schema 165 保持不变；本次不增加迁移、回填或兼容分支。
-历史标题和命令重放结果不重算。Agent automation 工具保留原输出形状。
+Desktop/Web 的共享编辑器提供日期、时间勾选和名称前/后位置选择，日期与时间分别固定为
+`YYYY-MM-DD` / `HH:mm`；Renderer 仅预览。Core 在 occurrence 创建事务内按配置生成标题，
+定时触发取 `scheduledFor`，手动触发取实际 admission 时间，统一使用执行 Core 的本地时区。
+两项均关闭时只使用任务名；时间戳与名称之间使用 ` · `，任务名为空时沿用 Prompt 派生规则。
+`camp.title` 与创建事件使用同一结果，历史标题和命令重放结果不重算。
+沿用 schema 165，格式字段收敛为固定值；不增加迁移、回填或旧格式兼容分支。
+Agent automation 工具保留原输出形状。
 
 ## 恢复和结算
 
@@ -89,7 +91,7 @@ Core 启动、定义创建／修改／关闭／删除、执行事实提交及宿
 
 ## References
 
-- [Scheduled Automation v4](../contracts/scheduled-automation-v4.md)
+- [Scheduled Automation v5](../contracts/scheduled-automation-v5.md)
 - [Public Camp Message、Delivery 与 AgentRun](public-a2a-message-delivery.md)
 - [Runtime recovery and shutdown](foundational-invariants.md#runtime-recovery-shutdown)
 - [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)

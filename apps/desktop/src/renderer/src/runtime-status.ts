@@ -172,15 +172,7 @@ export function runtimeProductPresentation(
   if (admission.status === 'unsupported') {
     return presentation('unsupported', uiAttribute('该智能体不支持当前平台。'))
   }
-  const availabilityPresentation = runtimeAvailabilityPresentation(availability, pending)
-  if (admission.status !== 'preview') return availabilityPresentation
-  const previewDetail = uiAttribute('当前平台已开放使用，完整的平台资格验证记录尚未齐备。')
-  return {
-    ...availabilityPresentation,
-    detail: availabilityPresentation.detail
-      ? `${previewDetail}\n${availabilityPresentation.detail}`
-      : previewDetail
-  }
+  return runtimeAvailabilityPresentation(availability, pending)
 }
 
 export function memberRuntimePresentation(

@@ -1703,6 +1703,7 @@ async fn acp_probe_at(
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
             | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
             | AdapterKind::ZcodeApp
     ) {
         return AcpCapabilityProbe {
@@ -2092,10 +2093,22 @@ async fn run_acp_probe_with_scope(
     // working directory and its additive configuration belong to this probe;
     // native initialization may persist state, which is not ours to remove.
     command.current_dir(&probe_root).stdin(Stdio::piped());
-    let mut process =
-        RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
-            .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
-    let deadline = Duration::from_secs(30);
+    let mut process = RuntimeProbeProcess::spawn_with_purpose(
+        &mut command,
+        DEFAULT_CAPTURE_LIMIT,
+        DEFAULT_CLEANUP_TIMEOUT,
+        if kind == AdapterKind::HermesCli {
+            crate::managed_process::ManagedProcessPurpose::RuntimeConnection
+        } else {
+            crate::managed_process::ManagedProcessPurpose::RuntimeProbe
+        },
+    )
+    .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
+    let deadline = Duration::from_secs(if kind == AdapterKind::HermesCli {
+        90
+    } else {
+        30
+    });
     let result = {
         let (stdin, lines) = process.split_io()?;
         let exchange = async {
@@ -2133,6 +2146,16 @@ async fn run_acp_probe_with_scope(
             )
             .await?;
             let mut initialize = read_rpc_result(lines, 1).await?;
+            if kind == AdapterKind::HermesCli {
+                anyhow::ensure!(
+                    crate::hermes::supported_version(
+                        initialize
+                            .pointer("/agentInfo/version")
+                            .and_then(Value::as_str)
+                    ),
+                    "Unsupported Hermes ACP version"
+                );
+            }
             if let Some(preparation) = &model_preparation {
                 crate::dsh::annotate_session(&mut initialize, preparation);
             }
@@ -2821,6 +2844,7 @@ pub fn configure_acp_command(
         AdapterKind::CursorAgent => {
             command.arg("acp");
         }
+        AdapterKind::HermesCli => crate::hermes::configure_command(command)?,
         AdapterKind::KimiCodeCli | AdapterKind::MinimaxCodeCli => {
             command.arg("acp");
         }
@@ -2921,15 +2945,27 @@ fn acp_observed_capabilities(
             .into_iter()
             .map(str::to_string),
         );
-        if !matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
+        if !matches!(
+            kind,
+            AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::HermesCli
+        ) {
             capabilities.push("session.set_config_option".to_string());
         }
     }
     if matches!(
         kind,
-        AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::MinimaxCodeCli
+        AdapterKind::DeepseekHarness
+            | AdapterKind::CommandCodeCli
+            | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
     ) {
         capabilities.retain(|capability| capability != "workspace.additional_roots");
+    }
+    if kind == AdapterKind::HermesCli && session.is_some() {
+        capabilities.extend([
+            "session.set_model".to_string(),
+            "session.set_mode".to_string(),
+        ]);
     }
     if kind == AdapterKind::DeepseekHarness {
         if let Some(session) = session
@@ -2942,6 +2978,23 @@ fn acp_observed_capabilities(
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
+    if kind == AdapterKind::HermesCli {
+        return [
+            "acp.initialize",
+            "session.new",
+            "session.prompt",
+            "session.cancel",
+            "session.update",
+            "session.load",
+            "session.set_model",
+            "session.set_mode",
+            "structured_permission_request",
+            "mcp.additive_per_run",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    }
     if matches!(
         kind,
         AdapterKind::CommandCodeCli | AdapterKind::MinimaxCodeCli
@@ -3037,7 +3090,10 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     .into_iter()
     .map(str::to_string)
     .collect::<Vec<_>>();
-    if !matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
+    if !matches!(
+        kind,
+        AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::HermesCli
+    ) {
         capabilities.push("session.set_config_option".to_string());
     }
     capabilities
@@ -3062,6 +3118,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
             | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
     )
 }
 
@@ -3728,6 +3785,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         AdapterKind::CursorAgent => (&["ROVAI_CURSOR_BIN"][..], "cursor-agent"),
         AdapterKind::KimiCodeCli => (&["ROVAI_KIMI_BIN"][..], "kimi"),
         AdapterKind::MinimaxCodeCli => (&["ROVAI_MINIMAX_CODE_BIN"][..], "mcode"),
+        AdapterKind::HermesCli => (&["ROVAI_HERMES_BIN"][..], "hermes"),
         AdapterKind::GrokBuild => (&["ROVAI_GROK_BIN"][..], "grok"),
         AdapterKind::DeepseekHarness => (&["ROVAI_DEEPSEEK_HARNESS_BIN"][..], "dsh"),
         AdapterKind::ClineCli => (&["ROVAI_CLINE_BIN"][..], "cline"),
@@ -3968,6 +4026,7 @@ for line in sys.stdin:
     #[test]
     fn catalog_refresh_requires_current_full_acp_evidence() {
         for kind in [
+            AdapterKind::HermesCli,
             AdapterKind::OpencodeCli,
             AdapterKind::CopilotCli,
             AdapterKind::KiroCli,
@@ -4010,6 +4069,13 @@ for line in sys.stdin:
                     !catalog_refresh_evidence_current(kind, &invalid),
                     "{kind:?}: {invalidation}"
                 );
+            }
+            if kind == AdapterKind::HermesCli {
+                let mut legacy = snapshot;
+                legacy
+                    .capabilities
+                    .push("context.charter.managed_system_prompt".into());
+                assert!(!catalog_refresh_evidence_current(kind, &legacy));
             }
         }
     }
@@ -4884,9 +4950,43 @@ while IFS= read -r ignored; do :; done
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn grok_and_kiro_checks_validate_current_model_without_lifecycle_rehearsals() {
-        for kind in [AdapterKind::GrokBuild, AdapterKind::KiroCli] {
-            for valid_model in [true, false] {
+    async fn acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals() {
+        for kind in [
+            AdapterKind::GrokBuild,
+            AdapterKind::KiroCli,
+            AdapterKind::HermesCli,
+        ] {
+            for case in [
+                "listed",
+                "unlisted",
+                "missing",
+                "empty",
+                "malformed",
+                "missing_current",
+                "session_error",
+            ] {
+                if kind != AdapterKind::HermesCli && !matches!(case, "listed" | "unlisted") {
+                    continue;
+                }
+                let mut result = json!({"sessionId":"s1","models":{"currentModelId":"native-model","availableModels":[{"modelId":"native-model","name":"Native"}]}});
+                match case {
+                    "unlisted" => result["models"]["currentModelId"] = json!("missing"),
+                    "missing" => result
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("models")
+                        .map(|_| ())
+                        .unwrap(),
+                    "empty" => result["models"]["availableModels"] = json!([]),
+                    "malformed" => result["models"]["availableModels"] = json!([{}]),
+                    "missing_current" => result["models"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("currentModelId")
+                        .map(|_| ())
+                        .unwrap(),
+                    _ => (),
+                }
                 let root =
                     env::temp_dir().join(format!("rovai-current-model-{}", uuid::Uuid::new_v4()));
                 let _cleanup = ProbeRootCleanup(root.clone());
@@ -4899,16 +4999,21 @@ while IFS= read -r ignored; do :; done
                 } else {
                     ""
                 };
+                let response = if case == "session_error" {
+                    json!({"jsonrpc":"2.0","id":session_id,"error":{"code":-32603,"message":"native session rejected"}})
+                } else {
+                    json!({"jsonrpc":"2.0","id":session_id,"result":result})
+                };
                 std::fs::write(&runtime, format!(r#"#!/bin/sh
 if [ "$1" = "--version" ]; then exit 42; fi
 log='{}'
 IFS= read -r init; printf '%s\n' "$init" >> "$log"
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"sessionCapabilities":{{"resume":{{}}}}}},"authMethods":[{{"id":"cached_token"}}],"_meta":{{"defaultAuthMethodId":"cached_token"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"version":"0.22.4"}},"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}},"authMethods":[{{"id":"cached_token"}}],"_meta":{{"defaultAuthMethodId":"cached_token"}}}}}}'
 {}
 IFS= read -r session; printf '%s\n' "$session" >> "$log"
-printf '%s\n' '{{"jsonrpc":"2.0","id":{},"result":{{"sessionId":"s1","models":{{"currentModelId":"{}","availableModels":[{{"modelId":"native-model","name":"Native"}}]}}}}}}'
+printf '%s\n' '{}'
 while IFS= read -r extra; do printf '%s\n' "$extra" >> "$log"; exit 43; done
-"#, log.display(), auth, session_id, if valid_model { "native-model" } else { "missing" })).unwrap();
+"#, log.display(), auth, response)).unwrap();
                 std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
                 let probe = acp_capability_probe_at_for_purpose(
                     &runtime,
@@ -4919,7 +5024,7 @@ while IFS= read -r extra; do printf '%s\n' "$extra" >> "$log"; exit 43; done
                     false,
                 )
                 .await;
-                if valid_model {
+                if case == "listed" || (kind == AdapterKind::HermesCli && case != "session_error") {
                     assert_eq!(
                         probe.result.status,
                         AgentRuntimeProbeStatus::Ready,
@@ -4947,12 +5052,14 @@ while IFS= read -r extra; do printf '%s\n' "$extra" >> "$log"; exit 43; done
                         vec!["initialize", "session/new"]
                     }
                 );
-                assert!(
-                    !probe
-                        .result
-                        .capabilities
-                        .contains(&"session.set_model".to_string())
-                );
+                if kind != AdapterKind::HermesCli {
+                    assert!(
+                        !probe
+                            .result
+                            .capabilities
+                            .contains(&"session.set_model".to_string())
+                    );
+                }
             }
         }
     }

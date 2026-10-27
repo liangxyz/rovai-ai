@@ -113,7 +113,7 @@ export function startQualificationCore({
   environmentOverrides = {}
 }) {
   const executable = resolve(coreExecutable)
-  const dataArguments = coreDataDirectoryArguments(dataDirectory)
+  const dataArguments = coreDataDirectoryArguments(dataDirectory, {homeDirectory: environmentOverrides.HOME})
   const resolvedDataDirectory = dataArguments[1]
   const args = [
     ...dataArguments,
@@ -194,6 +194,7 @@ export function startQualificationCore({
 
   return {
     pid: child.pid,
+    get stderrTail() { return stderrTail },
     executable,
     request(method, params = {}, timeoutMs = 60_000) {
       if (child.exitCode !== null) return Promise.reject(new Error(`rovai-core is not running: ${method}`))

@@ -118,6 +118,14 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 
 ## Rust 测试准入与退役门槛
 
+Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess
+根进程清理均扩展原 owner；迁移/历史读取仍保留。原私有 Home controller、维护 CLI 与其专属测试
+随生产路径删除，不保留失效的 smoke 入口。完整退役与 successor 见 [测试归属](../research/hermes-runtime/README.md#rust-测试归属)。
+当前原生验证入口 `node scripts/smoke-hermes-native-session.mjs <official-source> <prepared-python>`
+使用未补丁官方源码、共享测试用户 Home、预先启动 Gateway、隔离 Core/data/Skills/MCP 与受控 Provider。
+最低 Rust 命令 `cargo test --workspace` 与 `cargo test -p rovai-core --features slow-tests,extended-tests --lib hermes`。
+实际结果见 [实施记录](../versions/v1.72/hermes-first-input-implementation.md)，不等同真实付费模型或跨平台验收。
+
 Web 长粘贴扩展既有 Host HTTP 与浏览器适配/恢复 owners；schema 161→162 的 DDL 失败回滚
 无法由 HTTP 测试证明，新增一个复用 schema-only fixture 的迁移 owner。准入与最小命令见
 [Web 长粘贴实施记录](../versions/v1.72/web-pasted-text-implementation.md#验证归属)。
@@ -1703,6 +1711,54 @@ CLI 解析与教学 owner 保留文件输入矩阵并覆盖旧 taskId 兼容；`
 完整范围见 [fixture 说明](../../scripts/fixtures/capability-workspace/README.md)。旧 `SkillSettings` 页面及仅服务
 旧导入／交付组的单元测试已退役。Core 的历史 Library、Revision、投影恢复与兼容测试继续拥有旧数据路径。
 
+
+## Hermes 首次输入与历史证据
+
+`context::slow_tests::hermes_rules_follow_accepted_inputs_and_ignore_retired_compaction_requirements` 拥有 Hermes 完整 B
+摘要、接受状态和冻结最终输入的组合合同。旧共享 Bootstrap owner 的稳定摘要刻意不含身份，不能证明
+身份单独变化、prepared/unknown 去重及旧实验记录不参与规则基线的行为；复用现有 Context fixture，
+不引入完整 Core/进程 fixture。覆盖首次、重复、身份更新、未知恢复、冻结正文和旧 pending 不消费。
+`db::hermes::rules_tests::rules_migration_preserves_data_and_rolls_back_with_receipt` 拥有 Migration 217
+新增 FK/nullable 字段与 receipt 的 DDL 原子性；现有 catalog owner 验证的是闭集表重建，不能替代它。
+使用既有 seeded database；catalog owner 从 schema 165 验证 Hermes Migration 216，保留原有 rollback 矩阵。
+
+最低命令：`cargo test -p rovai-core --features slow-tests,extended-tests --lib hermes`。
+原 compaction policy owner 验证 Hermes 完成事件不再准入；共享 CLI outbox 的其他 Runtime case 保留。
+原生请求与生产 Core 的边界由 `scripts/smoke-hermes-native-session.mjs` 拥有，使用隔离测试用户 Home；
+合成 usage 只用于触发官方压缩，不作为实际账单或模型效果证明。
+
+同一入口追加 `--observations`，使用未补丁官方 ACP 与本地受控 Provider 比较每轮已报告计数和
+终态 usage，覆盖另一客户端保持 Session、模型切换、Core 强杀后续轮、工具之后模型失败。
+测试专用 stdio 记录器只保留字段名/数值/关联标识，不改 ACP 消息；不进入生产启动链。
+额外原生客户端显式订阅标准压缩通知，并主动调用一次 `/compress`，只用于排除未订阅的解释，
+不增加 Core Run 或生产隐藏命令。测试里的原生日志是验收依据，不是新的运行时采集通道。
+现版的缺口、数字及失败尝试见[原生观测验证](../research/hermes-runtime/README.md#原生-acp-观测验证2026-10-25)；
+此分支是版本行为刻画，若上游改变计数/通知语义，应重新核验断言，不能把旧限制永久固化为能力合同。
+
+2026-10-26 `clarify` 分类修复扩展既有 `approval_selects_the_exact_native_option_id`，不新增 Rust
+测试函数：官方选择题 fixture、开放题、字段缺失/冲突、普通审批及其他 Adapter 不误分类均由该 owner
+负责。修复前 Hermes 两种提问都落入 Execution；最小命令为
+`cargo test -p rovai-core --features extended-tests --lib approval_selects_the_exact_native_option_id`。
+共享终态 owner 继续覆盖问卷失败不能被 final/Send 掩盖及原生错误/取消优先。
+上述原生 smoke 追加 `--questionnaires`，仅在一次性测试用户配置启用 clarify，验证真实官方提问、
+精确取消回执、零 Approval、无用户答案、已发送消息保留，以及后继 Core 冷恢复原 Session。
+它使用本地受控 Responses，不能替代真实模型或完整 Renderer 验收；与 `--observations` 分开运行。
+
+User 明确授权真实模型后，同一入口追加 `--real-model <第二个模型 ID>`：
+
+```sh
+node scripts/smoke-hermes-native-session.mjs /absolute/official-source /absolute/prepared-python --real-model <second-model-id>
+```
+
+真实分支读取当前原生配置中的默认模型及 Responses Provider，使用一次性用户 Home、独立 Core data、
+Skill Library、MCP 文件和未修改的源码副本。测试 relay 原样转发真实模型响应，凭据只留在测试进程内，
+不复制到 fixture；不生成工具调用或伪造模型回复。测试用 stdio observer 只记录 ACP 方法、Session、
+模型/模式等白名单元数据，不改变消息。它不是生产代理、插件或 CLI wrapper。
+两成员真实工具与 Send、原 Session 冷恢复、同值省略设置、目录外显式模型切换和固定 Skills 文件选择
+使用生产 Core 入口验收。报告区分请求模型、原生设置、落盘文件与公开 Send 回执，不靠模型自报身份。
+该分支不重跑压缩、取消、MCP 或平台矩阵；它不能替代默认受控分支的相应证据。
+启动解释器也可能触发官方 bootstrap 的依赖准备，必须在已明确隔离的 Home/源码副本中执行，
+不要为了检查依赖在日常 Home 导入 bootstrap。
 
 ## Command Code 1.88 简化测试归属（2026-10-24）
 

@@ -1,37 +1,29 @@
-# Rovai AI v0.5.1
+# Rovai AI v0.5.2
 
 <!-- lang:zh-CN -->
 
-本次更新支持在创建使命时选用团队，改善会话引用与执行状态展示，并修复多项智能体运行问题。
+本次更新支持为定时任务生成的会话标题添加日期和时间，并改进会话记录读取与执行状态展示。
 
-- 【功能】**创建使命时支持选用团队。** 可直接使用已保存的队员组合、队长和协作指引，也可自定义成员。较长的指引支持展开阅读全文，描述中额外 @ 的队员也会加入使命。
-- 【交互】**优化会话与使命引用。** 长标题自动省略显示，避免撑开输入框和消息气泡，详情中仍可查看完整标题。在公屏 `@` 列表中，可用 Tab、Shift+Tab 切换队员、会话和使命，用 Enter 插入引用。
-- 【交互】**统一执行启动与停止时的提示。** 启动阶段显示“启动中”，尚未开始处理的消息显示“准备中”或“排队中”。停止时保留已有内容和执行步骤，减少重复提示。
-- 【修复】**修复 Claude Code 审批通过后可能一直显示运行中的问题。** 当原生进程已经退出、工具结果未返回时，执行会结束为中断状态，并保留操作结果未知的记录。
-- 【修复】**修复新版 Copilot CLI 无法启动的问题。** 调整启动参数，兼容 Copilot CLI 1.0.103。
-- 【修复】**修复运行时检测使用的路径不一致问题。** 应用启动、重新检测和单项检查统一使用相同的命令搜索路径；主动点击“检查”时会刷新路径，减少 macOS 从 Dock 启动后反复检测失败的情况。
-- 【修复】**补齐 Command Code 写入文件的差异展示。** 对新建文件或空文件写入内容并成功后，可查看新增行数和完整差异，不再只显示一次文件操作。
-- 【优化】**减少 MCP 配置快照的重复写入。** 同一次执行恢复时复用配置快照，并补齐 Grok 临时 MCP 插件的启动清理。
+- 【功能】**定时任务生成的会话可自动添加日期和时间。** 在“对话命名”中，可分别开关日期和时间，选择显示在任务名称前或后，并实时预览标题，方便区分多次运行。设置对之后生成的会话生效。
+- 【功能】**支持增量读取会话记录。** 新增 `rovai thread read --after N`，可从指定消息序列之后按顺序读取后续记录，支持分页和回复链，方便队员补读长会话。
+- 【交互】**明确区分手动停止与执行失败。** 手动停止后，消息回执和执行卡片统一显示“已停止”；失败单独标识为“执行失败”。发送给多位队员时，分别统计各自状态。
+- 【界面】**调整消息回复图标。** 回复按钮改用更紧凑的三点气泡样式。
 
-感谢 @arschlochnop 反馈的 Claude Code 审批与运行时检测问题（[#889](https://github.com/murray17/rovai-ai/issues/889)、[#891](https://github.com/murray17/rovai-ai/issues/891)）。
+感谢 [@liangxyz](https://github.com/liangxyz) 提出的定时任务会话标题建议（[#875](https://github.com/murray17/rovai-ai/issues/875)），以及 [@liuqiong0319](https://github.com/liuqiong0319) 反馈的 Copilot 无法运行问题。
 
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.1)
+[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.5.1...v0.5.2)
 
 ---
 
 <!-- lang:en -->
 
-This release brings team presets to mission creation, improves conversation references and execution status, and fixes several agent runtime issues.
+This release adds date and time options for conversations created by scheduled tasks, incremental conversation history reads, and clearer execution status.
 
-- [Feature] **Use saved teams when creating missions.** Choose an existing teammate lineup, lead, and collaboration guidance, or set up a custom roster. Expand long guidance to read it in full. Additional teammates mentioned in the description also join the mission.
-- [Interaction] **Improve conversation and mission references.** Long titles are ellipsized to fit the input and message bubble, with full titles available in the details. In the public `@` picker, use Tab or Shift+Tab to switch between teammates, conversations, and missions, then Enter to insert a reference.
-- [Interaction] **Make startup and stop feedback consistent.** Show a single startup status, distinguish preparation from queued messages, and retain existing content and execution steps while stopping, with fewer duplicate notices.
-- [Fix] **Fix Claude Code remaining in a running state after approval.** If the native process has exited without returning its tool result, finish the execution as interrupted while retaining an unknown result for the affected operation.
-- [Fix] **Restore startup with newer Copilot CLI releases.** Update launch arguments for compatibility with Copilot CLI 1.0.103.
-- [Fix] **Use consistent command search paths for runtime checks.** Startup, rediscovery, and individual checks now use the same path capture policy. Clicking Check refreshes the paths, reducing repeated detection failures when launching from the macOS Dock.
-- [Fix] **Show complete diffs for Command Code writes from empty content.** Successful writes to new or empty files now show added line counts and the full diff instead of only a file operation.
-- [Improvement] **Reduce duplicate MCP configuration snapshots.** Reuse the snapshot when recovering the same execution, and clean up abandoned temporary Grok MCP plugins at startup.
+- [Feature] **Add dates and times to conversations created by scheduled tasks.** In Conversation naming, toggle the date and time separately, place them before or after the task name, and preview the title. The settings apply to conversations created afterward.
+- [Feature] **Read conversation history incrementally.** Use `rovai thread read --after N` to read subsequent records in order, with pagination and reply-chain support, so teammates can catch up on long conversations.
+- [Interaction] **Distinguish stopped executions from failures.** Message receipts and execution cards now use Stopped for manual stops. Failures are identified separately as Execution failed, and messages sent to multiple teammates show counts for each status.
+- [UI] **Update the message reply icon.** The reply button now uses a compact speech bubble with three dots.
 
-Thanks to @arschlochnop for reporting the Claude Code approval and runtime detection issues ([#889](https://github.com/murray17/rovai-ai/issues/889), [#891](https://github.com/murray17/rovai-ai/issues/891)).
+Thanks to [@liangxyz](https://github.com/liangxyz) for suggesting dates in scheduled-task conversation titles ([#875](https://github.com/murray17/rovai-ai/issues/875)), and [@liuqiong0319](https://github.com/liuqiong0319) for reporting the Copilot startup issue.
 
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.4.19...v0.5.1)
+[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.5.1...v0.5.2)

@@ -77,7 +77,7 @@ export function NativeSkillsSettings(): React.JSX.Element {
   }
   return <div className="rebuilt-skills-page">
     <header className="rebuilt-skills-header">
-      <div><h1>Skills</h1><p><UiText zh={"查看各智能体的 Skills。"} /></p></div>
+      <div><h1>Skills</h1><p><UiText zh={runtime === 'hermes-cli' ? '此处展示约定目录中发现的技能文件，不代表 Hermes 当前已启用或加载。' : '查看各智能体的 Skills。'} /></p></div>
     </header>
     <div className="rebuilt-runtime-bar"><span><UiText zh={"智能体"} /></span>
       <Menu.Root>

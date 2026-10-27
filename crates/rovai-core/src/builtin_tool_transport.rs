@@ -10,12 +10,12 @@ use serde_json::{Map, Value, json};
 
 use crate::team_tool_catalog::builtin_tool_definitions;
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 43;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 44;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 3;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 43;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 44;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 14;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v43";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v44";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -372,6 +372,32 @@ pub struct BuiltinToolIpcRequest {
     pub auth: BuiltinToolAuth,
     #[serde(flatten)]
     pub body: BuiltinToolIpcRequestBody,
+}
+
+/// Hermes identifies the logical native session; Core resolves the current
+/// execution exactly once. No context exchange or CLI-supplied Run identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesSessionIpcRequest {
+    pub source: HermesSessionSource,
+    pub native_session_id: String,
+    #[serde(flatten)]
+    pub body: BuiltinToolIpcRequestBody,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HermesSessionSource {
+    #[serde(rename = "hermes_native_session")]
+    NativeSession,
+}
+
+/// One endpoint for the current Core instance, never a Session/Run map.
+pub fn builtin_tool_discovery_path() -> Result<std::path::PathBuf> {
+    Ok(dirs::data_dir()
+        .context("Rovai data directory is unavailable")?
+        .join("Rovai AI")
+        .join("builtin-tools")
+        .join("connection.json"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1128,10 +1154,10 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 43);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 43);
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 44);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 44);
         assert_eq!(BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION, 14);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v43");
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v44");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()

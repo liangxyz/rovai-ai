@@ -395,6 +395,7 @@ pub enum SkillDeliveryGroupKey {
     Cursor,
     Kimi,
     Minimax,
+    Hermes,
     Grok,
     Dsh,
     Cline,
@@ -403,7 +404,7 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
@@ -418,6 +419,7 @@ impl SkillDeliveryGroupKey {
         Self::Cursor,
         Self::Kimi,
         Self::Minimax,
+        Self::Hermes,
         Self::Grok,
         Self::Dsh,
         Self::Cline,
@@ -441,6 +443,7 @@ impl SkillDeliveryGroupKey {
             Self::Cursor => "cursor",
             Self::Kimi => "kimi",
             Self::Minimax => "minimax",
+            Self::Hermes => "hermes",
             Self::Grok => "grok",
             Self::Dsh => "dsh",
             Self::Cline => "cline",
@@ -465,6 +468,7 @@ impl SkillDeliveryGroupKey {
             Self::Cursor => Path::new(".cursor/skills"),
             Self::Kimi => Path::new(".kimi-code/skills"),
             Self::Minimax => Path::new(".minimax/skills"),
+            Self::Hermes => Path::new(".hermes/skills"),
             Self::Grok => Path::new(".grok/skills"),
             Self::Dsh => Path::new(".dsh/skills"),
             Self::Cline => Path::new(".cline/skills"),
@@ -493,6 +497,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "cursor" => Ok(Self::Cursor),
             "kimi" => Ok(Self::Kimi),
             "minimax" => Ok(Self::Minimax),
+            "hermes" => Ok(Self::Hermes),
             "grok" => Ok(Self::Grok),
             "dsh" => Ok(Self::Dsh),
             "cline" => Ok(Self::Cline),
@@ -777,6 +782,9 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             )
         };
+        if kind == AdapterKind::HermesCli {
+            return unqualified();
+        }
         if kind == AdapterKind::MinimaxCodeCli {
             return match platform {
                 HostPlatformKey::MacosArm64 => RuntimePlatformAdmission::preview(
@@ -980,6 +988,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::MinimaxCodeCli => {
                 json!({"permission_mode": "bypassPermissions", "mode":"default"})
             }
+            AdapterKind::HermesCli => json!({"permission_mode":"dont_ask"}),
             AdapterKind::KimiCodeCli => json!({
                 "permission_mode": "yolo",
             }),
@@ -1014,6 +1023,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
             | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
             | AdapterKind::GrokBuild
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
@@ -1073,6 +1083,10 @@ impl AgentRuntimeAdapterRegistry {
                 [SkillDeliveryGroupKey::Cursor],
                 SkillDiscoveryVerification::DocumentationOnly,
             ),
+            AdapterKind::HermesCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Hermes],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             AdapterKind::MinimaxCodeCli => native_skill_discovery(
                 [SkillDeliveryGroupKey::Minimax],
                 SkillDiscoveryVerification::Verified,
@@ -1106,6 +1120,15 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::ClineCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
+            AdapterKind::HermesCli => McpProjectionCapability {
+                supports_stdio: true,
+                supports_streamable_http: true,
+                external_mcp_projection: ExternalMcpProjection::AdditivePerRun,
+                // Native config and editor MCP are separate upstream sources.
+                // Rovai no longer edits config to impose a same-name winner.
+                same_name_policy: None,
+                approval_control: McpApprovalControl::RuntimeNative,
+            },
             AdapterKind::GrokBuild | AdapterKind::CommandCodeCli => {
                 additive_native_mcp_projection(McpSameNamePolicy::NativeWinsSkip)
             }
@@ -1162,6 +1185,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => {
                 acp_capability_snapshot(observation, kimi_permission_options())
             }
+            AdapterKind::HermesCli => {
+                acp_capability_snapshot(observation, hermes_permission_options())
+            }
             AdapterKind::MinimaxCodeCli => {
                 acp_capability_snapshot(observation, minimax_permission_options())
             }
@@ -1191,6 +1217,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::TraeCnCli => trae_static_permission_options(),
             AdapterKind::CursorAgent => cursor_permission_options(),
             AdapterKind::KimiCodeCli => kimi_permission_options(),
+            AdapterKind::HermesCli => hermes_permission_options(),
             AdapterKind::MinimaxCodeCli => minimax_permission_options(),
             AdapterKind::GrokBuild => grok_permission_options(),
             AdapterKind::DeepseekHarness => dsh_permission_options(),
@@ -1215,6 +1242,8 @@ impl AgentRuntimeAdapterRegistry {
             && !crate::dsh::supported_version(reported_version.as_deref());
         let command_code_version_unsupported = kind == AdapterKind::CommandCodeCli
             && !crate::command_code_acp::supported_version(reported_version.as_deref());
+        let hermes_version_unsupported = kind == AdapterKind::HermesCli
+            && !crate::hermes::supported_version(reported_version.as_deref());
         let pi_version_unsupported =
             kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
@@ -1225,6 +1254,7 @@ impl AgentRuntimeAdapterRegistry {
                 || pi_version_unsupported
                 || dsh_version_unsupported
                 || command_code_version_unsupported
+                || hermes_version_unsupported
             {
                 "light_failed".to_string()
             } else {
@@ -1243,8 +1273,16 @@ impl AgentRuntimeAdapterRegistry {
             last_error: (grok_version_unsupported
                 || pi_version_unsupported
                 || dsh_version_unsupported
-                || command_code_version_unsupported)
-                .then(|| "runtime_version_below_minimum".to_string()),
+                || command_code_version_unsupported
+                || hermes_version_unsupported)
+                .then(|| {
+                    if hermes_version_unsupported {
+                        "runtime_version_unsupported"
+                    } else {
+                        "runtime_version_below_minimum"
+                    }
+                    .to_string()
+                }),
             native_session_compatibility_key: None,
         })
     }
@@ -2450,6 +2488,9 @@ fn acp_capability_snapshot(
         let session = session_result.context("ready ACP probe did not create a session")?;
         match acp_model_catalog_for_adapter(adapter_kind, session) {
             Ok(models) => models,
+            // Hermes owns native default and explicit model selection. A
+            // missing picker must not turn a successful Session into a failure.
+            Err(_) if adapter_kind == AdapterKind::HermesCli => Vec::new(),
             Err(_)
                 if matches!(
                     adapter_kind,
@@ -2500,6 +2541,19 @@ fn acp_capability_snapshot(
                 "acp.initialize",
                 "session.new",
                 "context.charter.first_payload",
+            ]
+        } else if adapter_kind == AdapterKind::HermesCli {
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "session.set_model",
+                "session.set_mode",
+                "structured_permission_request",
+                "context.charter.first_payload",
+                "hermes.native_session_cli",
             ]
         } else if matches!(
             adapter_kind,
@@ -2576,6 +2630,9 @@ fn acp_capability_snapshot(
         }
         let mcp_projection = AgentRuntimeAdapterRegistry::default().mcp_projection(adapter_kind);
         match mcp_projection.external_mcp_projection {
+            ExternalMcpProjection::AdditivePerRun if adapter_kind == AdapterKind::HermesCli => {
+                capabilities.push("mcp.external_projection.additive_per_run".to_string());
+            }
             ExternalMcpProjection::AdditivePerRun => append_additive_mcp_axes(
                 &mut capabilities,
                 mcp_projection
@@ -3277,6 +3334,25 @@ fn cursor_permission_options() -> Vec<PermissionOptionDescriptor> {
     ]
 }
 
+fn hermes_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".into(),
+        label: "File edit approval".into(),
+        description: "Hermes file edit policy. Command approvals remain native requests.".into(),
+        value_type: "enum".into(),
+        choices: ["default", "accept_edits", "dont_ask"]
+            .into_iter()
+            .map(|value| choice(value, value))
+            .collect(),
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Run,
+        risk: "elevated".into(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
 fn minimax_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![
         PermissionOptionDescriptor {
@@ -3585,7 +3661,10 @@ fn resolve_session_runtime(
         .find(|protocol| protocol.as_str() == required_protocol)
         .context("Runtime installation does not advertise the required protocol")?
         .clone();
-    if expected_kind == AdapterKind::CommandCodeCli {
+    if matches!(
+        expected_kind,
+        AdapterKind::CommandCodeCli | AdapterKind::HermesCli
+    ) {
         return Ok(AdapterRuntimeProjection {
             protocol_version,
             binding_compatibility_digest: None,
@@ -3962,6 +4041,112 @@ mod tests {
 
     #[test]
     fn grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs() {
+        let observation = AcpProbeObservation {
+            adapter_kind: AdapterKind::HermesCli,
+            reported_version: Some("0.22.4".into()),
+            executable_fingerprint: Some("sha256:hermes".into()),
+            authentication_status: "authenticated".into(),
+            probe_status: "ready".into(),
+            capabilities: vec![],
+            initialize_result: Some(json!({"agentCapabilities":{"loadSession":true}})),
+            session_result: Some(json!({"sessionId":"native", "models":{
+                "currentModelId":"route/model", "availableModels":[{"modelId":"route/model","name":"Model"}]}
+            })),
+            attempted_at: "2026-10-23T00:00:00Z".into(),
+            last_error: None,
+        };
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let hermes = registry
+            .acp_capability_snapshot(observation.clone())
+            .unwrap();
+        for models in [
+            Value::Null,
+            json!({"availableModels":[]}),
+            json!({"availableModels":[{}]}),
+        ] {
+            let mut missing = observation.clone();
+            missing.session_result = Some(json!({"sessionId":"native", "models": models}));
+            let snapshot = registry.acp_capability_snapshot(missing).unwrap();
+            assert_eq!(snapshot.probe_status, "ready");
+            assert!(
+                snapshot.models.is_empty(),
+                "do not invent a picker from missing evidence"
+            );
+        }
+        let mut partial = observation.clone();
+        partial.session_result.as_mut().unwrap()["models"]["currentModelId"] =
+            json!("another-provider/model");
+        let partial = registry.acp_capability_snapshot(partial).unwrap();
+        assert_eq!(partial.models.len(), 1);
+        assert_eq!(partial.models[0].id, "route/model");
+        assert!(!partial.models[0].is_default);
+        let mut absent_session = observation;
+        absent_session.session_result = None;
+        assert!(registry.acp_capability_snapshot(absent_session).is_err());
+        validate_machine_ready_snapshot(AdapterKind::HermesCli, &hermes).unwrap();
+        for capability in [
+            "context.charter.first_payload",
+            "hermes.native_session_cli",
+            "session.set_model",
+            "session.set_mode",
+            "structured_permission_request",
+            "session.load",
+        ] {
+            assert!(hermes.capabilities.iter().any(|value| value == capability));
+        }
+        assert_eq!(hermes.permission_options, hermes_permission_options());
+        let permissions = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::HermesCli,
+            schema_version: 1,
+            values: json!({"permission_mode":"dont_ask"}),
+        };
+        for (path, version, fingerprint) in [
+            ("/old/hermes", "0.22.4", "old"),
+            ("/new/hermes", "0.23.0", "new"),
+        ] {
+            let projection = AgentRuntimeAdapterRegistry::default()
+                .resolve_runtime(
+                    AdapterKind::HermesCli,
+                    AdapterRuntimeResolutionInput {
+                        installation_id: "hermes-local",
+                        executable_path: path,
+                        auth_scope: "default",
+                        reported_version: Some(version),
+                        executable_fingerprint: fingerprint,
+                        protocols: &["acp-v1".into()],
+                        native_session_compatibility_key: None,
+                        permissions: &permissions,
+                        permission_descriptors: &hermes.permission_options,
+                    },
+                )
+                .unwrap();
+            assert_eq!(projection.protocol_version, "acp-v1");
+            assert!(projection.binding_compatibility_digest.is_none());
+            assert!(projection.host_config_digest.is_none());
+        }
+
+        assert_eq!(
+            AgentRuntimeAdapterRegistry::default()
+                .mcp_projection(AdapterKind::HermesCli)
+                .same_name_policy,
+            None
+        );
+        assert!(hermes.models.iter().all(|model| model.options.is_empty()));
+        assert!(
+            !hermes
+                .capabilities
+                .iter()
+                .any(|capability| capability == "session.set_config_option")
+        );
+        for old in [
+            "mcp.same_name_policy.rovai_wins",
+            "context.compaction.signal_driven",
+            "context.compaction.best_effort",
+            "context.charter.managed_system_prompt",
+            "context.compaction.native_system_prompt_preserved",
+        ] {
+            assert!(!hermes.capabilities.iter().any(|value| value == old));
+        }
         let mini = json!({"configOptions":[
             {"id":"model","type":"select","currentValue":"m:provider:model:u","options":[{"value":"m:provider:model:u","name":"Model"},{"value":"m:provider:other:v:fast","name":"Other"}]},
             {"id":"thinkingEffort","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
@@ -5355,6 +5540,11 @@ mod tests {
             &[SkillDeliveryGroupKey],
             SkillDiscoveryVerification,
         )] = &[
+            (
+                AdapterKind::HermesCli,
+                &[SkillDeliveryGroupKey::Hermes],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             (
                 AdapterKind::ClineCli,
                 &[SkillDeliveryGroupKey::Cline],

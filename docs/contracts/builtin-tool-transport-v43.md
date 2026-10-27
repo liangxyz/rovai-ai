@@ -5,7 +5,7 @@ authority: builtin-tool-transport
 status: accepted
 version: 43
 source_version: v1.72
-last_updated: 2026-10-19
+last_updated: 2026-10-25
 ---
 
 # Built-in Tool Transport v43
@@ -35,3 +35,22 @@ CLI 成功解析 `--input-file` 后，按当时 CLI cwd 转为绝对路径并做
 成功 Send 的输入文件从本轮 Files Changed 排除，包含项目内外路径。规则依据输入用途，不判断文件
 是否临时；已有项目文档若被作为输入文件发送，其本轮变化同样排除。正式附件不因 `--file` 被排除。
 原始 Runtime 文件操作及 Command Diff 保留；受管 `ROVAI_RUN_TMP` 的既有 ingress 排除继续独立生效。
+
+
+## Hermes 原生会话来源
+
+Hermes 未发布的新入口与 CLI/Core 同包交付，不增加版本协商。其他 Runtime 的 context/auth 请求不变。
+Hermes 本机终端提供 platform=local 与逻辑 chat_id，CLI 自动构造：
+
+```json
+{"source":"hermes_native_session","nativeSessionId":"local-…","kind":"invoke","request_id":"UUID","operation":"thread.message.send","input":{}}
+```
+
+`input` 遵循原操作 Schema，`sendInputFilePath` 仍可选。没有 Run ID、Token 或新 Agent 参数。
+CLI 读取私有实例端点描述后直接发一次业务请求；派发后结果未知不自动重试。
+Core 在现有 invocation_gate 内定位唯一 Hermes Conversation 和当前非取消 running Run，
+读取同 Binding/generation、Run/epoch 的 ActiveLease。捕获身份后进入原公共认证/Router/回执，
+撤权时失败，不在同一操作中换到后继 Run；无唯一会话/活动执行明确拒绝。
+旧后台命令直到下一轮首次调用时归下一轮，这是明确采用的调用时语义，不提供原执行来源证明。
+实例发现文件仅含 IPC 地址，位置为用户数据目录 `Rovai AI/builtin-tools/connection.json`，
+不增加 DB 表、会话映射或上下文交换。固定 CLI 安装和路径边界见 [Hermes 合同](hermes-managed-runtime-v1.md#内置-cli-的原生会话来源)。

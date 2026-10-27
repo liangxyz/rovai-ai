@@ -5,6 +5,7 @@ import { FilePreviewFrameNavigation } from './file-preview/file-preview-navigati
 import { installWindowNavigation } from './window-navigation'
 import { ShortcutPreferencesStore } from './shortcut-preferences'
 import { installShortcutInput } from './shortcut-input'
+import { installBundledCliEntry } from './bundled-cli-entry'
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { webLinkWindowHandler } from './web-link-window-handler'
 import { randomUUID } from 'node:crypto'
@@ -975,6 +976,13 @@ if (primaryInstance) void app.whenReady().then(async () => {
   console.info(
     `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
   )
+  if (process.platform === 'darwin' && app.isPackaged && !hasExplicitUserDataDirectory) {
+    try {
+      await installBundledCliEntry(resolveDesktopBootstrapBinary(), app.getPath('home'))
+    } catch (error) {
+      console.warn('[rovai] Bundled CLI entry installation failed; existing files were preserved.', error)
+    }
+  }
   powerMonitor.on('suspend', () => {
     void core.notifyAutomationSystemSuspending().catch((error) => {
       console.warn('[rovai] Scheduled Automation scheduler was not paused before suspend.', error)

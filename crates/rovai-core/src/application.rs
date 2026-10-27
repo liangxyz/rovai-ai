@@ -2495,6 +2495,7 @@ struct Core {
     cursor_agent: AcpCliRuntimeAdapter,
     kimi_code_cli: AcpCliRuntimeAdapter,
     minimax_code_cli: AcpCliRuntimeAdapter,
+    hermes_cli: AcpCliRuntimeAdapter,
     grok_build: AcpCliRuntimeAdapter,
     deepseek_harness: AcpCliRuntimeAdapter,
     cline_cli: AcpCliRuntimeAdapter,
@@ -2853,6 +2854,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::CursorAgent => "Cursor Agent",
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::MinimaxCodeCli => "MiniMax Code",
+        AdapterKind::HermesCli => "Hermes Agent",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
         AdapterKind::ClineCli => "Cline",
@@ -6039,6 +6041,13 @@ impl Core {
             return Some(AgentRunRuntime::Acp(runtime));
         }
         if let Some(runtime) = self
+            .hermes_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
             .zcode_app
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -6183,6 +6192,7 @@ impl Core {
             self.cursor_agent.shutdown_all(),
             self.kimi_code_cli.shutdown_all(),
             self.minimax_code_cli.shutdown_all(),
+            self.hermes_cli.shutdown_all(),
             self.grok_build.shutdown_all(),
             self.deepseek_harness.shutdown_all(),
             self.command_code_cli.shutdown_all(),
@@ -6209,6 +6219,7 @@ impl Core {
                 self.cursor_agent.shutdown_all(),
                 self.kimi_code_cli.shutdown_all(),
                 self.minimax_code_cli.shutdown_all(),
+                self.hermes_cli.shutdown_all(),
                 self.grok_build.shutdown_all(),
                 self.deepseek_harness.shutdown_all(),
                 self.command_code_cli.shutdown_all(),
@@ -6238,6 +6249,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::CursorAgent => Some(&self.cursor_agent),
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::MinimaxCodeCli => Some(&self.minimax_code_cli),
+            rovai_core::agent_profile::AdapterKind::HermesCli => Some(&self.hermes_cli),
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             AdapterKind::DeepseekHarness => Some(&self.deepseek_harness),
             AdapterKind::CommandCodeCli => Some(&self.command_code_cli),
@@ -6248,6 +6260,86 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
             | rovai_core::agent_profile::AdapterKind::AntigravityApp => None,
         }
+    }
+
+    async fn handle_hermes_session_ipc(
+        &self,
+        request: rovai_core::builtin_tool_transport::HermesSessionIpcRequest,
+    ) -> BuiltinToolIpcResponse {
+        let BuiltinToolIpcRequestBody::Invoke {
+            request_id,
+            operation,
+            ..
+        } = &request.body;
+        let _gate = self.builtin_tool_leases.invocation_guard().await;
+        let resolved: Result<_> = {
+            let database = self.database.lock().await;
+            (|| {
+                anyhow::ensure!(
+                    !request.native_session_id.trim().is_empty(),
+                    "Hermes Session ID is missing"
+                );
+                let mut statement = database.connection().prepare(
+                    "SELECT c.id, c.native_binding_id, c.native_binding_generation
+                     FROM conversation AS c JOIN adapter_installation AS i ON i.id=c.native_adapter_installation_id
+                     WHERE c.native_session_id=?1 AND i.adapter_kind='hermes-cli'")?;
+                let matches = statement
+                    .query_map([&request.native_session_id], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                anyhow::ensure!(
+                    matches.len() == 1,
+                    "Hermes Session does not identify one Conversation"
+                );
+                let (conversation, binding, generation) = &matches[0];
+                let (run, epoch): (String, i64) = database.connection().query_row(
+                    "SELECT id, execution_epoch FROM agent_run WHERE conversation_id=?1
+                     AND status='running' AND cancel_requested_at IS NULL AND runtime_adapter_kind='hermes-cli'",
+                    [conversation], |row| Ok((row.get(0)?,row.get(1)?)))
+                    .optional()?.context("Hermes Session has no active execution")?;
+                Ok((run, epoch, binding.clone(), *generation))
+            })()
+        };
+        let (run, epoch, binding, generation) = match resolved {
+            Ok(scope) => scope,
+            Err(_) => {
+                return builtin_tool_rejection(
+                    operation,
+                    request_id,
+                    "builtin_tool.run_not_bound",
+                    "Hermes Session does not identify one active Rovai Run.",
+                );
+            }
+        };
+        let auth = match self
+            .builtin_tool_leases
+            .auth_for_execution(&run, epoch, &binding, generation)
+            .await
+        {
+            Ok(auth) => auth,
+            Err(_) => {
+                return builtin_tool_rejection(
+                    operation,
+                    request_id,
+                    "builtin_tool.run_not_bound",
+                    "Hermes Session has no active execution lease.",
+                );
+            }
+        };
+        // The captured lease is revalidated by the common handler. It may be
+        // revoked before commit, but can never be re-resolved to a successor.
+        drop(_gate);
+        self.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+            ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+            auth,
+            body: request.body,
+        })
+        .await
     }
 
     async fn handle_builtin_tool_ipc(
@@ -9395,12 +9487,12 @@ impl Core {
                 // A same-value save also repairs a previously failed projection.
                 // Retry only this derived file state; the preference stays saved
                 // and each attempt reads the latest value under the invocation gate.
-                if !self.refresh_task_discovery().await {
+                if !self.refresh_task_discovery(None).await {
                     let core = Arc::clone(self);
                     tokio::spawn(async move {
                         for delay_ms in [100, 500, 2_000] {
                             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                            if core.refresh_task_discovery().await {
+                            if core.refresh_task_discovery(None).await {
                                 break;
                             }
                         }
@@ -12650,6 +12742,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::CursorAgent
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::MinimaxCodeCli
+            | rovai_core::agent_profile::AdapterKind::HermesCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
             | rovai_core::agent_profile::AdapterKind::CommandCodeCli
@@ -15414,7 +15507,7 @@ impl Core {
         self.builtin_tool_process_config_factory()?.create()
     }
 
-    async fn refresh_task_discovery(&self) -> bool {
+    async fn refresh_task_discovery(&self, target: Option<(&str, &str, i64)>) -> bool {
         let _gate = self.builtin_tool_leases.invocation_guard().await;
         let enabled_runs = {
             let database = self.database.lock().await;
@@ -15427,7 +15520,11 @@ impl Core {
             })()
         };
         match enabled_runs {
-            Ok(enabled_runs) => self.builtin_tool_leases.refresh_tasks(&enabled_runs).await,
+            Ok(enabled_runs) => {
+                self.builtin_tool_leases
+                    .refresh_tasks(&enabled_runs, target)
+                    .await
+            }
             Err(error) => {
                 eprintln!("Task CLI capability read failed: {error:#}");
                 false
@@ -15450,7 +15547,14 @@ impl Core {
                 Path::new(&execution.workspace.execution_root),
             )
             .await?;
-        self.refresh_task_discovery().await;
+        if config.context_path().is_some() {
+            self.refresh_task_discovery(Some((
+                config.process_id(),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )))
+            .await;
+        }
         Ok(())
     }
 
@@ -18429,6 +18533,10 @@ impl Core {
         if binding_credential.native_session_id.is_some()
             && session_continuation == acp::AcpSessionContinuation::New
         {
+            anyhow::ensure!(
+                execution.runtime.adapter_kind != AdapterKind::HermesCli,
+                "当前 Hermes 未提供原会话恢复能力；已保留原 Session，未创建替代会话"
+            );
             launch_permit.check_cancelled()?;
             {
                 let database = self.database.lock().await;
@@ -18531,6 +18639,7 @@ impl Core {
             Ok(session_id) => session_id,
             Err(error)
                 if resumable_session_id.is_some()
+                    && execution.runtime.adapter_kind != AdapterKind::HermesCli
                     && native_resume_failure(&error)
                         == NativeSessionResumeFailure::Incompatible =>
             {
@@ -19090,6 +19199,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::CursorAgent
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::MinimaxCodeCli
+            | rovai_core::agent_profile::AdapterKind::HermesCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
             | rovai_core::agent_profile::AdapterKind::CommandCodeCli
@@ -20094,6 +20204,15 @@ async fn run_core(
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::MinimaxCodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        ),
+        hermes_cli: AcpCliRuntimeAdapter::deferred(
+            rovai_core::agent_profile::AdapterKind::HermesCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/hermes"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::HermesCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
         deepseek_harness: AcpCliRuntimeAdapter::deferred(
@@ -27209,6 +27328,10 @@ async fn serve_builtin_tool_ipc(core: Arc<Core>, mut shutdown: oneshot::Receiver
                 _ = &mut shutdown => return,
             }
         };
+        let _discovery =
+            builtin_tool_runtime::BuiltinToolDiscovery::publish(builtin_tool_endpoint())
+                .map_err(|error| eprintln!("Native CLI endpoint discovery unavailable: {error:#}"))
+                .ok();
         let admission_error = loop {
             let accepted = tokio::select! {
                 accepted = listener.accept() => accepted,
@@ -27272,6 +27395,20 @@ async fn handle_builtin_tool_connection(core: Arc<Core>, stream: LocalIpcStream)
                 }) {
                     Some(request) => core.handle_compaction_hook_ipc(request).await,
                     None => CompactionHookIpcResponse { accepted: false },
+                };
+                serde_json::to_value(response)?
+            } else if value.as_ref().and_then(|v| v.get("source")).is_some() {
+                let response = match value.and_then(|v| {
+                    serde_json::from_value::<
+                        rovai_core::builtin_tool_transport::HermesSessionIpcRequest,
+                    >(v)
+                    .ok()
+                }) {
+                    Some(request) => core.handle_hermes_session_ipc(request).await,
+                    None => BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.invalid_ipc_request",
+                        "Native Session request is malformed",
+                    ),
                 };
                 serde_json::to_value(response)?
             } else {
@@ -28511,6 +28648,15 @@ mod tests {
                 runtime_fleet.clone(),
                 compaction_detector_policies
                     .policy_for(AdapterKind::MinimaxCodeCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            hermes_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::HermesCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/hermes"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::HermesCli)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
             deepseek_harness: AcpCliRuntimeAdapter::new(
@@ -34545,6 +34691,146 @@ done
             )
         };
         (camp_id, agent_run_id, version, execution_epoch)
+    }
+
+    // Owns the preference transaction -> invocation gate -> CLI projection seam.
+    // Registry tests cannot verify when Core reads SQLite or its saved-value retry.
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test(start_paused = true)]
+    async fn task_discovery_refresh_scopes_bindings_and_repairs_saved_preferences() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("rovai-task-discovery-{}", uuid::Uuid::new_v4()));
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
+        let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+            path: root.join("core.sock").to_string_lossy().into_owned(),
+        };
+        async fn save(core: &Arc<Core>, enabled: bool) {
+            let result = core
+                .handle(&Request {
+                    client: rovai_core::draft_client::DraftClient::default(),
+                    id: json!(1),
+                    method: "preferences.tasks.set".to_string(),
+                    params: json!({"enabled": enabled}),
+                })
+                .await
+                .unwrap();
+            assert_eq!(result["enabled"], enabled);
+        }
+        fn tasks(config: &BuiltinToolProcessConfig) -> bool {
+            let context: serde_json::Value =
+                serde_json::from_slice(&fs::read(config.context_path().unwrap()).unwrap()).unwrap();
+            context["tasksEnabled"].as_bool().unwrap()
+        }
+        save(&core, false).await;
+        let mut bindings = Vec::new();
+        for _ in 0..2 {
+            let (camp, run, _, epoch) = claimed_runtime_cleanup_test_run(&core, &workspace).await;
+            let execution = {
+                let database = core.database.lock().await;
+                ExecutionRuntimeService::default()
+                    .load_agent_run_execution(&database, &run, epoch)
+                    .unwrap()
+                    .unwrap()
+            };
+            let credential = core
+                .prepare_builtin_tool_binding(&execution, false)
+                .await
+                .unwrap();
+            let config = BuiltinToolProcessConfig::create(
+                &std::env::current_exe().unwrap(),
+                &endpoint,
+                &root,
+            )
+            .unwrap();
+            bindings.push((camp, execution, credential, config));
+        }
+        let (_, execution_a, credential_a, a) = &bindings[0];
+        let (_, execution_b, credential_b, b) = &bindings[1];
+        core.bind_builtin_tool_runtime(a, execution_a, credential_a)
+            .await
+            .unwrap();
+        let mut unchanged = fs::read(a.context_path().unwrap()).unwrap();
+        unchanged.push(b'\n'); // Detect even a same-value rewrite, independent of inode/mtime.
+        fs::write(a.context_path().unwrap(), &unchanged).unwrap();
+        core.bind_builtin_tool_runtime(b, execution_b, credential_b)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(a.context_path().unwrap()).unwrap(), unchanged);
+
+        // Pause at the existing gate, commit a new preference, then resume the
+        // binding refresh. It must read the new value, not one captured at bind.
+        {
+            let gate = core.builtin_tool_leases.invocation_guard().await;
+            let refresh = core.refresh_task_discovery(Some((
+                b.process_id(),
+                &execution_b.agent_run_id,
+                execution_b.execution_epoch,
+            )));
+            tokio::pin!(refresh);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    std::future::Future::poll(refresh.as_mut(), cx).is_pending()
+                ))
+                .await
+            );
+            {
+                let mut database = core.database.lock().await;
+                let tx = database.connection_mut().transaction().unwrap();
+                rovai_core::task_capability::set(&tx, true).unwrap();
+                tx.commit().unwrap();
+            }
+            drop(gate);
+            assert!(refresh.await);
+        }
+        assert!(tasks(b));
+        assert!(!tasks(a));
+        // A same-value public save repairs the other process, then a changed
+        // value updates both. The DB transaction is released before projection.
+        save(&core, true).await;
+        assert!(tasks(a) && tasks(b));
+        save(&core, false).await;
+        assert!(!tasks(a) && !tasks(b));
+
+        let saved = a.context_path().unwrap().with_extension("saved");
+        fs::rename(a.context_path().unwrap(), &saved).unwrap();
+        fs::create_dir(a.context_path().unwrap()).unwrap();
+        save(&core, true).await; // One failed file must not stop the other projection.
+        assert!(tasks(b));
+        assert_eq!(core.builtin_tool_leases.active_count().await, 2);
+        tokio::task::yield_now().await;
+        fs::remove_dir(a.context_path().unwrap()).unwrap();
+        fs::rename(saved, a.context_path().unwrap()).unwrap();
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        assert!(tasks(a)); // Existing bounded retry repairs without another save/bind.
+        for (camp, execution, _, config) in &bindings {
+            core.builtin_tool_leases
+                .unbind(
+                    config.process_id(),
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                )
+                .await;
+            ThreadAttachmentStore::new(&core.data_dir)
+                .remove_camp(camp)
+                .unwrap();
+            fs::set_permissions(
+                core.attachment_views.root().join("camps").join(camp),
+                fs::Permissions::from_mode(0o700),
+            )
+            .unwrap();
+        }
+        fs::set_permissions(
+            core.attachment_views.root().join("camps"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        drop(core);
+        drop(bindings);
+        fs::remove_dir_all(root).unwrap();
     }
 
     // Owns the ended one-shot worker -> bound Core route -> Delivery seam.

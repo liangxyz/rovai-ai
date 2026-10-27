@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # Runtime Catalog Boundaries
@@ -41,15 +41,15 @@ Antigravity 适配器通过 `--print-timeout 0` 等待原生整轮结束，保�
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十九种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含二十种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
-普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline 保留 closed identity 和历史 reader，但不进入
+普通执行仍只来自逐平台 Admission。Cursor、暂缓公开的 Cline 与 Hermes 保留 closed identity 和历史 reader，但不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
-selector 同样不展示 Cursor 与 Cline；Command Code 进入公开目录，macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。成员选项在当前主机上继续经过 Runtime Platform Admission，Renderer 不另建平台白名单。
+selector 同样不展示 Cursor、Cline 与 Hermes；Command Code 进入公开目录，macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。成员选项在当前主机上继续经过 Runtime Platform Admission，Renderer 不另建平台白名单。
 
-`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 保留缺失资格证据，检查详情说明记录未齐备。
+`qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 在内部保留缺失资格证据，用户界面不显示资格记录未齐备的提示。
 `qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
 “稳定 / 测试 / 实验性”标签。当前主机平台在目录标题旁统一显示，机器状态徽标继续来自 Availability。
 `not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，`unsupported` 显示平台不支持。
@@ -844,3 +844,22 @@ Usage 通过 Host 冻结的原生 data root、SQLite 精确 Session/cwd/root 身
 沿共享异步 baseline/poll 策略，短 Run 或结束尾部可能缺数；未观测保持未知，不以零补齐。
 ACP Session 累计费用仅作 Session gauge，不冒充 Run 费用。Skills 只读发现原生 `.minimax`、
 `.claude`、`.codex`、`.agents` 兼容来源，MCP 使用 ACP Session 追加投影；完整隔离和真实模型资格仍按矩阵记录。
+
+## Hermes 受管 ACP
+
+Hermes 保留 `hermes-cli` 产品闭集身份，2026-10-27 按 User sequence 122 在所有平台暂缓公开。
+macOS arm64/x64、Windows x64、Linux x64 均为 NotQualified；设置、引导、成员/Skills 菜单、安装引导
+和监控筛选不提供 Hermes，也不保留占位。共享准入阻止普通发现、检查、配置和执行；不删除既有记录。
+平台状态见[准入合同](../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。保留的共享 ACP 实现直接启动官方入口，
+使用用户原生 `~/.hermes` 与精确 Session resume；无私有 Home、启动器或专用 Gateway。
+Fleet 只拥有 ACP 客户端根进程，原生共享执行端不随 Run 回收。
+
+原生配置启用 `clarify` 后，官方 ACP 的选择题及开放题权限卡片进入共享问卷不支持处理，
+不创建执行审批、不代选答案；已识别的损坏问卷也不回落授权。后继输入沿原 Session 继续。
+
+模型的普通 CLI 调用通过原生逻辑 Session 定位唯一 Conversation/活动 Run，并复用现有 lease、
+Router、回复和回执。按调用时归属，不追溯旧后台程序最初属于哪轮。其他 Runtime 不改。
+FirstPayload 只保留首次及真实规则更新，不进行压缩补发。未确认的 MCP 撤销、原生工具终止和
+增强详情不声明成功；未知输入不自动重放。具体合同见
+[Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md)，理由见
+[原生会话定位决定](../versions/v1.72/decisions.md#v1-72-d67)。
