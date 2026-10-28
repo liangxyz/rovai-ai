@@ -44,11 +44,6 @@ export function verifyAdhocMacosApp(appPath, arch, options = {}) {
       binaryPath: join(resolvedAppPath, 'Contents', 'Resources', 'bin', 'rovai-host')
     },
     {
-      label: 'rovai-core',
-      path: join(resolvedAppPath, 'Contents', 'Resources', 'bin', 'rovai-core'),
-      binaryPath: join(resolvedAppPath, 'Contents', 'Resources', 'bin', 'rovai-core')
-    },
-    {
       label: 'rovai',
       path: join(resolvedAppPath, 'Contents', 'Resources', 'bin', 'rovai'),
       binaryPath: join(resolvedAppPath, 'Contents', 'Resources', 'bin', 'rovai')

@@ -783,7 +783,7 @@ impl AgentRuntimeAdapterRegistry {
             )
         };
         if kind == AdapterKind::HermesCli {
-            return unqualified();
+            return RuntimePlatformAdmission::enabled(kind, platform);
         }
         if kind == AdapterKind::MinimaxCodeCli {
             return match platform {

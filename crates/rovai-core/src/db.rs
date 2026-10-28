@@ -7599,7 +7599,7 @@ impl Database {
                 return Err(DatabaseOpenError::contract_changed(&path));
             }
         }
-        open.revalidate()?;
+        open.revalidate_after_open()?;
         configure_runtime_connection(&connection, &path)?;
         let mut database = Self {
             execution_text: Default::default(),

@@ -1,12 +1,37 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Agent Runtime 兼容性清单
 
-## 2026-10-27 Hermes 暂缓公开
+## 2026-10-28 Hermes 普通开放全部现有平台
+
+按维护者要求，macOS arm64/x64、Windows x64、Linux x64 均采用普通 `enabled` 准入，
+发现、安装、检查、成员配置与执行均可用，不采用 Preview。Windows 连接清理只拥有捕获的客户端根进程，
+共享 Gateway 不加入其 Job；其他 Runtime 的整树 Job 保证保持。平台开放不代表已完成完整模型与能力矩阵。
+当前范围由[平台准入](contracts/runtime-platform-admission-v2.md#hermes-初始准入)与
+[连接进程所有权](contracts/managed-runtime-process-v2.md#原生共享执行端的连接进程)拥有。
+
+## 2026-10-28 Hermes 运行中插话接通
+
+官方 0.22.4 ACP slash Steer 已通过生产 Core 接入，使用既有 Native Session、Run 和 CLI 授权。
+来晚的补充由原生在同 Session 接续，Core 等所有已发出请求返回后收尾；已知 Run 结束则走普通队列。
+受控 Provider 覆盖 5 个场景；真实 `gpt-6.1-sol` 验证连续更正与文件引用、冷恢复结束竞态、CLI 归属
+及普通消息后续执行（3 个成功 Core Run、12 次主模型请求）。取消、未知不重发和明确拒绝由受控场景
+独立验证。证据见 [Core Steer 验证](research/hermes-runtime/README.md#core-steer-接通2026-10-28)。
+当前只有 macOS arm64 执行证据；不扩展为 Intel/其他平台、Desktop UI 或原生 image block 验收。
+
+## 2026-10-28 Hermes macOS 重新开放（已由全部平台普通开放取代）
+
+按 User sequence 126，macOS arm64/x64 重新开放发现、检查、安装配置、成员选择和普通执行，
+内部沿用 Preview，不显示 Preview 或资格记录未齐备提示。Windows x64 与 Linux x64 继续隐藏。
+各用户入口按 Core Admission 过滤 Hermes；原生 ACP、原生 Home、Session resume 和既有能力边界保持。
+本次沿既有平台矩阵及 Renderer owners 验证入口，不重复模型验收，也不宣称完成 Intel 实机验证。
+当前边界见[平台准入合同](contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+
+## 2026-10-27 Hermes 暂缓公开（macOS 已重新开放）
 
 按 User sequence 122，Hermes 在 macOS arm64/x64、Windows x64、Linux x64 全部撤回公开入口，
 采用既有 NotQualified 准入并从所有新使用入口隐藏，不显示待支持或实验提示。内部实现与历史证据保留；

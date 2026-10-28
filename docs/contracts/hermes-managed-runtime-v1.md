@@ -4,13 +4,13 @@ name: Hermes Managed Runtime
 version: v1
 status: accepted
 source_version: v1.72
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Hermes Managed Runtime v1
 
-`hermes-cli` 使用共享 ACP、Fleet、Run 队列、Replay Quarantine 和 Explicit Send。Hermes 尚未上线，
-原生会话定位方案直接替换私有 Home 实验，不提供迁移、旧启动器回退或双版本协商。
+`hermes-cli` 使用共享 ACP、Fleet、Run 队列、Replay Quarantine 和 Explicit Send。
+原生会话定位方案已直接替换未发布的私有 Home 实验，不提供迁移、旧启动器回退或双版本协商。
 
 ## 安装与进程
 
@@ -59,7 +59,18 @@ Ready 声明 `context.charter.first_payload`、`hermes.native_session_cli`、模
 撤下 managed system、压缩保留、signal_driven/best_effort 旧能力。缓存按现有发现机制重新探测，
 不因能力缓存变化轮换 Session。Ready 不是所有工具、终端后端或平台已验收的证明。
 
-官方 ACP 无同轮插话接口时，输入进入既有后续队列；不维护私有 steer 通道。
+运行中补充输入通过官方 `session/prompt` 的 `/steer` 交付，普通消息仍进入既有后续队列。
+按 User sequence 130–134，接受同一原生 Session 内“当前轮插入，来晚则紧接着执行”的原生行为，
+不要求一项 Core Run 只对应一项原生 prompt。已知 Run 结束、取消或 owner 改变时不再发送；
+检查后才发生的原生结束不丢弃已提交输入，也不自动重复投递。
+Core 保留原 Run／epoch／Binding 与活动 CLI lease，直到原请求及所有已提交补充请求返回，
+再统一收尾；期间的原生事件和 CLI Send 仍归这项 Run，普通 waiting 消息不会提前启动。
+接收回执取匹配 RPC 的 `end_turn`，只表示原生已处理本次提交，不证明同一原生轮次消费；
+`admitted_turn_failed` 证明已接收但执行失败，失败保留到 Run 终态。明确协议/参数拒绝回普通队列，
+取消、连接丢失及其他不明结果保留未知，不重发。补充请求可能执行完整任务，不套用短 Steer ACK
+超时；生命周期仍使用现有 Run 取消、执行预算和连接退出处理。
+不解析 slash 通知或模型正文判断回执，不维护私有 Gateway 通道。
+边界与验证见[Core Steer 验证](../research/hermes-runtime/README.md#core-steer-接通2026-10-28)。
 取消直接发 `session/cancel`，按真实终态处理。ACP 退出不能证明已提交工具停止；无法确认时保留未知。
 
 ## 内置 CLI 的原生会话来源
@@ -153,8 +164,8 @@ ACP 图片沿原生媒体流程，能力取决于配置及模型。
 
 ## 准入
 
-2026-10-27 按 User sequence 122 暂缓公开：macOS arm64/x64、Windows x64、Linux x64 全部为
-Not Qualified，用户设置、引导、选择菜单、安装指南与监控筛选不展示 Hermes。普通发现、检查、
-配置与执行服从共享准入；内部实现及已有身份、输入账本和证据保留，不新增迁移或运行回退。
-现有原生执行证据仍限于已记录的 arm64 安装，不能替代公开准入。具体未覆盖路径见
+2026-10-28 按维护者明确要求，macOS arm64/x64、Windows x64、Linux x64 均采用普通 `enabled` 状态，
+允许发现、检查、配置与执行；不采用 Preview，也不显示实验或资格缺失提示。用户设置、引导、
+选择菜单、安装指南与监控筛选均消费共享准入。Windows 连接采用上述根进程所有权，不将共享 Gateway 放入 Run 的 Job。
+已有身份、输入账本和证据保留，不新增迁移或运行回退。开放不代表完成各平台完整能力矩阵；具体未覆盖路径见
 [验证记录](../research/hermes-runtime/README.md)，平台状态见[准入合同](runtime-platform-admission-v2.md#hermes-初始准入)。

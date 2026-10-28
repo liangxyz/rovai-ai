@@ -1,13 +1,27 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-10-14
+last_updated: 2026-10-28
 ---
 
 # macOS 构建、签名与打包
 
 当前本地桌面交付目标是 macOS 14+ Apple Silicon。`package:mac` 和 `dist:mac` 固定生成
 arm64 产物；正式签名 workflow 另外生成 x64 产物并组合两种架构的更新清单。
+
+## 桌面包内容
+
+macOS 与 Windows Desktop 只分发 `rovai-host` 和 `rovai` 两个 Rust sidecar。Host 内嵌 Core
+运行层，独立 `rovai-core` 可执行文件只保留在开发构建与兼容测试中，不进入 Desktop 安装包、
+签名列表或发布验证清单。
+
+ASAR 只包含 `out/main`、`out/preload`、`out/renderer`、`out/execution-web` 和包元数据。
+`out/web` 通过 `extraResources` 单独复制到 `web-ui`，供 Rust Host 读取；不再同时放入 ASAR。
+验收截图和其他 `out` 子目录不属于发行内容。
+
+根 `dependencies` 只声明 Main 运行时仍需从 npm 包加载的依赖。已编译进 Renderer/Web 的前端库
+放在 `devDependencies`，构建时安装，发行时不再携带完整 npm 包。新增依赖时按实际读取路径选择，
+不能整体排除 `node_modules`，也不能因为只在构建阶段引用就要求用户额外安装它。
 
 ## 构建
 
@@ -180,12 +194,12 @@ Apple Developer ID 身份兼容。切换到 Developer ID 的第一个版本，�
 `/Applications` 时，必须使用带完整验证门的 `package:mac:daily` 和 `install:mac:daily`。任何本地 ad-hoc
 产物都不能作为自动升级签名连续性或正式分发签名的证据。
 
-检查签名：
+检查 App、Host 与 CLI 签名：
 
 ```bash
 codesign --verify --deep --strict "dist/mac-arm64/Rovai AI.app"
 codesign --verify --strict \
-  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-core"
+  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-host"
 codesign --verify --strict \
   "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai"
 ```
@@ -193,7 +207,7 @@ codesign --verify --strict \
 仓库签名 workflow 与本地安装入口相互独立：它从受保护的 `release-signing` 环境导入 Developer ID
 Application 证书，校验 SHA-256 指纹和 Team ID，使用现有 Hardened Runtime entitlements，分别公证并
 贴票 App 与 DMG。每个架构的 verifier 检查 Apple Developer ID 签名链、Team ID、designated requirement、
-App/CLI/Core/Host 架构、App/DMG 票据和 Gatekeeper 准入；任何一项失败都不得发布。本地 daily 命令不得
+App/Host/CLI 架构、App/DMG 票据和 Gatekeeper 准入；任何一项失败都不得发布。本地 daily 命令不得
 调用或放宽这两个 Release 入口。证书、密码和公证 API Key 不得写入仓库。
 
 DMG 贴票和 verifier 的 App、DMG、更新 ZIP 票据验证使用同一个有限重试入口。仅在
@@ -237,7 +251,7 @@ pnpm package:mac:daily
 pnpm install:mac:daily --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
 ```
 
-`package:mac:daily` 不读取本机 Keychain 证书；构建后立即验证 App、Core、CLI 的架构、ad-hoc 签名、
+`package:mac:daily` 不读取本机 Keychain 证书；构建后立即验证 App、Host、CLI 的架构、ad-hoc 签名、
 CDHash designated requirement 与 Bundle ID，并拒绝证书签名或缺少有效 ad-hoc 签名的候选。
 `install:mac:daily` 只接受 `/Applications/Rovai AI.app` 作为规范目标；它在修改日常路径前验证源 bundle，
 并用 no-follow 路径项检查拒绝任何已有 backup 和符号链接 target，包括 dangling symlink。复制到目标同
@@ -274,21 +288,21 @@ Ready。
 
 ## 产物检查
 
-确认架构和内置 Core/CLI：
+确认架构和内置 Host/CLI：
 
 ```bash
 file "dist/mac-arm64/Rovai AI.app/Contents/MacOS/Rovai AI"
-file "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-core"
+file "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-host"
 file "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai"
 ```
 
-需要确认本次 release Core 已进入 App 时，可比较 Mach-O UUID：
+需要确认本次 release Host 已进入 App 时，可比较 Mach-O UUID（以下以 arm64 staging 为例）：
 
 ```bash
-dwarfdump --uuid resources/bin/rovai-core
+dwarfdump --uuid resources/bin/macos-arm64/rovai-host
 dwarfdump --uuid \
-  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-core"
-dwarfdump --uuid resources/bin/rovai
+  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-host"
+dwarfdump --uuid resources/bin/macos-arm64/rovai
 dwarfdump --uuid \
   "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai"
 ```

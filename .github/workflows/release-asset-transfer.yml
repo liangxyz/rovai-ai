@@ -1,0 +1,129 @@
+name: Transfer verified Release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Verified release source, workflow runs, notes digest and Desktop file digests
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release-asset-transfer
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TRANSFER_MANIFEST: ${{ inputs.manifest }}
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26
+      - name: Transfer the exact verified Desktop binaries to the unpublished draft
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict'
+          import { createHash } from 'node:crypto'
+          import { createReadStream } from 'node:fs'
+          import { mkdir, readdir, lstat } from 'node:fs/promises'
+          import { execFile } from 'node:child_process'
+          import { promisify } from 'node:util'
+          import { join } from 'node:path'
+          const execute = promisify(execFile)
+          const repo = process.env.GH_REPO
+          const manifest = JSON.parse(process.env.TRANSFER_MANIFEST)
+          assert.match(manifest.source, /^[a-f0-9]{40}$/)
+          assert.match(manifest.version, /^\d+\.\d+\.\d+$/)
+          assert.match(manifest.notesSha256, /^[a-f0-9]{64}$/)
+          const gh = async args => (await execute('gh', args, { maxBuffer: 8 * 1024 * 1024 })).stdout
+          const api = async path => JSON.parse(await gh(['api', `repos/${repo}/${path}`]))
+          const paths = { mac: 'macos-signed-build.yml', windows: 'windows-package.yml', server: 'full-check.yml', windowsDesktop: 'full-check.yml', windowsRuntime: 'full-check.yml' }
+          assert.deepEqual(Object.keys(manifest.runs).sort(), Object.keys(paths).sort())
+          for (const [name, id] of Object.entries(manifest.runs)) {
+            assert.ok(Number.isSafeInteger(id) && id > 0)
+            const run = await api(`actions/runs/${id}`)
+            assert.equal(run.head_sha, manifest.source)
+            assert.equal(run.conclusion, 'success')
+            assert.equal(run.path, `.github/workflows/${paths[name]}`)
+          }
+          const names = ['arm64.dmg', 'arm64.zip', 'x64.dmg', 'x64.zip', 'x64.exe'].map(suffix => `Rovai-AI-${manifest.version}-${suffix}`)
+          assert.deepEqual(manifest.files.map(file => file.name).sort(), names.sort())
+          for (const file of manifest.files) {
+            assert.match(file.sha256, /^[a-f0-9]{64}$/)
+            assert.ok(Number.isSafeInteger(file.size) && file.size > 0)
+          }
+          const draft = async () => {
+            const matches = (await api('releases?per_page=100')).filter(release => release.tag_name === `v${manifest.version}`)
+            assert.equal(matches.length, 1, 'Require one existing release draft')
+            const release = matches[0]
+            assert.equal(release.draft, true, 'Transfer only to an unpublished draft')
+            assert.equal(release.prerelease, false)
+            assert.equal(release.target_commitish, manifest.source)
+            assert.equal(createHash('sha256').update(release.body.trim()).digest('hex'), manifest.notesSha256)
+            return release
+          }
+          await draft()
+          const root = join(process.env.RUNNER_TEMP, 'verified-release-transfer')
+          await mkdir(root, { recursive: true })
+          await Promise.all([
+            gh(['run', 'download', String(manifest.runs.mac), '--repo', repo, '--name', 'rovai-macos-signed', '--dir', join(root, 'mac')]),
+            gh(['run', 'download', String(manifest.runs.windows), '--repo', repo, '--name', `rovai-windows-x64-unsigned-${manifest.source}`, '--dir', join(root, 'windows')])
+          ])
+          const files = new Map()
+          async function walk(directory) {
+            for (const entry of await readdir(directory, { withFileTypes: true })) {
+              const path = join(directory, entry.name)
+              if (entry.isDirectory()) await walk(path)
+              else if (names.includes(entry.name)) {
+                assert.equal((await lstat(path)).isFile(), true)
+                assert.equal(files.has(entry.name), false, 'Ambiguous artifact file')
+                files.set(entry.name, path)
+              }
+            }
+          }
+          await walk(root)
+          assert.equal(files.size, names.length)
+          for (const file of manifest.files) {
+            const path = files.get(file.name)
+            assert.equal((await lstat(path)).size, file.size)
+            const hash = createHash('sha256')
+            for await (const chunk of createReadStream(path)) hash.update(chunk)
+            assert.equal(hash.digest('hex'), file.sha256, file.name)
+          }
+          const queue = [...manifest.files]
+          await Promise.all(Array.from({ length: 4 }, async () => {
+            while (queue.length) {
+              const file = queue.shift()
+              const release = await draft()
+              const existing = release.assets.find(asset => asset.name === file.name)
+              if (existing) {
+                assert.equal(existing.state, 'uploaded')
+                assert.equal(existing.size, file.size)
+                assert.equal(existing.digest, `sha256:${file.sha256}`)
+              } else {
+                console.log(`Transferring verified artifact: ${file.name}`)
+                await gh(['release', 'upload', `v${manifest.version}`, files.get(file.name), '--repo', repo])
+              }
+            }
+          }))
+          const release = await draft()
+          for (const file of manifest.files) {
+            const asset = release.assets.find(asset => asset.name === file.name)
+            assert.equal(asset?.state, 'uploaded')
+            assert.equal(asset.size, file.size)
+            assert.equal(asset.digest, `sha256:${file.sha256}`)
+          }
+          console.log('Verified Desktop binaries transferred. Draft remains unpublished; final publication checks are still required.')
+          JS

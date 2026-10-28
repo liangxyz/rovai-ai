@@ -11,6 +11,40 @@ importers:
 
   .:
     dependencies:
+      '@larksuiteoapi/node-sdk':
+        specifier: 1.73.0
+        version: 1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+      acorn:
+        specifier: 8.15.0
+        version: 8.15.0
+      dingtalk-stream:
+        specifier: 2.1.6-beta.1
+        version: 2.1.6-beta.1(supports-color@7.2.0)
+      electron-updater:
+        specifier: 6.8.9
+        version: 6.8.9(supports-color@7.2.0)
+      micromark-util-decode-string:
+        specifier: 2.0.1
+        version: 2.0.1
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
+      qrcode:
+        specifier: 1.5.4
+        version: 1.5.4
+      remark-cjk-friendly:
+        specifier: 2.3.2
+        version: 2.3.2(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(unified@11.0.5)
+      remark-cjk-friendly-gfm-strikethrough:
+        specifier: 2.3.1
+        version: 2.3.1(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(supports-color@7.2.0)(unified@11.0.5)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1(supports-color@7.2.0)
+      remark-stringify:
+        specifier: ^11.0.0
+        version: 11.0.0
+    devDependencies:
       '@codemirror/language':
         specifier: 6.12.4
         version: 6.12.4
@@ -26,9 +60,6 @@ importers:
       '@codemirror/view':
         specifier: 6.43.11
         version: 6.43.11
-      '@larksuiteoapi/node-sdk':
-        specifier: 1.73.0
-        version: 1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       '@lexical/extension':
         specifier: 0.50.0
         version: 0.50.0(typescript@6.0.3)
@@ -59,67 +90,6 @@ importers:
       '@radix-ui/react-tabs':
         specifier: 1.1.17
         version: 1.1.17(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@uiw/react-codemirror':
-        specifier: 4.25.11
-        version: 4.25.11(@babel/runtime@8.0.0)(@codemirror/autocomplete@6.20.3)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.2)(@codemirror/state@6.7.4)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.43.11)(codemirror@6.0.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      acorn:
-        specifier: 8.15.0
-        version: 8.15.0
-      cron-parser:
-        specifier: 5.10.0
-        version: 5.10.0
-      dingtalk-stream:
-        specifier: 2.1.6-beta.1
-        version: 2.1.6-beta.1(supports-color@7.2.0)
-      electron-updater:
-        specifier: 6.8.9
-        version: 6.8.9(supports-color@7.2.0)
-      lexical:
-        specifier: 0.50.0
-        version: 0.50.0(typescript@6.0.3)
-      micromark-util-decode-string:
-        specifier: 2.0.1
-        version: 2.0.1
-      parse5:
-        specifier: 7.3.0
-        version: 7.3.0
-      pinyin-pro:
-        specifier: 3.29.5
-        version: 3.29.5
-      qrcode:
-        specifier: 1.5.4
-        version: 1.5.4
-      qrcode.react:
-        specifier: 4.2.0
-        version: 4.2.0(react@19.2.7)
-      react:
-        specifier: 19.2.7
-        version: 19.2.7
-      react-dom:
-        specifier: 19.2.7
-        version: 19.2.7(react@19.2.7)
-      react-markdown:
-        specifier: ^10.1.0
-        version: 10.1.0(@types/react@19.2.17)(react@19.2.7)(supports-color@7.2.0)
-      remark-cjk-friendly:
-        specifier: 2.3.2
-        version: 2.3.2(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(unified@11.0.5)
-      remark-cjk-friendly-gfm-strikethrough:
-        specifier: 2.3.1
-        version: 2.3.1(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(supports-color@7.2.0)(unified@11.0.5)
-      remark-gfm:
-        specifier: ^4.0.1
-        version: 4.0.1(supports-color@7.2.0)
-      remark-stringify:
-        specifier: ^11.0.0
-        version: 11.0.0
-      style-mod:
-        specifier: 4.1.3
-        version: 4.1.3
-      yaml:
-        specifier: 2.9.0
-        version: 2.9.0
-    devDependencies:
       '@types/mdast':
         specifier: ^4.0.4
         version: 4.0.4
@@ -135,12 +105,18 @@ importers:
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.17)
+      '@uiw/react-codemirror':
+        specifier: 4.25.11
+        version: 4.25.11(@babel/runtime@8.0.0)(@codemirror/autocomplete@6.20.3)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.2)(@codemirror/state@6.7.4)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.43.11)(codemirror@6.0.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@vitejs/plugin-react':
         specifier: 5.2.0
         version: 5.2.0(supports-color@7.2.0)(vite@7.3.6(@types/node@26.1.1)(jiti@2.7.0)(yaml@2.9.0))
       ajv:
         specifier: 8.20.0
         version: 8.20.0
+      cron-parser:
+        specifier: 5.10.0
+        version: 5.10.0
       electron:
         specifier: 43.1.1
         version: 43.1.1(supports-color@7.2.0)
@@ -153,12 +129,33 @@ importers:
       jsqr:
         specifier: 1.4.0
         version: 1.4.0
+      lexical:
+        specifier: 0.50.0
+        version: 0.50.0(typescript@6.0.3)
+      pinyin-pro:
+        specifier: 3.29.5
+        version: 3.29.5
+      qrcode.react:
+        specifier: 4.2.0
+        version: 4.2.0(react@19.2.7)
       rcedit:
         specifier: 5.0.2
         version: 5.0.2
+      react:
+        specifier: 19.2.7
+        version: 19.2.7
+      react-dom:
+        specifier: 19.2.7
+        version: 19.2.7(react@19.2.7)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.17)(react@19.2.7)(supports-color@7.2.0)
       remark-parse:
         specifier: 11.0.0
         version: 11.0.0(supports-color@7.2.0)
+      style-mod:
+        specifier: 4.1.3
+        version: 4.1.3
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -171,6 +168,9 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@26.1.1)(vite@7.3.6(@types/node@26.1.1)(jiti@2.7.0)(yaml@2.9.0))
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
 
   apps/desktop: {}
 

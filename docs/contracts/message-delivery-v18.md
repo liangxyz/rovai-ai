@@ -5,7 +5,7 @@ version: 18
 status: accepted
 authority: public-message-delivery-route-reconciliation
 source_version: v1.72
-last_updated: 2026-10-15
+last_updated: 2026-10-28
 ---
 
 # Message Delivery v18
@@ -57,3 +57,14 @@ RUN_INPUT。原生过载错误只映射固定安全文案，不输出任意 Prov
 及 `sourceAvailable`。accepted 只表示原执行运行时接收；已转普通队列不能伪装为原执行已接收。
 详情通过既有消息 around 窗口按需读取原正文，并由会话历史导航打开来源；不创建独立输入内容 API。
 旧输入未保存标记时不补造历史 sequence，也不从消息时间推断其相对 command 的位置。
+
+## Hermes 原生 Session 补充输入
+
+Hermes 官方 ACP 的稳定 0.x 版本自 0.22.4 起使用 `session/prompt` 的 `/steer`，与普通输入共用物化和投递账本。
+资格复用冻结程序身份、协议、版本和实际 Native Binding；该适配器不要求已取消使用的配置摘要。
+匹配补充 RPC 的 `end_turn` 确认原生处理提交，不承诺同一原生轮次。原生可能在结束竞争中将其
+作为同 Session 的下一项任务；Core 仍保留发出时的 Run／epoch，直到原请求和已发出的补充请求
+全部返回才结束，期间输出、CLI 授权、回复锚点和回执均保持原归属。
+明确未接受则回普通队列；`admitted_turn_failed` 记录接收及 Run 失败；其他不明结果不自动重发。
+已知 Run 结束或取消则禁止新增投递。取消走原生 `session/cancel`，只清理自有 ACP，
+不因接通 Steer 而把共享 Gateway 纳入回收。详见 [Hermes 合同](hermes-managed-runtime-v1.md#session-与输入)。

@@ -63,6 +63,8 @@ Activity、Execution 与文件 Tabs 占右侧共享工作区。详情浮层仍�
 文件链接或 File Change 卡片选择内容，不伪造默认文件；关闭最后一个 Tab 仍自动收起预览。
 切换 Camp 时，各 Camp 的 Tab 顺序、当前 Tab 与 Pane 可见性在本窗口内独立记忆；关闭 App 后不恢复。返回 Camp
 直接复用热预览内容、活动标签和阅读位置；只有被淘汰或未加载的内容才按需读取活动标签，不等待版本检查。
+执行位置为右侧且当前显示文件、File Change 或 Mission 活动时，发送或返回 Thread 不自动切到执行；
+显式执行入口仍正常切换，具体消费与恢复边界见[执行进入规则](conversation-workspace.md#camp-执行过程)。
 预览内链接成功打开当前 Camp 工作区内的普通文件后，该子 Tab 使用 Main 签发的独立工作区恢复来源；关闭或删除父 Tab
 不影响它再次重验。未取得可重验业务 source 的项目外 child 或临时授权派生文件在热集合中保留原能力；能力撤销后只保留 unavailable shell，
 不显示新的恢复入口或状态装饰。

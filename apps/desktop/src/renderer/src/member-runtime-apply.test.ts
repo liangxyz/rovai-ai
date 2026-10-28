@@ -54,13 +54,18 @@ describe('applying a saved member Runtime configuration', () => {
   it('protects pending Runtime drafts, ongoing edits and platform-frozen configurations', () => {
     expect(runtimeApplyEligibility(member, configuration, { runtimeDirty: true, busy: false }, environment)).toBe('draft')
     expect(runtimeApplyEligibility(member, configuration, { runtimeDirty: false, busy: true }, environment)).toBe('busy')
-    for (const adapterKind of ['cursor-agent', 'cline-cli', 'hermes-cli'] as const) {
+    for (const adapterKind of ['cursor-agent', 'cline-cli'] as const) {
       expect(runtimeApplyEligibility({ ...member, runtimeConfiguration: { ...configuration, adapterKind } }, configuration, undefined, environment)).toBe('locked')
     }
     const commandMember = { ...member, runtimeConfiguration: { ...configuration, adapterKind: 'command-code-cli' as const } }
     for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
       const admissions: RuntimePlatformAdmission[] = [{ runtimeKind: 'command-code-cli', platform, status: 'preview', reasonCode: 'runtime_platform.qualification_evidence_missing', evidenceRevision: null }]
       expect(runtimeApplyEligibility(commandMember, configuration, undefined, { hostPlatform: platform, admissions })).toBe('available')
+    }
+    const hermesMember = { ...member, runtimeConfiguration: { ...configuration, adapterKind: 'hermes-cli' as const } }
+    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
+      const admissions: RuntimePlatformAdmission[] = [{ runtimeKind: 'hermes-cli', platform, status: 'enabled', reasonCode: null, evidenceRevision: null }]
+      expect(runtimeApplyEligibility(hermesMember, configuration, undefined, { hostPlatform: platform, admissions })).toBe('available')
     }
     const target = { ...member, runtimeConfiguration: configuration }
     const admissions = [{ platform: 'windows-x64', runtimeKind: 'codex-cli', status: 'not_qualified' }] as RuntimePlatformAdmission[]

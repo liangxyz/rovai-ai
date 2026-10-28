@@ -3,7 +3,7 @@ document_type: development-guide
 authority: windows-desktop-build-packaging-routing
 status: implemented-pending-release-qualification
 source_version: v1.15
-last_updated: 2026-10-03
+last_updated: 2026-10-28
 ---
 
 # Windows x64 构建、打包与发布
@@ -39,7 +39,7 @@ pnpm accept:windows:installer
 `package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer。外层产品名和安装目录为
 `Rovai AI`，内部兼容可执行文件继续是 `Rovai-ai.exe`，发布 artifact 使用 URL 安全的
 `Rovai-AI-<version>-x64.exe`。两条命令都验证
-App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与隔离 Core health。`accept:windows:installer`
+App/Host/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与 Host 内嵌 Core 的隔离 health。`accept:windows:installer`
 执行 per-user clean install、已安装 App Onboarding、同版本 upgrade、默认卸载和数据保留，并把报告与截图写入
 `dist/windows-installation-acceptance/`。`accept:planned-shutdown` 默认使用 `dist/win-unpacked/Rovai-ai.exe`，
 在隔离 `userData` 中验证真实 Runtime 运行期间的受控退出、子进程回收和重启恢复。正式签名构建使用
@@ -68,7 +68,8 @@ GitHub/manifest/内嵌日志保留完整原文的发布流程见[共用发布源
 ## Target-isolated staging
 
 每次构建使用目标专属 sidecar staging，至少区分 macOS 与 Windows x64。Windows App 只接收当前构建生成且经过
-hash/PE/manifest 检查的 `rovai-core.exe` 与 `rovai.exe`；不得复用未清理的 `resources/bin`、从 PATH 拾取同名文件，
+hash/PE/manifest 检查的 `rovai-host.exe` 与 `rovai.exe`；独立 `rovai-core.exe` 不随 Desktop 分发。
+ASAR、外置 Web 和前端构建依赖的共同边界见[桌面包内容](packaging.md#桌面包内容)。不得复用未清理的 `resources/bin`、从 PATH 拾取同名文件，
 或让两个 target 的输出互相覆盖。
 
 三个 shipped EXE 都嵌入 `longPathAware` 和正确的 x64/version resources。Host long-path policy 是诊断事实；App 与
@@ -127,7 +128,7 @@ pnpm accept:windows:installer-shutdown
 
 ## 正式签名与发布验证
 
-正式发布分别 Authenticode-sign Electron EXE、`rovai-core.exe`、`rovai.exe` 和 installer，使用 SHA-256 与 RFC 3161
+正式发布分别 Authenticode-sign Electron EXE、`rovai-host.exe`、`rovai.exe` 和 installer，使用 SHA-256 与 RFC 3161
 timestamp。release verifier 对每个 PE 检查 x64、long-path manifest、version/icon resources、当前发布 signer allowlist、
 timestamp 与 release-manifest hash。SmartScreen reputation 与签名有效性分别记录，不能用“签名有效”推断 reputation。
 

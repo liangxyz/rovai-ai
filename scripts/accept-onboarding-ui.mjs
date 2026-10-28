@@ -492,7 +492,7 @@ async function launchApp(port) {
     ? appPath
     : join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   if (process.platform === 'win32' && !existsSync(dataDir)) {
-    const preparer = join(dirname(executable), 'resources', 'bin', 'rovai-core.exe')
+    const preparer = join(dirname(executable), 'resources', 'bin', 'rovai-host.exe')
     const prepared = spawnSync(preparer, ['--prepare-windows-data-root', dataDir], {
       cwd: root,
       encoding: 'utf8'

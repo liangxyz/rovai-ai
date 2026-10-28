@@ -4960,7 +4960,7 @@ export function SettingsView({
             onPreferencesChange={onGeneralPreferencesChange}
           />
         )}
-        <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><NativeSkillsSettings /></Activity>
+        <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><NativeSkillsSettings health={health} /></Activity>
         <Activity mode={section === 'toolbox' ? 'visible' : 'hidden'}><ToolboxSettings agents={agents} /></Activity>
         <Activity mode={section === 'mcp' ? 'visible' : 'hidden'}><McpSettings agents={agents} platform={platform} /></Activity>
         <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} commonEnvironmentReturn={commonEnvironmentReturn}
@@ -4980,7 +4980,7 @@ export function SettingsView({
           <NotificationSettings />
         )}
         {section === 'monitoring' && (
-          <RuntimeMonitoring platform={platform} />
+          <RuntimeMonitoring platform={platform} health={health} />
         )}
         {section === 'diagnostics' && (
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} platform={platform} />

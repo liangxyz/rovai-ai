@@ -60,6 +60,42 @@ node scripts/probe-steer-version.mjs /absolute/new-fixture /absolute/bin/rovai-c
 不用“最低兼容”。合并后产品证据见[Steer 收口报告](../research/runtime-monitoring/steer-hardening-2026-10-15.md)，
 此前低版本边界见[低版本验证报告](../research/runtime-monitoring/steer-low-versions-2026-10-15.md)。
 
+### Hermes 原生 Steer 边界探针
+
+Hermes 0.22.4 的 slash Steer 已接入生产 Core。下面保留的早期原生探针不经过 Core、CLI 或 UI，
+不能替代生产链路验收：
+
+```sh
+node scripts/probe-hermes-steer.mjs /absolute/official-v0.22.4-source /absolute/prepared-python
+node scripts/probe-hermes-steer.mjs /absolute/official-v0.22.4-source /absolute/prepared-python --real-model
+```
+
+源码 checkout 须位于官方 tag `v0.22.4`，含原生 `install-stamp.json`；Python 须已具备该安装依赖。
+脚本在新建临时目录克隆未修改源码，并建立隔离测试用户 Home、项目和原生 `.hermes`。
+每个夹具仅有一个共享 Gateway；退出只停止夹具创建的 ACP 与 Gateway，不访问日常 Session。
+默认通过 loopback Provider 验证正常插话、冷恢复、延迟终态、ACP 关闭后的后继执行及图片排队。
+`--real-model` 需要当前任务的真实模型调用授权，只从本机现有配置读取 Responses Provider，
+通过内存 relay 使用凭据；不向夹具文件写真实凭据，不修改日常配置。它验证两个原生任务的实际文件结果，
+不重跑受控竞态。原始 `result.json` 与日志保留在私有夹具，只公开白名单脱敏摘要。
+当前结果与缺口见[Hermes 实测](../research/hermes-runtime/README.md#0224-原生-acp-steer-实测2026-10-28)。
+
+生产链路使用同样的未补丁官方源码与独立测试用户 Home，先构建本分支 Core 和 CLI：
+
+```bash
+cargo build -p rovai-core --bin rovai-core --bin rovai
+node scripts/smoke-hermes-steer.mjs /absolute/official-v0.22.4-source /absolute/prepared-python
+node scripts/smoke-hermes-steer.mjs /absolute/official-v0.22.4-source /absolute/prepared-python --real-model
+```
+
+默认受控 Provider 验证连续输入与文件引用、原 Session 冷恢复、延迟原终态后的原生后继与 CLI 归属、
+普通队列、取消、丢失回执不重发和明确拒绝回队列。传输延迟/丢帧/拒绝只在验收代理中发生，不修改
+上游或生产协议。真实模型模式只转发 Provider 字节，凭据只在 relay 内存；运行前须有模型使用授权。
+最终证据与失败尝试保留在[Core Steer 验证](../research/hermes-runtime/README.md#core-steer-接通2026-10-28)。
+扩展既有 `active_input_receipts_preserve_the_original_prompt_and_fence_late_sources`，拥有多请求终态合并、
+两种返回顺序、已接受执行失败、拒绝、取消与未知；扩展 `active_inputs_preserve_initial_context_and_unsubmitted_sources`
+验证 Hermes 无配置摘要时仍复核 Run/epoch/终态。新增 Rust 测试函数为零。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib active_input`。
+
 ## MiniMax Code 控制服务验收
 
 先构建配套 Core/CLI，再用实际安装入口运行：
@@ -125,6 +161,12 @@ Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease�
 使用未补丁官方源码、共享测试用户 Home、预先启动 Gateway、隔离 Core/data/Skills/MCP 与受控 Provider。
 最低 Rust 命令 `cargo test --workspace` 与 `cargo test -p rovai-core --features slow-tests,extended-tests --lib hermes`。
 实际结果见 [实施记录](../versions/v1.72/hermes-first-input-implementation.md)，不等同真实付费模型或跨平台验收。
+
+Hermes 全平台普通开放扩展既有 Admission 矩阵、诊断和 Renderer owners；不新增 Rust 测试函数。
+Windows 的 `managed_process::tests::windows_job_contains_an_immediate_grandchild_after_leader_exit`
+同时覆盖连接根进程的归属、强制终止和 Drop 后共享服务仍存活；其原有整树 Job 断言保留。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib runtime_platform_admission::`
+及 `cargo test -p rovai-core --features extended-tests --lib managed_process::`，默认 workspace 仍须通过。
 
 Web 长粘贴扩展既有 Host HTTP 与浏览器适配/恢复 owners；schema 161→162 的 DDL 失败回滚
 无法由 HTTP 测试证明，新增一个复用 schema-only fixture 的迁移 owner。准入与最小命令见

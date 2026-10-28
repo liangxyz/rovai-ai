@@ -191,7 +191,8 @@ jobs:
           ROVAI_SERVER_BIN: ${{ github.workspace }}/out/server/${{ matrix.target }}/rovai-server
           ROVAI_SERVER_RELEASE_DIR: ${{ github.workspace }}/out/server/releases/${{ matrix.target }}
           ROVAI_WEB_UI: ${{ github.workspace }}/out/server/${{ matrix.target }}/web-ui
-        run: node --test scripts/lib/host-lifecycle.test.mjs scripts/lib/host-web.test.mjs scripts/lib/host-web-channels.test.mjs scripts/lib/server-entry.test.mjs scripts/lib/server-install.test.mjs
+        # Each file starts isolated Host/Core processes; avoid competing cold starts on small runners.
+        run: node --test --test-concurrency=1 scripts/lib/host-lifecycle.test.mjs scripts/lib/host-web.test.mjs scripts/lib/host-web-channels.test.mjs scripts/lib/server-entry.test.mjs scripts/lib/server-install.test.mjs
       - name: Upload checksummed native archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-09-27
+last_updated: 2026-10-28
 ---
 
 # 本地开发与 App 隔离流程
@@ -36,7 +36,7 @@ Core 必须在创建、修复或清理 Skill Revision 前失败。Core 会在打
 
 Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等于 Electron `userData`。Desktop 先由
 已打包的 `rovai.exe --prepare-windows-bootstrap-root <instance-key>` 原生创建独立私有 Electron 壳层 profile，绑定后
-判定 single-instance；只有 primary 在 `app.ready` 前调用 `rovai-core.exe --prepare-windows-data-root <root>` 准备正式布局，把 Core
+判定 single-instance；只有 primary 在 `app.ready` 前调用 `rovai-host.exe --prepare-windows-data-root <root>` 准备正式布局，把 Core
 绑定到 `<root>\Core`，把 Electron `userData` / `sessionData` 分别绑定到
 `<root>\Electron\User Data` / `<root>\Electron\Session Data`，并将隔离 Skill Library 放在
 `<root>\Core\managed-skill-library`。验收方必须传入一个尚未被普通 `mkdir` 以继承 ACL 创建的目标 root；
@@ -173,7 +173,7 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验�
 `pnpm install:mac:daily` 安装门。提升前必须：
 
 1. 完成隔离 App 验收；
-2. 验证待安装 `.app`、内置 Core 和 CLI 的签名与目标架构，并把它暂存到日常安装目录所在文件系统中的
+2. 验证待安装 `.app`、内置 Host 和 CLI 的签名与目标架构，并把它暂存到日常安装目录所在文件系统中的
    唯一路径；
 3. 确认日常安装目标只能是 `/Applications/Rovai AI.app`；暂存和备份路径必须是同一父目录中的精确
    绝对路径，备份路径尚不存在；
@@ -207,7 +207,7 @@ pnpm install:mac:daily --backup "/Applications/Rovai AI.backup-before-<timestamp
    `package:mac:daily` 的 ad-hoc 签名、Bundle ID 与架构验证；
 2. 用 `install:mac:daily` 把新 bundle 复制到日常安装目录的唯一暂存路径；脚本验证暂存 bundle 后，将旧
    App 原子改名到不存在的显式备份路径，再把暂存 App 原子改名到规范路径，不修改 `userData`；
-3. 脚本从规范安装路径第三次验证新 App、Core 和 CLI；任一复制、改名或验证失败时，在不扩大清理范围的
+3. 脚本从规范安装路径第三次验证新 App、Host 和 CLI；任一复制、改名或验证失败时，在不扩大清理范围的
    前提下恢复旧安装。若回滚本身受宿主故障阻断，以脚本报告的规范路径和备份状态为准，不得宣称旧安装
    已恢复。随后确认记录的旧进程仍存活；
 4. 将结果表述为“新版本已安装、当前进程仍是旧版本”，不把磁盘替换误报为热升级，也不在旧实例仍运行时

@@ -493,8 +493,8 @@ function packagedAppExecutable() {
 
 function packagedCoreExecutable() {
   return process.platform === 'win32'
-    ? join(resolve(appPath, '..'), 'resources', 'bin', 'rovai-core.exe')
-    : join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')
+    ? join(resolve(appPath, '..'), 'resources', 'bin', 'rovai-host.exe')
+    : join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host')
 }
 
 function parseShutdownResult(stderr) {

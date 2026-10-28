@@ -26,7 +26,7 @@ import {
 import { MemberAvatar } from './MemberAvatar'
 import { builtinMemberPresetsForLanguage, type BuiltinMemberPreset } from './member-presets'
 import { useInterfaceLanguage, useUiText , uiAttribute } from './interface-language'
-import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
+import { visibleProductRuntimes } from './runtime-products'
 import {
   runtimeAvailabilityPresentation,
   runtimePlatformAdmissionAllowsUse,
@@ -59,8 +59,6 @@ export type OnboardingRuntimePhase =
   | 'models'
   | 'ready'
   | 'error'
-
-export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = VISIBLE_PRODUCT_RUNTIMES
 
 const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'claude-code-cli': claudeCodeLogo,
@@ -419,7 +417,8 @@ function RuntimeStep({
   const hasEnabledRuntime = health?.runtimePlatformAdmission.some((row) => (
     row.platform === health.hostPlatform && runtimePlatformAdmissionAllowsUse(row)
   )) ?? false
-  const runtimeChoices = ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
+  const runtimeKinds = visibleProductRuntimes(health?.hostPlatform ?? null, health?.runtimePlatformAdmission ?? [])
+  const runtimeChoices = runtimeKinds.map((kind) => {
     const item = availability.find((candidate) => candidate.runtimeKind === kind) ?? null
     const admission = runtimePlatformAdmissionFor(health?.hostPlatform ?? null, health?.runtimePlatformAdmission ?? [], kind)
     const presentation = runtimeProductPresentation(admission, item)
@@ -474,6 +473,7 @@ function RuntimeStep({
             ? (
                 <RuntimeEmptyState
                   busy={busy}
+                  runtimeKinds={runtimeKinds}
                   scanFailed={phase === 'error'}
                   error={error}
                   platform={health?.hostPlatform ?? null}
@@ -566,6 +566,7 @@ function RuntimeStep({
 
 function RuntimeEmptyState({
   busy,
+  runtimeKinds,
   scanFailed,
   error,
   platform,
@@ -573,6 +574,7 @@ function RuntimeEmptyState({
   onDefer
 }: {
   busy: boolean
+  runtimeKinds: readonly AdapterKind[]
   scanFailed: boolean
   error: string | null
   platform: HostPlatformKey | null
@@ -616,7 +618,7 @@ function RuntimeEmptyState({
               {!scanFailed && <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>{t('重新扫描')}</button>}
             </div>
             <div id="onboarding-install-links" className="onboarding-install-links" hidden={!guideOpen}>
-              {ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
+              {runtimeKinds.map((kind) => {
                 const guide = runtimeInstallGuide(kind, platform)
                 return guide && <a key={kind} href={guide.docs} target="_blank" rel="noopener noreferrer">{RUNTIME_LABELS[kind]} <span aria-hidden="true">↗</span></a>
               })}
@@ -750,7 +752,7 @@ export function onboardingHasUsableRuntime(
   installations: AdapterInstallation[]
 ): boolean {
   if (phase !== 'ready' || !health) return false
-  return ONBOARDING_PRODUCT_RUNTIMES.some((kind) => {
+  return visibleProductRuntimes(health.hostPlatform, health.runtimePlatformAdmission).some((kind) => {
     const admission = runtimePlatformAdmissionFor(
       health.hostPlatform,
       health.runtimePlatformAdmission,

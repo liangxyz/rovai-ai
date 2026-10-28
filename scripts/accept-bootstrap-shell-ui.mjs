@@ -177,7 +177,7 @@ try {
 async function verifyCoreCrashRecovery() {
   const recoveryDataDir = assertUserDataIsIsolated(join(fixtureRoot, 'crash-recovery-user-data'))
   await mkdir(recoveryDataDir, { recursive: false })
-  const coreExecutable = await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core'))
+  const coreExecutable = await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host'))
   const hostExecutable = await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host'))
   const core = startQualificationCore({
     coreExecutable,
@@ -329,7 +329,7 @@ async function verifyOptionalSubsystemRecovery() {
   const optionalDataDir = assertUserDataIsIsolated(join(fixtureRoot, 'optional-subsystem-user-data'))
   await mkdir(optionalDataDir)
   const seed = startQualificationCore({
-    coreExecutable: await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')),
+    coreExecutable: await realpath(join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host')),
     dataDirectory: optionalDataDir,
     workingDirectory: root,
     runtimeCacheDirectory: join(fixtureRoot, 'runtime-cache'),

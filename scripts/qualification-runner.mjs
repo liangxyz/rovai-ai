@@ -2046,7 +2046,7 @@ function isTurnTerminal(status) {
 }
 
 function isPackagedCore(path) {
-  return /\.app\/Contents\/Resources\/bin\/rovai-core$/.test(resolve(path))
+  return /\.app\/Contents\/Resources\/bin\/rovai-(?:host|core)$/.test(resolve(path))
 }
 
 function sanitizeCoreStop(value) {

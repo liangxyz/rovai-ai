@@ -73,11 +73,11 @@ describe('first-run onboarding flow', () => {
     expect(markup).not.toContain('onboarding-runtime-list')
     expect(markup).not.toContain('onboarding-model-panel')
 
-    // A Ready record from an internal Hermes build must not expose a hidden Runtime.
+    // A stale Ready record cannot bypass the current host's denied admission.
     const runtimeKind = 'hermes-cli' as const
     const staleHealth = healthWithRuntime(
       { ...readyAvailability(), runtimeKind },
-      { ...qualifiedAdmission(), runtimeKind }
+      { ...qualifiedAdmission(), runtimeKind, status: 'not_qualified', evidenceRevision: null, reasonCode: 'runtime_platform.qualification_evidence_missing' }
     )
     const staleInstallation: AdapterInstallation = {
       ...codexInstallation(),
@@ -92,6 +92,16 @@ describe('first-run onboarding flow', () => {
     const staleMarkup = renderOnboarding(snapshot('runtime'), 'ready', staleHealth, [staleInstallation])
     expect(staleMarkup).toContain('暂未找到可用的智能体')
     expect(staleMarkup).not.toContain('Hermes')
+    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
+      const admittedHealth = { ...staleHealth, hostPlatform: platform, runtimePlatformAdmission: [{
+        ...staleHealth.runtimePlatformAdmission[0], platform, status: 'enabled' as const, reasonCode: null
+      }] }
+      expect(onboardingHasUsableRuntime('ready', admittedHealth, [staleInstallation])).toBe(true)
+      const markup = renderOnboarding(snapshot('runtime'), 'ready', admittedHealth, [staleInstallation])
+      expect(markup).toContain('Hermes Agent')
+      expect(markup).not.toContain('验证记录尚未齐备')
+      expect(markup).not.toContain('Preview')
+    }
   })
 
   it('keeps the normal Runtime selection when at least one Runtime can continue', () => {

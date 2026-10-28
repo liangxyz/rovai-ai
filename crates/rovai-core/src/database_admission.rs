@@ -251,6 +251,32 @@ impl ExistingAuthorityOpen<'_> {
         revalidate_lease(self.lease)?;
         revalidate_namespace_artifacts(self.lease, &self.artifacts, BusyStage::Revalidation)
     }
+
+    /// Opening the admitted file read/write may attach provenance after the
+    /// read-only probe. Consume this proof and obtain a fresh one before writes;
+    /// never reuse the stale ticket or retry an unexplained identity change.
+    pub(crate) fn revalidate_after_open(self) -> Result<(), TicketValidationError> {
+        let Err(error) = self.revalidate() else {
+            return Ok(());
+        };
+        if matches!(&error, TicketValidationError::Blocked(block)
+            if matches!(**block, AuthorityBlock::IdentityChanged { .. }))
+            && self
+                .artifacts
+                .macos_provenance_transition_observed(self.lease)
+            && let AdmissionAssessment::AdmittedExisting(ticket) =
+                DatabaseAdmission::assess_with_recovery(self.lease, false, false)
+                    .map_err(TicketValidationError::Infrastructure)?
+            && self
+                .artifacts
+                .macos_provenance_only_change(&ticket.artifacts)
+        {
+            // The original SQLite connection stays open, so its close cannot
+            // checkpoint the WAL between this admission and the final fence.
+            return ticket.into_open()?.revalidate();
+        }
+        Err(error)
+    }
 }
 
 impl<'lease> NewAuthorityTicket<'lease> {
@@ -419,19 +445,8 @@ impl MigrationAuthorityOpen<'_> {
         else {
             return false;
         };
-        if !matches!(lease.revalidate_identity(), Ok(true)) {
-            return false;
-        }
-        let Ok(observed) = observe_all(lease) else {
-            return false;
-        };
-        let other = observed.namespace(match namespace {
-            AuthorityNamespace::Rovai => AuthorityNamespace::Lumen,
-            AuthorityNamespace::Lumen => AuthorityNamespace::Rovai,
-        });
-        other.main.is_none()
-            && other.authoritative_sidecars().is_empty()
-            && artifacts.macos_provenance_only_change(observed.namespace(*namespace))
+        debug_assert_eq!(*namespace, artifacts.namespace);
+        artifacts.macos_provenance_transition_observed(lease)
     }
 
     /// Writes may change bytes and WAL state, never the authority's namespace or
@@ -570,6 +585,20 @@ impl DatabaseAdmission {
             Err(ObservationFailure::Infrastructure(error)) => return Err(error),
         };
 
+        Self::assess_observed_authority(
+            lease,
+            observed,
+            allow_recovery,
+            allow_macos_provenance_refresh,
+        )
+    }
+
+    fn assess_observed_authority<'lease>(
+        lease: &'lease CoreDataDirLease,
+        observed: CompleteArtifactObservation,
+        allow_recovery: bool,
+        allow_macos_provenance_refresh: bool,
+    ) -> Result<AdmissionAssessment<'lease>, AdmissionInfrastructureError> {
         let main_candidates = [observed.rovai.main.as_ref(), observed.lumen.main.as_ref()]
             .into_iter()
             .flatten()
@@ -763,6 +792,22 @@ impl ObservedArtifact {
             byte_length: self.identity.byte_length,
         }
     }
+
+    #[cfg(target_os = "macos")]
+    fn macos_provenance_added_only(&self, other: &Self) -> bool {
+        let before = self.identity.state_key.split(':').collect::<Vec<_>>();
+        let after = other.identity.state_key.split(':').collect::<Vec<_>>();
+        self.namespace == other.namespace
+            && self.kind == other.kind
+            && self.identity.object == other.identity.object
+            && self.identity.byte_length == other.identity.byte_length
+            && before.len() == 4
+            && after.len() == 4
+            && before[..2] == after[..2]
+            && self.macos_file_security == other.macos_file_security
+            && self.macos_provenance.is_some_and(|stamp| !stamp.present)
+            && other.macos_provenance.is_some_and(|stamp| stamp.present)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -830,20 +875,37 @@ impl NamespaceArtifactSet {
             .collect()
     }
 
+    fn macos_provenance_transition_observed(&self, lease: &CoreDataDirLease) -> bool {
+        if !matches!(lease.revalidate_identity(), Ok(true)) {
+            return false;
+        }
+        let Ok(observed) = observe_all(lease) else {
+            return false;
+        };
+        let other = observed.namespace(match self.namespace {
+            AuthorityNamespace::Rovai => AuthorityNamespace::Lumen,
+            AuthorityNamespace::Lumen => AuthorityNamespace::Rovai,
+        });
+        other.main.is_none()
+            && other.authoritative_sidecars().is_empty()
+            && self.macos_provenance_only_change(observed.namespace(self.namespace))
+    }
+
     #[cfg(target_os = "macos")]
     fn macos_provenance_only_change(&self, other: &Self) -> bool {
         let (Some(before), Some(after)) = (&self.main, &other.main) else {
             return false;
         };
-        let same_mtime = |left: &str, right: &str| {
-            let left = left.split(':').collect::<Vec<_>>();
-            let right = right.split(':').collect::<Vec<_>>();
-            left.len() == 4 && right.len() == 4 && left[..2] == right[..2]
+        let provenance_added = |left: &Option<ObservedArtifact>,
+                                right: &Option<ObservedArtifact>| {
+            matches!((left, right), (Some(left), Some(right)) if left.macos_provenance_added_only(right))
         };
-        let same_sidecar = |left: &Option<ObservedArtifact>, right: &Option<ObservedArtifact>| {
-            left.as_ref().map(|artifact| &artifact.identity)
-                == right.as_ref().map(|artifact| &artifact.identity)
-        };
+        let unchanged_or_tagged =
+            |left: &Option<ObservedArtifact>, right: &Option<ObservedArtifact>| {
+                left.as_ref().map(|artifact| &artifact.identity)
+                    == right.as_ref().map(|artifact| &artifact.identity)
+                    || provenance_added(left, right)
+            };
         let rebuildable_empty_wal = matches!(
             (&self.wal, &other.wal),
             (None, None)
@@ -872,15 +934,16 @@ impl NamespaceArtifactSet {
                     })
                 )
         );
+        let main_tagged = before.macos_provenance_added_only(after);
         self.namespace == other.namespace
-            && before.identity.object == after.identity.object
-            && before.identity.byte_length == after.identity.byte_length
-            && same_mtime(&before.identity.state_key, &after.identity.state_key)
-            && before.macos_provenance.is_some_and(|stamp| !stamp.present)
-            && after.macos_provenance.is_some_and(|stamp| stamp.present)
-            && before.macos_file_security == after.macos_file_security
-            && (same_sidecar(&self.wal, &other.wal) || rebuildable_empty_wal)
-            && same_sidecar(&self.rollback_journal, &other.rollback_journal)
+            && (main_tagged
+                || provenance_added(&self.wal, &other.wal)
+                || provenance_added(&self.rollback_journal, &other.rollback_journal))
+            && unchanged_or_tagged(&self.main, &other.main)
+            // Preserve the existing empty-WAL allowance only alongside a proven
+            // main-file tag. Nonempty sidecars must keep their object and bytes.
+            && (unchanged_or_tagged(&self.wal, &other.wal) || (main_tagged && rebuildable_empty_wal))
+            && unchanged_or_tagged(&self.rollback_journal, &other.rollback_journal)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1039,7 +1102,7 @@ fn observe_artifact(
         ))
     })?;
     #[cfg(target_os = "macos")]
-    let macos_provenance = if kind == AuthorityArtifactKind::Main {
+    let macos_provenance = if kind != AuthorityArtifactKind::Shm {
         macos_provenance_present(&path)
             .ok()
             .map(|present| MacosProvenanceStamp { present })
@@ -1444,6 +1507,27 @@ mod tests {
     use crate::core_data_dir_lock::CoreDataDirLease;
     use std::process::{Child, Command, Stdio};
 
+    #[cfg(target_os = "macos")]
+    fn attach_macos_provenance(path: &Path) {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+        let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let value = [1_u8, 2_u8];
+        assert_eq!(
+            unsafe {
+                libc::setxattr(
+                    path.as_ptr(),
+                    c"com.apple.provenance".as_ptr(),
+                    value.as_ptr().cast(),
+                    value.len(),
+                    0,
+                    0,
+                )
+            },
+            0
+        );
+    }
+
     #[test]
     fn legacy_rename_explains_only_ctime_not_replacement_or_content_changes() {
         let before = AuthorityArtifactIdentityToken {
@@ -1759,45 +1843,103 @@ mod tests {
 
         #[cfg(target_os = "macos")]
         {
-            use std::{ffi::CString, os::unix::ffi::OsStrExt};
+            fn artifact(
+                set: &mut NamespaceArtifactSet,
+                kind: AuthorityArtifactKind,
+            ) -> &mut ObservedArtifact {
+                match kind {
+                    AuthorityArtifactKind::Main => set.main.as_mut().unwrap(),
+                    AuthorityArtifactKind::Wal => set.wal.as_mut().unwrap(),
+                    AuthorityArtifactKind::RollbackJournal => {
+                        set.rollback_journal.as_mut().unwrap()
+                    }
+                    _ => unreachable!(),
+                }
+            }
 
-            // Some macOS hosts tag newly created temporary files automatically.
-            // Keep the untagged observation explicit so this test still owns the
-            // false-to-true provenance transition on both kinds of host.
-            let mut untagged_wal = nonempty_wal.clone();
-            untagged_wal
-                .main
-                .as_mut()
-                .unwrap()
-                .macos_provenance
-                .as_mut()
-                .unwrap()
-                .present = false;
-            let path = CString::new(main.as_os_str().as_bytes()).unwrap();
-            let value = [1_u8, 2_u8];
-            assert_eq!(
-                unsafe {
-                    libc::setxattr(
-                        path.as_ptr(),
-                        c"com.apple.provenance".as_ptr(),
-                        value.as_ptr().cast(),
-                        value.len(),
-                        0,
-                        0,
-                    )
-                },
-                0
-            );
+            std::fs::write(
+                directory.0.join("rovai.sqlite-journal"),
+                b"retained journal",
+            )
+            .unwrap();
+            for kind in [
+                AuthorityArtifactKind::Main,
+                AuthorityArtifactKind::Wal,
+                AuthorityArtifactKind::RollbackJournal,
+            ] {
+                // Some hosts tag new files immediately. Control only the initial
+                // observation; the later xattr, inode and metadata reads stay real.
+                let mut untagged = observe_namespace(&lease, AuthorityNamespace::Rovai)
+                    .ok()
+                    .unwrap();
+                let before = artifact(&mut untagged, kind);
+                before.macos_provenance = Some(MacosProvenanceStamp { present: false });
+                attach_macos_provenance(&before.path);
+                let tagged = observe_namespace(&lease, AuthorityNamespace::Rovai)
+                    .ok()
+                    .unwrap();
+                assert!(!untagged.authority_unchanged(&tagged));
+                assert!(
+                    untagged.macos_provenance_only_change(&tagged),
+                    "{kind:?} provenance must allow fresh admission"
+                );
+
+                for mutation in [
+                    "length",
+                    "mtime",
+                    "mode",
+                    "uid",
+                    "gid",
+                    "object",
+                    "unobserved",
+                    "already_present",
+                    "other_artifact",
+                ] {
+                    let mut before = untagged.clone();
+                    let mut after = tagged.clone();
+                    let changed = artifact(&mut after, kind);
+                    match mutation {
+                        "length" => changed.identity.byte_length += 1,
+                        "mtime" => changed.identity.state_key = "0:0:1:0".to_string(),
+                        "mode" => changed.macos_file_security.0 ^= 0o100,
+                        "uid" => changed.macos_file_security.1 += 1,
+                        "gid" => changed.macos_file_security.2 += 1,
+                        "object" => {
+                            changed.identity.object = FilesystemObjectIdentity::observe(
+                                &lease.data_dir().join(".rovai-core-instance.lock"),
+                            )
+                            .unwrap()
+                        }
+                        "unobserved" => artifact(&mut before, kind).macos_provenance = None,
+                        "already_present" => {
+                            artifact(&mut before, kind).macos_provenance =
+                                Some(MacosProvenanceStamp { present: true })
+                        }
+                        "other_artifact" => {
+                            let other = if kind == AuthorityArtifactKind::Main {
+                                AuthorityArtifactKind::Wal
+                            } else {
+                                AuthorityArtifactKind::Main
+                            };
+                            artifact(&mut after, other).identity.byte_length += 1;
+                        }
+                        _ => unreachable!(),
+                    }
+                    assert!(
+                        !before.macos_provenance_only_change(&after),
+                        "{kind:?}/{mutation}"
+                    );
+                }
+            }
             let tagged = observe_namespace(&lease, AuthorityNamespace::Rovai)
                 .ok()
                 .unwrap();
-            assert!(!untagged_wal.authority_unchanged(&tagged));
-            assert!(untagged_wal.macos_provenance_only_change(&tagged));
+            assert!(!tagged.macos_provenance_only_change(&tagged));
             std::fs::write(&main, b"changed authority").unwrap();
             let changed = observe_namespace(&lease, AuthorityNamespace::Rovai)
                 .ok()
                 .unwrap();
-            assert!(!untagged_wal.macos_provenance_only_change(&changed));
+            assert!(!tagged.macos_provenance_only_change(&changed));
         }
     }
 
@@ -1835,6 +1977,65 @@ mod tests {
             classify_database_contract(initialized.connection()).unwrap(),
             DatabaseContractClassification::Current(_)
         ));
+        initialized
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = '保留的队员' WHERE id = 'agent_1'",
+                [],
+            )
+            .unwrap();
+
+        #[cfg(target_os = "macos")]
+        {
+            // Retain committed business data in a nonempty WAL. The production
+            // probe must discard its stale observation and fully readmit it.
+            let mut before = observe_all(&lease).ok().unwrap();
+            let wal = before.rovai.wal.as_mut().unwrap();
+            assert!(wal.identity.byte_length > 0);
+            wal.macos_provenance = Some(MacosProvenanceStamp { present: false });
+            attach_macos_provenance(&wal.path);
+            assert!(matches!(
+                DatabaseAdmission::assess_observed_authority(&lease, before.clone(), false, false)
+                    .unwrap(),
+                AdmissionAssessment::Blocked(block)
+                    if matches!(*block, AuthorityBlock::IdentityChanged { .. })
+            ));
+            let AdmissionAssessment::AdmittedExisting(ticket) =
+                DatabaseAdmission::assess_observed_authority(&lease, before, false, true).unwrap()
+            else {
+                panic!("WAL provenance must allow one complete readmission");
+            };
+
+            // The later read/write open can tag the main file separately. Its
+            // old ticket still fails, but a fresh proof may admit the same data.
+            let mut open = ticket.into_open().unwrap();
+            open.artifacts.main.as_mut().unwrap().macos_provenance =
+                Some(MacosProvenanceStamp { present: false });
+            attach_macos_provenance(&open.path);
+            assert!(open.revalidate().is_err());
+            open.revalidate_after_open().unwrap();
+
+            // A real write alongside a tag must never take the compatibility
+            // path, even though it preserves a valid current database contract.
+            let AdmissionAssessment::AdmittedExisting(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("unchanged authority must be admitted");
+            };
+            let mut open = ticket.into_open().unwrap();
+            open.artifacts.main.as_mut().unwrap().macos_provenance =
+                Some(MacosProvenanceStamp { present: false });
+            initialized
+                .connection()
+                .execute("UPDATE agent_profile SET display_name = '保留的队员（更新）' WHERE id = 'agent_1'", [])
+                .unwrap();
+            attach_macos_provenance(&open.path);
+            assert!(matches!(
+                open.revalidate_after_open(),
+                Err(TicketValidationError::Blocked(block))
+                    if matches!(*block, AuthorityBlock::IdentityChanged { .. })
+            ));
+        }
         drop(initialized);
 
         let ticket = match DatabaseAdmission::assess(&lease).unwrap() {
@@ -1844,6 +2045,22 @@ mod tests {
         let reopened = crate::db::Database::open_admitted(*ticket).unwrap();
         crate::test_support::assert_production_database_configuration(&reopened);
         assert_eq!(reopened.path(), lease.data_dir().join("rovai.sqlite"));
+        let display_name: String = reopened
+            .connection()
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            display_name,
+            if cfg!(target_os = "macos") {
+                "保留的队员（更新）"
+            } else {
+                "保留的队员"
+            }
+        );
     }
 
     #[test]

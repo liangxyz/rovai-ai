@@ -1,0 +1,1331 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-28",
+  "rovaiBase": "8de8c396dd2f46ce1a0a51c7cff5f9af77f5287d",
+  "platform": "macOS arm64",
+  "scope": "Official unpatched v0.22.4 ACP and shared Gateway in isolated fixtures. No production Core/CLI integration or UI acceptance.",
+  "upstreamCommit": "4d04303818b61bf3aa09278af48356315515965b",
+  "script": "scripts/probe-hermes-steer.mjs",
+  "productionSteerEnabled": false,
+  "verdict": "Native text steering works, including real-model cold resume. The automatic ordinary-prompt fallback can execute a successor after ACP closure; existing exact-Run steering semantics are not satisfied.",
+  "attempts": [
+    {
+      "schemaVersion": 1,
+      "version": "0.22.4",
+      "commit": "4d04303818b61bf3aa09278af48356315515965b",
+      "mode": "controlled-provider",
+      "transport": "official ACP stdio to native shared Gateway",
+      "cases": [
+        {
+          "name": "no_dedicated_acp_method",
+          "errorCode": -32601,
+          "admissions": []
+        },
+        {
+          "name": "active",
+          "sessionId": "local-9fd249f702a8f98d8ca31a5cc2ddeb82a16e3bec93bcebdf44a48ee0c7e8865f",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "admissions": [
+            {
+              "id": "c613b48784a24b9d9674727fb3c6c8f1",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "resumed",
+          "sessionId": "local-9fd249f702a8f98d8ca31a5cc2ddeb82a16e3bec93bcebdf44a48ee0c7e8865f",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "admissions": [
+            {
+              "id": "c613b48784a24b9d9674727fb3c6c8f1",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "c8e379c33cc740098602c13f4ef404bc",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "ended_before_steer_with_delayed_terminal",
+          "localOriginalPendingAtSubmit": true,
+          "createdSuccessorAdmission": true,
+          "successorContinuedAfterAcpClosed": true,
+          "admissions": [
+            {
+              "id": "1be28847c4754f58b88aae1067298a8c",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "48885368f0e0444a8b630978bb8b9fe8",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        }
+      ],
+      "providerRequests": [
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "late",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "late",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        }
+      ],
+      "passed": false,
+      "attempt": "controlled-initial",
+      "rawResultSha256": "8ba122eb8633922dad2a1b2aaae98b4c86d2a148cc66d7ed57b4d5e62ab0ca87",
+      "probeSha256": "1517ad594398f32cbf51b30511c72d1bccfd2dc56d0dfeef1de20de787ba922e",
+      "probeFailure": "Fixture read attachments instead of the native persisted attachments_v1.media field; preceding three native scenarios passed.",
+      "protocolSummary": {
+        "requestMethods": [
+          "initialize",
+          "session/new",
+          "session/prompt",
+          "session/resume",
+          "session/steer"
+        ],
+        "steerNoticeCount": 2,
+        "promptResponses": [
+          {
+            "direction": "out",
+            "id": 5,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 6,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "version": "0.22.4",
+      "commit": "4d04303818b61bf3aa09278af48356315515965b",
+      "mode": "controlled-provider",
+      "probeSha256": "c955129eba22a09818b8613603bed142db40aa7350d4510a99e1c812a1cfb1ac",
+      "transport": "official ACP stdio to native shared Gateway",
+      "cases": [
+        {
+          "name": "no_dedicated_acp_method",
+          "errorCode": -32601,
+          "admissions": []
+        },
+        {
+          "name": "active",
+          "sessionId": "local-7b849266686904302635c2494c5e1e2121e6833284ca87f50e755708c753f27a",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "admissions": [
+            {
+              "id": "b22741527759436f80da292665c775f2",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "resumed",
+          "sessionId": "local-7b849266686904302635c2494c5e1e2121e6833284ca87f50e755708c753f27a",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "admissions": [
+            {
+              "id": "b22741527759436f80da292665c775f2",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "c6a39bd0880d48278a1c9c3341e6f23e",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "ended_before_steer_with_delayed_terminal",
+          "localOriginalPendingAtSubmit": true,
+          "createdSuccessorAdmission": true,
+          "successorContinuedAfterAcpClosed": true,
+          "admissions": [
+            {
+              "id": "956c33c8d6fe4cd996d3a83c7a40fc83",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "ec7c54dc851549689a19537e3d4d6a84",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        }
+      ],
+      "providerRequests": [
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "late",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "late",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imagefollowup",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imagefollowup",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        }
+      ],
+      "passed": false,
+      "attempt": "controlled-media-assertion",
+      "rawResultSha256": "ff222f2b9b49f043c8247222fa2364598fc26f53b6845a86ace5b3a4072f514d",
+      "probeFailure": "Fixture incorrectly expected the literal /steer prefix in the model request. ACP queued the media prompt, then the native execution path removed the prefix. Final assertion checks queued admission and absent steer notice instead.",
+      "protocolSummary": {
+        "requestMethods": [
+          "initialize",
+          "session/new",
+          "session/prompt",
+          "session/resume",
+          "session/steer"
+        ],
+        "steerNoticeCount": 2,
+        "promptResponses": [
+          {
+            "direction": "out",
+            "id": 5,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 6,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "version": "0.22.4",
+      "commit": "4d04303818b61bf3aa09278af48356315515965b",
+      "mode": "real-model",
+      "probeSha256": "c955129eba22a09818b8613603bed142db40aa7350d4510a99e1c812a1cfb1ac",
+      "transport": "official ACP stdio to native shared Gateway",
+      "cases": [
+        {
+          "name": "no_dedicated_acp_method",
+          "errorCode": -32601,
+          "admissions": []
+        },
+        {
+          "name": "active",
+          "sessionId": "local-83347e699f2a28df00371611b198cc1b861630cf53f0f5aeac3e2f0b3502da01",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "fileResult": "GREEN",
+          "admissions": [
+            {
+              "id": "99b3f04565d14be3992948e2a77a2174",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "resumed",
+          "sessionId": "local-83347e699f2a28df00371611b198cc1b861630cf53f0f5aeac3e2f0b3502da01",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "fileResult": "GREEN",
+          "admissions": [
+            {
+              "id": "99b3f04565d14be3992948e2a77a2174",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "4df1bb6d40ca4048adec815e770c7358",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        }
+      ],
+      "providerRequests": [
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "model": "gpt-6.1-sol",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "model": "gpt-6.1-sol",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        }
+      ],
+      "passed": true,
+      "nativeConfigUnchanged": true,
+      "upstreamUnmodified": true,
+      "attempt": "real-initial",
+      "rawResultSha256": "613edad02b093216c1f4c52ba27bb5dcd60bf48197c8d3aa9c82f31e6351fa84",
+      "scopeNote": "Both original and resumed prompts wrote GREEN; final rerun uses distinct per-prompt guidance tokens and GREEN/BLUE output to exclude matches in prior history.",
+      "protocolSummary": {
+        "requestMethods": [
+          "initialize",
+          "session/new",
+          "session/prompt",
+          "session/resume",
+          "session/steer"
+        ],
+        "steerNoticeCount": 2,
+        "promptResponses": [
+          {
+            "direction": "out",
+            "id": 5,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "version": "0.22.4",
+      "commit": "4d04303818b61bf3aa09278af48356315515965b",
+      "mode": "controlled-provider",
+      "probeSha256": "a59249c7c746164b91a033ac319bc35f5a263e7d7d06c18a8f3033f8f2d9d425",
+      "transport": "official ACP stdio to native shared Gateway",
+      "cases": [
+        {
+          "name": "no_dedicated_acp_method",
+          "errorCode": -32601,
+          "admissions": []
+        },
+        {
+          "name": "active",
+          "sessionId": "local-977de1166521097f9018b5f0403d39b563ac27e0fb64102c3268de04ed6181f6",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "admissions": [
+            {
+              "id": "ca5954af4b3b42bcb90569cf99bca611",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "resumed",
+          "sessionId": "local-977de1166521097f9018b5f0403d39b563ac27e0fb64102c3268de04ed6181f6",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "admissions": [
+            {
+              "id": "ca5954af4b3b42bcb90569cf99bca611",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "ed613d5482b44532bc35ab82c69cd82e",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "ended_before_steer_with_delayed_terminal",
+          "localOriginalPendingAtSubmit": true,
+          "createdSuccessorAdmission": true,
+          "successorContinuedAfterAcpClosed": true,
+          "admissions": [
+            {
+              "id": "5d9940ccb5a74785ab627d0d2afe355e",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "a408dffcb2e04b388b5092bef76410be",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "image_bypasses_steer",
+          "queuedWhileOriginalStarted": [
+            {
+              "id": "28e62ab7c78f40b78387c1217f17edec",
+              "status": "started",
+              "outcome": null,
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "cdc6616f129d472f849ac475042d8660",
+              "status": "queued",
+              "outcome": null,
+              "generation": null,
+              "attachments": 1
+            }
+          ],
+          "literalSlashReachedModel": false,
+          "admissions": [
+            {
+              "id": "28e62ab7c78f40b78387c1217f17edec",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "cdc6616f129d472f849ac475042d8660",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 1
+            }
+          ]
+        }
+      ],
+      "providerRequests": [
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "race",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "late",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "late",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imageoriginal",
+          "model": "native-probe",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imagefollowup",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "imagefollowup",
+          "model": "native-probe",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        }
+      ],
+      "passed": true,
+      "nativeConfigUnchanged": true,
+      "upstreamUnmodified": true,
+      "attempt": "controlled-final",
+      "rawResultSha256": "04a6f848f6131b79d3f6b6609ade716d98d060a423c50ecc22e3f7e9fd8fda86",
+      "protocolSummary": {
+        "requestMethods": [
+          "initialize",
+          "session/new",
+          "session/prompt",
+          "session/resume",
+          "session/steer"
+        ],
+        "steerNoticeCount": 2,
+        "promptResponses": [
+          {
+            "direction": "out",
+            "id": 5,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 6,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          }
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "version": "0.22.4",
+      "commit": "4d04303818b61bf3aa09278af48356315515965b",
+      "mode": "real-model",
+      "probeSha256": "a59249c7c746164b91a033ac319bc35f5a263e7d7d06c18a8f3033f8f2d9d425",
+      "transport": "official ACP stdio to native shared Gateway",
+      "cases": [
+        {
+          "name": "no_dedicated_acp_method",
+          "errorCode": -32601,
+          "admissions": []
+        },
+        {
+          "name": "active",
+          "sessionId": "local-7499045c2a31184c0945372721ced96965ac89f5769f67f10f88969c7c1cb129",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "fileResult": "GREEN",
+          "admissions": [
+            {
+              "id": "55f6c1b15b7341c294f5594a5f620a8e",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            }
+          ]
+        },
+        {
+          "name": "resumed",
+          "sessionId": "local-7499045c2a31184c0945372721ced96965ac89f5769f67f10f88969c7c1cb129",
+          "receipt": {
+            "stopReason": "end_turn"
+          },
+          "noticeKeys": [
+            "content",
+            "sessionUpdate"
+          ],
+          "sameAdmission": true,
+          "guidanceReachedModel": true,
+          "fileResult": "BLUE",
+          "admissions": [
+            {
+              "id": "55f6c1b15b7341c294f5594a5f620a8e",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 1,
+              "attachments": 0
+            },
+            {
+              "id": "389a9ee43ce44bdc90eb07f4fbfa80d4",
+              "status": "terminal",
+              "outcome": "completed",
+              "generation": 2,
+              "attachments": 0
+            }
+          ]
+        }
+      ],
+      "providerRequests": [
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "model": "gpt-6.1-sol",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": "active",
+          "model": "gpt-6.1-sol",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        },
+        {
+          "label": null,
+          "model": "gpt-6.1-sol",
+          "main": false,
+          "guidanceInInput": false,
+          "slashInInput": false
+        },
+        {
+          "label": "resumed",
+          "model": "gpt-6.1-sol",
+          "main": true,
+          "guidanceInInput": true,
+          "slashInInput": false
+        }
+      ],
+      "passed": true,
+      "nativeConfigUnchanged": true,
+      "upstreamUnmodified": true,
+      "attempt": "real-final",
+      "rawResultSha256": "f46518af7a216d62cc6d911f3bf61243ffb5bc653f76413da543591690c1c684",
+      "protocolSummary": {
+        "requestMethods": [
+          "initialize",
+          "session/new",
+          "session/prompt",
+          "session/resume",
+          "session/steer"
+        ],
+        "steerNoticeCount": 2,
+        "promptResponses": [
+          {
+            "direction": "out",
+            "id": 5,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 4,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason"
+            ],
+            "stopReason": "end_turn"
+          },
+          {
+            "direction": "out",
+            "id": 3,
+            "method": "session/prompt",
+            "resultKeys": [
+              "stopReason",
+              "usage"
+            ],
+            "stopReason": "end_turn"
+          }
+        ]
+      }
+    }
+  ]
+}

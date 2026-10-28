@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { AdapterKind, AgentProfile, NativeSkillScan, NativeSkillView, SkillContentView, StoredCommandResult, ToolboxSkillView } from '@contracts'
+import type { AdapterKind, AgentProfile, NativeSkillScan, NativeSkillView, RuntimeStatus, SkillContentView, StoredCommandResult, ToolboxSkillView } from '@contracts'
 import { useThreadClient } from './camp-client'
 import { useCapabilitySplitter } from './useCapabilitySplitter'
 import { MemberAvatar } from './MemberAvatar'
@@ -10,12 +10,12 @@ import { SkillIdentityMark } from './SkillIdentityMark'
 import { SafeMarkdown } from './SafeMarkdown'
 import { skillReadingContent } from './skill-reading-content'
 import { SkillFileNavigation } from './SkillFileNavigation'
-import { adapterLabel, VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
+import { adapterLabel, visibleProductRuntimes } from './runtime-products'
 import { readErrorMessage } from './error-message'
 import './rebuilt-skills-settings.css'
 import { UiText, uiAttribute } from './interface-language'
 
-export function NativeSkillsSettings(): React.JSX.Element {
+export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus | null } = {}): React.JSX.Element {
   const id = useId()
   const { root, compact, separator } = useCapabilitySplitter('rovai.native-skills-list-width.v1', `${id}-list ${id}-detail`)
   const client = useThreadClient()
@@ -84,7 +84,7 @@ export function NativeSkillsSettings(): React.JSX.Element {
         <Menu.Trigger asChild><button className="member-runtime-picker rebuilt-runtime-trigger" type="button" aria-label={uiAttribute("选择智能体，当前为 {0}", String(adapterLabel(runtime)))}><RuntimeGlyph kind={runtime} /><span>{adapterLabel(runtime)}</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button></Menu.Trigger>
         <Menu.Portal><Menu.Content className="runtime-model-picker-menu member-runtime-menu" align="end" sideOffset={5} loop>
           <Menu.RadioGroup className="runtime-picker-options" value={runtime} onValueChange={(value) => setRuntime(value as AdapterKind)}>
-            <div className="runtime-picker-scroll">{VISIBLE_PRODUCT_RUNTIMES.map((kind) => <Menu.RadioItem key={kind} value={kind} textValue={adapterLabel(kind)} className="runtime-model-picker-item member-runtime-menu-item"><RuntimeGlyph kind={kind} /><span className="runtime-model-picker-copy"><strong>{adapterLabel(kind)}</strong></span><Menu.ItemIndicator className="runtime-model-picker-check">✓</Menu.ItemIndicator></Menu.RadioItem>)}</div>
+            <div className="runtime-picker-scroll">{visibleProductRuntimes(health?.hostPlatform ?? null, health?.runtimePlatformAdmission ?? []).map((kind) => <Menu.RadioItem key={kind} value={kind} textValue={adapterLabel(kind)} className="runtime-model-picker-item member-runtime-menu-item"><RuntimeGlyph kind={kind} /><span className="runtime-model-picker-copy"><strong>{adapterLabel(kind)}</strong></span><Menu.ItemIndicator className="runtime-model-picker-check">✓</Menu.ItemIndicator></Menu.RadioItem>)}</div>
           </Menu.RadioGroup>
         </Menu.Content></Menu.Portal>
       </Menu.Root>

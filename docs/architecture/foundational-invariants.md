@@ -341,9 +341,9 @@ last_updated: 2026-10-26
   由对应结果确认。字段与生命周期由 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md) 拥有。
 
 - TRAE 的 light check、显式 availability verification、cold resume、HistoryRestore 和 replay quarantine 使用独立的用户授权、Session ID 校验和有界恢复路径；恢复响应 ID 不一致时 fail closed。
-- Product execution qualification 是 `AdapterKind × HostPlatformKey` 的封闭准入。存在安装或能启动进程不等于平台合格；不合格组合保留配置但阻止执行，并提供结构化 reason/evidence。
+- Product execution qualification 是 `AdapterKind × HostPlatformKey` 的封闭准入。存在安装或能启动进程不等于平台合格；不合格组合保留配置但阻止执行，并提供结构化 reason/evidence。维护者明确普通开放的 `enabled` 允许使用但不声称 qualified，reason/evidence 均为空；Hermes 的四个平台沿此状态开放。
 - Pi 不得继承 ACP、Kimi、Grok 或通用平台 evidence。macOS arm64、macOS x64、Windows x64 当前分别绑定各自 Pi immutable qualification artifact 并为 Qualified；任何未来平台或不兼容版本在自己的 artifact 建立前仍必须 NotQualified。本机 debug override 只用于隔离 smoke，release 不得读取或应用。
-- Windows 正式进程必须在创建时原子加入受管 Job 并限制继承 handle；本地 IPC、私有存储、DACL、validated Node shim、长路径和 descendant cleanup 都是平台 admission 的组成部分，不能在进程启动后补偿安全边界。
+- Windows 整树所有权进程必须在创建时原子加入受管 Job 并限制继承 handle；`RuntimeConnection` 只拥有捕获的客户端根 handle，不将共享 Gateway 放入 Job，清理只终止该根进程。两种模式均保留入口身份与 stdio handle 继承校验。本地 IPC、私有存储、DACL、validated Node shim、长路径和相应所有权范围的 cleanup 都是平台 admission 的组成部分，不能在进程启动后补偿安全边界。
 
 ## Native Session、Context 与 Bootstrap
 

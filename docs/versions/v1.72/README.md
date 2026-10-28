@@ -6,10 +6,17 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## macOS 来源标记导致的启动误拦截（2026-10-28）
+
+补齐 main/WAL/journal 的系统来源标记识别，以及 current authority 以读写方式打开后的有界重新准入。
+已有校验在发行版 0.5.1 与 0.5.2 之间未变；本次升级触发了既有兼容缺口，而非新增 schema migration 失败。
+当前规则见 [Availability-first Runtime](../../architecture/availability-first-runtime.md#database-authority-state-machine)，
+复现、测试归属与交付边界见[实施记录](implementation-plan.md#macos-来源标记启动修复2026-10-28)。
 
 ## Thread read 正向增量读取（2026-10-22）
 
@@ -62,9 +69,12 @@ Issue #891 按 User 确认的范围统一启动／重新检测／主动检查的
 FirstPayload 保留首次/真实更新，取消压缩补发；ACP 清理不拥有原生执行端。
 当前规范见 [Hermes 合同](../../contracts/hermes-managed-runtime-v1.md)，理由见 [D67](decisions.md#v1-72-d67)，
 正文确认见 [R2](model-context-change-hermes-first-input.md)，验证见 [实施记录](hermes-first-input-implementation.md)。
-最低版本 0.22.4。2026-10-27 按 User sequence 122 暂缓全部平台公开，取代 sequence 113 的
-macOS 开放决定。macOS 两架构、Windows x64、Linux x64 均为 NotQualified；用户入口完全隐藏，
-普通发现、检查、配置与执行关闭。内部实现和已有记录保留，状态见[平台准入](../../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+最低版本 0.22.4。2026-10-28 按维护者要求在 macOS arm64/x64、Windows x64、Linux x64 均普通开放，
+统一采用 `enabled`，不采用 Preview 或实验标签。入口消费共享准入；Windows ACP 仅拥有连接根进程，
+不将原生共享 Gateway 纳入 Job。开放与完整平台资格验证分开记录，不制造 qualification evidence。
+内部实现和已有记录保留，Intel 开放不代表完成实机验收，状态见[平台准入](../../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+按同 Thread sequence 134 接通官方 ACP slash Steer：已知结束走普通队列；已发出的补充即使被原生
+转入下一轮，也由原 Core Run 跟踪至完成。验证与覆盖边界见[接通记录](../../research/hermes-runtime/README.md#core-steer-接通2026-10-28)。
 按同 Thread sequence 116，所有 Runtime 的引导、成员配置及检查反馈移除 Preview 资格说明小字，
 只呈现实际机器状态和可处理的错误；内部准入与诊断证据保留。
 

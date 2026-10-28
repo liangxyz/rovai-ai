@@ -3,10 +3,40 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # v1.72 实施与验收
+
+## macOS 来源标记启动修复（2026-10-28）
+
+- 分支 `rovai/macos-wal-provenance`，基线 `c4dedf32683179070ee90e72eb1e6a1161c8228f`。
+  工作使用独立 worktree；所有复现均为合成 SQLite、独立 Skills/MCP 与 Runtime Files Root，不复制日常会话数据。
+- 0.5.1 与 0.5.2 tag 的 admission/migration 校验没有差异。原规则只观察 main 的 provenance，漏掉 WAL/journal；
+  current authority 的 READ_WRITE open 也没有迁移路径已有的来源标记重新准入。
+- 在已有合成数据库保留 32,992 字节已提交 WAL，安装版 0.5.2 首次打开返回 `identity_changed`。
+  WAL 的对象、长度、mtime 未变，`com.apple.provenance` 从无到有、ctime 改变；数据完整性检查通过。
+  这属于 macOS 文件元数据兼容问题，不能归因于数据库损坏或本轮 schema migration。
+- 修复扩展同一 artifact 判定到 main/WAL/journal，existing open 在写入前消费旧证明、完整重新准入一次并严格
+  复核新票据。未知标记、权限/属主/mtime/长度/对象变化、另一 authority 出现及真实写入仍拒绝。
+  Windows 的 last-write/size 比较不变；没有把本机 macOS 结果当成 Windows 真机验收。
+- 沿用 `read_probe_tolerates_only_a_new_empty_wal_not_authority_changes` 扩展 artifact 与拒绝条件矩阵；
+  修复前 WAL case 明确失败。沿用 `confirmed_absence_initializes_and_reopens_a_current_authority`，
+  复用原 SQLite fixture 验证只读探测重新准入、读写打开重新准入、真实写入仍拒绝、业务行与生产连接配置保留。
+  新增 Rust 测试函数为零。最小命令为 `cargo test -p rovai-core --lib database_admission::tests::`，12 项通过。
+- 原生进程复验将安装版 Host 的来源标记复制到临时修复版 Host，使 macOS 在同一合成场景实际添加数据库标记。
+  main 与非空 WAL 均出现来源标记，二者对象、长度与 mtime 未变，修复版首次即 `ready`、无需手动 Retry；
+  关闭后只读验证业务行仍为 `preserved`、SQLite `quick_check` 为 `ok`。未带来源标记的调试 Host 也能启动，
+  但那条未触发系统标记的路径不作为本回归的充分证据。
+- 既有迁移来源标记回归通过（`cargo test -p rovai-core --features extended-tests --lib
+  authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data -- --exact`）。
+  默认 `cargo test --workspace` 的 Core 为 434 passed / 1 failed / 1 ignored；唯一失败为既有
+  `successful_leader_with_stdio_holding_descendant_finishes_bounded` 的 500ms stdout cleanup 超时。
+  未修改 main 与修复分支的同一 owner 各做三次交替对照，均为一次相同超时、两次通过，证实既有时序不稳定；
+  保留失败记录，不改写或跳过该 owner，也不将整套回归记为全绿。随后单独补完 CLI 31、Host 4、Web 11 项，全部通过。
+- `cargo check --workspace`、`cargo fmt --all --check`、`git diff --check`、`pnpm docs:test`、
+  `pnpm docs:check` 和以本节基线为 `DOCS_BASE_REF` 的 `pnpm docs:check:ci` 通过。
+  安装与正式发行是独立交付边界，以上结果不代表已经发布修复版或完成 Windows 真机验收。
 
 ## MCP Run 快照与 Grok 启动清理（2026-10-26）
 

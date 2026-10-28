@@ -54,6 +54,7 @@ import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
 import { collapsedMessageProjection } from './conversation-message-collapse'
 import { samePublicMessageSegment } from './public-message-grouping'
+import { messageTimeParts, useMessageTimeDate } from './message-time'
 import { usePublicMessageLayout } from './usePublicMessageLayout'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
@@ -178,6 +179,7 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { mentionCandidateRuntime } from './mention-runtime'
 import { SafeMarkdown } from './SafeMarkdown'
+import { AgentMessageContent } from './AgentMessageContent'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useExecutionPreviewHost, useOptionalFilePreview } from './FilePreviewContext'
@@ -1768,9 +1770,12 @@ export function ThreadWorkspace({
   const taskFocusWasRemoved = !tasksEnabled && typeof document !== 'undefined' && !!document.activeElement?.closest('.task-panel-scroll, .camp-detail-entry[data-detail="tasks"], .task-editor-dialog, .task-cancel-dialog')
   const client = useThreadClient()
   const interfaceLanguage = useInterfaceLanguage()
+  const messageTimeDate = useMessageTimeDate()
   const { profile: currentUserProfile } = useCurrentUserProfile()
   const currentUserName = currentUserDisplayName(currentUserProfile)
   const filePreview = useOptionalFilePreview()
+  const rightPreviewBlocksExecutionAutoOpen = executionPlacement === 'right'
+    && Boolean(filePreview?.paneVisible && filePreview.activeTab && filePreview.activeTab.kind !== 'execution')
   const replyReader = useMemo(() => new ThreadReplyReader(snapshot.thread.id, client), [snapshot.thread.id, client])
   const replyDetail = useSyncExternalStore(replyReader.subscribe, replyReader.getSnapshot, replyReader.getSnapshot)
   const [replyFull, setReplyFull] = useState(false)
@@ -2132,7 +2137,7 @@ export function ThreadWorkspace({
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<ThreadInspectorTab>('tasks')
   const [workspaceEntrySelection] = useState(() =>
-    workspaceEntrySnapshotReady && !suppressExecutionAutoOpen
+    workspaceEntrySnapshotReady && !suppressExecutionAutoOpen && !rightPreviewBlocksExecutionAutoOpen
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
   )
@@ -2451,10 +2456,11 @@ export function ThreadWorkspace({
 
   useEffect(() => setMentionPopover(null), [snapshot.thread.id])
   useLayoutEffect(() => {
-    if (workspaceEntrySnapshotHandled.current || !workspaceEntrySnapshotReady) return
+    if (workspaceEntrySnapshotHandled.current) return
+    if (!workspaceEntrySnapshotReady && !rightPreviewBlocksExecutionAutoOpen) return
     workspaceEntrySnapshotHandled.current = true
     if (executionEntryInteractionThreadId.current === snapshot.thread.id) return
-    if (suppressExecutionAutoOpen) return
+    if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     const entrySelection = executionWorkspaceEntrySelection(snapshot.agentRuns)
     const runningRun = entrySelection?.focusedRun ?? null
     setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
@@ -2483,13 +2489,14 @@ export function ThreadWorkspace({
     filePreview,
     snapshot.agentRuns,
     workspaceEntrySnapshotReady,
-    suppressExecutionAutoOpen
+    suppressExecutionAutoOpen,
+    rightPreviewBlocksExecutionAutoOpen
   ])
   useLayoutEffect(() => {
     if (workspaceEntryInspectorHandled.current) return
-    if (!workspaceEntrySnapshotReady) return
+    if (!workspaceEntrySnapshotReady && !rightPreviewBlocksExecutionAutoOpen) return
     workspaceEntryInspectorHandled.current = true
-    if (suppressExecutionAutoOpen) return
+    if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     if (!mobile && workspaceEntryRunningRun && executionPlacement === 'inspector') {
       onOpenInspector?.(inspectorTab)
     } else if (workspaceEntryRunningRun && executionPlacement === 'right') {
@@ -2503,14 +2510,15 @@ export function ThreadWorkspace({
     filePreview,
     workspaceEntryRunningRun,
     workspaceEntrySnapshotReady,
-    suppressExecutionAutoOpen
+    suppressExecutionAutoOpen,
+    rightPreviewBlocksExecutionAutoOpen
   ])
   useLayoutEffect(() => {
     if (mountedThreadId.current === snapshot.thread.id) return
     mountedThreadId.current = snapshot.thread.id
     executionEntryInteractionThreadId.current = null
-    workspaceEntrySnapshotHandled.current = workspaceEntrySnapshotReady
-    const entrySelection = workspaceEntrySnapshotReady && !suppressExecutionAutoOpen
+    workspaceEntrySnapshotHandled.current = workspaceEntrySnapshotReady || rightPreviewBlocksExecutionAutoOpen
+    const entrySelection = workspaceEntrySnapshotReady && !suppressExecutionAutoOpen && !rightPreviewBlocksExecutionAutoOpen
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
     const runningRun = entrySelection?.focusedRun ?? null
@@ -2529,7 +2537,7 @@ export function ThreadWorkspace({
     } else if (runningRun && executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, workspaceEntrySnapshotReady])
+  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -5028,7 +5036,9 @@ export function ThreadWorkspace({
     const submittedExecutionRequest = submittedExecutionRequests[0]
     if (!submittedExecutionRequest) return
     const consumeRequest = (): void => { setSubmittedExecutionRequests((current) => current.slice(1)) }
-    if (suppressExecutionAutoOpen) { consumeRequest(); return }
+    // Consume even before the Run arrives so leaving the preview cannot replay
+    // an automatic navigation that was declined while the user was reading.
+    if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) { consumeRequest(); return }
     if (taskCreationBlocksSubmittedRunAutoFocus(
       taskCreationActive,
       inspectorVisible,
@@ -5076,7 +5086,8 @@ export function ThreadWorkspace({
     initializePreviewMinimumWidth,
     mobile,
     taskCreationActive,
-    suppressExecutionAutoOpen
+    suppressExecutionAutoOpen,
+    rightPreviewBlocksExecutionAutoOpen
   ])
 
   const conversationFindTotal = conversationFind.snapshot?.totalMatchCount ?? 0
@@ -5661,6 +5672,13 @@ export function ThreadWorkspace({
                   const joinsNextMessage = nextItem?.kind === 'camp_message'
                     && shortPublicMessages.has(campMessage.id)
                     && samePublicMessageSegment(groupingMessage(campMessage), groupingMessage(nextItem.message))
+                  const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
+                  const messageTimestamp = !joinsNextMessage && messageTime ? (
+                    <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}
+                      title={messageTime.full} aria-label={`${messageTime.full} · #${campMessage.sequence}`}>
+                      {messageTime.short}
+                    </time>
+                  ) : undefined
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.deliveryKind === 'public_a2a'
                     && !delivery.continuationRequest
@@ -5780,11 +5798,6 @@ export function ThreadWorkspace({
                           <CurrentUserAvatar profile={currentUserProfile} className="local-message-avatar" />
                         </button>
                       )}
-                      {campMessage.authorType === 'agent' && (
-                        <time className="message-continuation-time" aria-hidden="true">
-                          {messageClockTime(campMessage.createdAt)}
-                        </time>
-                      )}
                       {(campMessage.authorType === 'user'
                         || campMessage.authorType === 'agent'
                         || campMessage.authorType === 'external_principal')
@@ -5807,10 +5820,10 @@ export function ThreadWorkspace({
                                   <MessageModelSummary message={campMessage} installations={installations}
                                     displayName={author} avatarRef={authorProfile?.avatarRef ?? null} />
                                 )}
-                                <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                               </div>
                               <div className="public-message-readout">
                               <MessageSurface
+                                timestamp={messageTimestamp}
                                 copied={copied}
                                 hasDelivery={campMessage.authorType === 'agent' && campMessageDeliveries.length > 0}
                                 showActions={campMessage.authorType !== 'agent'}
@@ -5856,16 +5869,23 @@ export function ThreadWorkspace({
                                     segment.kind === 'current_user_mention'
                                   )
                                     ? (
-                                        <div className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                        <AgentMessageContent className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
                                           {replyQuote}
                                           {renderPublicMessageBody(campMessage, 'timeline')}
-                                        </div>
+                                        </AgentMessageContent>
                                       )
                                     : (
-                                        <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' || campMessage.authorType === 'agent' ? campMessage.id : undefined} data-quote-owner={`thread:${snapshot.thread.id}`}>
-                                          {replyQuote}
-                                          {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
-                                        </div>
+                                        campMessage.authorType === 'agent' ? (
+                                          <AgentMessageContent className="message-bubble" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                            {replyQuote}
+                                            {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
+                                          </AgentMessageContent>
+                                        ) : (
+                                          <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' ? campMessage.id : undefined} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                            {replyQuote}
+                                            {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
+                                          </div>
+                                        )
                                       )
                                 )}
                                 {!humanAuthored && (
@@ -5894,6 +5914,8 @@ export function ThreadWorkspace({
                                 && trailingResultItems.length === 0 && !timelineItem.interruptedRun
                                 && (
                                   <MessageActions
+                                    timestamp={messageTimestamp}
+                                    timeAfter
                                     copied={copied}
                                     className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                                     onReply={handleReply}
@@ -5952,6 +5974,8 @@ export function ThreadWorkspace({
                           <RunInterruptionMarker run={timelineItem.interruptedRun} author={author} onOpen={openExecutionProcess} />
                         )}
                         <MessageActions
+                          timestamp={messageTimestamp}
+                          timeAfter
                           copied={copied}
                           className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                           onReply={handleReply}
@@ -9985,6 +10009,7 @@ function ReplyParentQuote({
 }
 
 function MessageSurface({
+  timestamp,
   copied,
   hasDelivery,
   showActions = true,
@@ -9995,6 +10020,7 @@ function MessageSurface({
   withdrawing = false,
   children
 }: {
+  timestamp?: React.ReactNode
   copied: boolean
   hasDelivery: boolean
   showActions?: boolean
@@ -10011,6 +10037,7 @@ function MessageSurface({
       {showActions && (
         <div className="message-action-line">
           <MessageActions
+            timestamp={timestamp}
             copied={copied}
             onReply={onReply}
             onCopy={onCopy}
@@ -10025,6 +10052,8 @@ function MessageSurface({
 }
 
 function MessageActions({
+  timestamp,
+  timeAfter = false,
   copied,
   className,
   onReply,
@@ -10032,6 +10061,8 @@ function MessageActions({
   onWithdraw,
   withdrawing = false
 }: {
+  timestamp?: React.ReactNode
+  timeAfter?: boolean
   copied: boolean
   className?: string
   onReply?(modality: ReplyFocusModality): void
@@ -10048,6 +10079,7 @@ function MessageActions({
       <span className="copy-feedback" role="status" aria-live="polite">
         {copied ? uiAttribute("已复制") : ''}
       </span>
+      {!timeAfter && timestamp}
       <MessageCopyButton copied={copied} onCopy={onCopy} />
       {onWithdraw && (
         <button
@@ -10075,6 +10107,7 @@ function MessageActions({
           <MessageReplyIcon />
         </button>
       )}
+      {timeAfter && timestamp}
     </div>
   )
 }

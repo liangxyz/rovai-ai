@@ -297,11 +297,11 @@ export function SafeMarkdown({
               </MarkdownCodeFrame>
             )
           },
-          ...(mode === 'document' ? {
-            table({ children: tableChildren }) {
-              return <div className="markdown-table-scroll"><table>{tableChildren}</table></div>
-            }
-          } : {}),
+          table({ children: tableChildren }) {
+            return mode === 'document'
+              ? <div className="markdown-table-scroll"><table>{tableChildren}</table></div>
+              : <div className="markdown-table-scroll" tabIndex={0} role="region" aria-label={uiAttribute('表格')}><table>{tableChildren}</table></div>
+          },
           a({ href, children: linkChildren, className: linkClassName }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {
               let rawReference: string

@@ -12,7 +12,7 @@ let error
 try {
   // The helper Core only prepares the private Native profile. The App launches
   // its own bundled sidecar, whose fingerprint is the relevant execution proof.
-  f.report.appCoreSha256=digest(await readFile(join(dirname(app),'resources/bin/rovai-core.exe')))
+  f.report.appCoreSha256=digest(await readFile(join(dirname(app),'resources/bin/rovai-host.exe')))
   f.report.appAsarSha256=digest(await readFile(join(dirname(app),'resources/app.asar')))
   const fixture=join(f.root,'shutdown'),output=join(f.root,'captures')
   // The production default asks before closing. Set only this fixture's explicit

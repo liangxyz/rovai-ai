@@ -3090,6 +3090,33 @@ mod tests {
             assert_eq!(pending.len(), 1);
             assert_eq!(pending[0].delivery_id, source);
             assert_eq!(pending[0].execution_epoch, 1);
+            if stage == "running" {
+                // Hermes deliberately has no configuration compatibility digest.
+                // Native Binding generation and actual Run status still fence input.
+                f.database.connection().execute("UPDATE agent_run SET runtime_adapter_kind='hermes-cli',runtime_reported_version='0.22.4',runtime_protocol_version='acp-v1',runtime_binding_compatibility_digest=NULL WHERE id=?1", [&run]).unwrap();
+                assert!(
+                    crate::steer::active_input_availability(f.database.connection(), &run, 1)
+                        .unwrap()
+                        .ready
+                );
+                assert!(
+                    !crate::steer::active_input_availability(f.database.connection(), &run, 2)
+                        .unwrap()
+                        .can_steer
+                );
+                f.database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_run SET status='succeeded',ended_at=datetime('now') WHERE id=?1",
+                        [&run],
+                    )
+                    .unwrap();
+                assert!(
+                    !crate::steer::active_input_availability(f.database.connection(), &run, 1)
+                        .unwrap()
+                        .can_steer
+                );
+            }
         }
         let mut fixture = Fixture::new();
         fixture.publish_visible_without_delivery("quoted-reference", "agent", "agent_2");

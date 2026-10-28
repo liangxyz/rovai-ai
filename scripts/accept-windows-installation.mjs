@@ -127,14 +127,19 @@ async function locateInstallation() {
 }
 
 async function installedFileEvidence(directory, { compareWithCurrentPayload = true } = {}) {
+  // Old baseline installers predate Host; the current payload always ships Host.
+  const hostName = compareWithCurrentPayload
+    || existsSync(join(directory, 'resources', 'bin', 'rovai-host.exe'))
+    ? 'rovai-host.exe'
+    : 'rovai-core.exe'
   const files = {
     app: join(directory, `${executableName}.exe`),
-    core: join(directory, 'resources', 'bin', 'rovai-core.exe'),
+    core: join(directory, 'resources', 'bin', hostName),
     cli: join(directory, 'resources', 'bin', 'rovai.exe')
   }
   const unpacked = {
     app: join(root, 'dist', 'win-unpacked', `${executableName}.exe`),
-    core: join(root, 'dist', 'win-unpacked', 'resources', 'bin', 'rovai-core.exe'),
+    core: join(root, 'dist', 'win-unpacked', 'resources', 'bin', 'rovai-host.exe'),
     cli: join(root, 'dist', 'win-unpacked', 'resources', 'bin', 'rovai.exe')
   }
   const evidence = {}
@@ -163,7 +168,9 @@ async function waitForUninstall(directory, timeoutMs = 20_000) {
 }
 
 function launchRunningUpgradeApp(executable, dataRoot, logPath) {
-  const preparer = join(dirname(executable), 'resources', 'bin', 'rovai-core.exe')
+  const binDirectory = join(dirname(executable), 'resources', 'bin')
+  const host = join(binDirectory, 'rovai-host.exe')
+  const preparer = existsSync(host) ? host : join(binDirectory, 'rovai-core.exe')
   run(preparer, ['--prepare-windows-data-root', dataRoot])
   const logHandle = openSync(logPath, 'w')
   try {

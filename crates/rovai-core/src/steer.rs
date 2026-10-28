@@ -32,6 +32,7 @@ pub fn supports_active_input(adapter: &str) -> bool {
             | "kiro-cli"
             | "zcode-app"
             | "trae-cn-cli"
+            | "hermes-cli"
     )
 }
 
@@ -105,6 +106,7 @@ pub fn protocol_unavailable(
         "kiro-cli" => ([2, 21, 1], 2),
         "zcode-app" => ([0, 16, 5], 0),
         "trae-cn-cli" => ([0, 207, 1], 0),
+        "hermes-cli" => ([0, 22, 4], 0),
         // The unresolved 2.132.0 business outcome is not an established ABI break.
         // CodeBuddy uses a minimum-only version policy; observed release results
         // remain separate from this compatibility policy.
@@ -171,10 +173,14 @@ pub fn active_input_availability(
         Some(ExecutionNotReady)
     } else if unknown {
         Some(InputOutcomeUnknown)
-    } else if [&fingerprint, &installation, &path, &binding]
+    } else if [&fingerprint, &installation, &path]
         .iter()
         .any(|v| v.as_deref().is_none_or(|s| s.trim().is_empty()))
         || generation.is_none_or(|g| g <= 0)
+        // Hermes uses the existing Native Binding identity policy. The accepted
+        // input above still has to match the Conversation's binding generation.
+        || (adapter.as_deref() != Some("hermes-cli")
+            && binding.as_deref().is_none_or(|s| s.trim().is_empty()))
     {
         Some(RuntimeIdentityUnknown)
     } else {

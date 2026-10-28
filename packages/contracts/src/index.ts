@@ -444,7 +444,7 @@ export interface ProductRuntimeCatalogEntry {
 
 export type HostPlatformKey = 'macos-arm64' | 'macos-x64' | 'windows-x64' | 'linux-x64'
 
-export type RuntimePlatformAdmissionStatus = 'qualified' | 'preview' | 'not_qualified' | 'unsupported'
+export type RuntimePlatformAdmissionStatus = 'enabled' | 'qualified' | 'preview' | 'not_qualified' | 'unsupported'
 
 export type RuntimePlatformAdmissionReasonCode =
   | 'runtime_platform.qualification_evidence_missing'

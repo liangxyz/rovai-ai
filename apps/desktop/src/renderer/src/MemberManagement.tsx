@@ -75,6 +75,7 @@ import {
 import type { MemberWorkspaceTab } from './MemberSidebar'
 import {
   VISIBLE_PRODUCT_RUNTIMES,
+  visibleProductRuntimes,
   PRODUCT_RUNTIME_LOGOS,
   adapterLabel
 } from './runtime-products'
@@ -1295,6 +1296,7 @@ export const MemberRuntimeForm = forwardRef<
         <div className="member-editor-runtime-primary">
           <MemberRuntimePicker
             id={runtimeSelectId}
+            runtimeKinds={visibleProductRuntimes(hostPlatform, runtimePlatformAdmission)}
             value={selectedKind}
             disabled={(busy !== null || submitting) || persistedRuntimeLocked}
             isDisabled={(kind) =>
@@ -1565,7 +1567,7 @@ export function RuntimeInstallationsPanel({
         </div>
 
         <div className="runtime-product-list">
-          {VISIBLE_PRODUCT_RUNTIMES.map((runtimeKind) => {
+          {visibleProductRuntimes(health?.hostPlatform ?? null, health?.runtimePlatformAdmission ?? []).map((runtimeKind) => {
             const item = availability.find(
               (candidate) => candidate.runtimeKind === runtimeKind
             )

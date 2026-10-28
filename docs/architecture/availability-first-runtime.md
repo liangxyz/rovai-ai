@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-availability-and-authority-startup-boundary
 status: accepted
-last_updated: 2026-10-12
+last_updated: 2026-10-28
 ---
 
 # Availability-first Runtime
@@ -102,7 +102,16 @@ authority artifacts；SHM 是可丢弃协调缓存，但只能在 main 不存在
 两个 main 同时出现、孤立 WAL/journal、未知合同、损坏/不可读、权限拒绝、SQLite busy 或对象 identity 改变都产生
 typed blocker。现有 main 优先以 READ_ONLY/NOFOLLOW 探测，不使用 CREATE。只读连接对干净 WAL 库可能新建空 WAL
 和 SHM：只有 main/journal 的对象、长度与状态未变，且原本缺失的 WAL 新建后为零字节，才视为正常探测副作用。
-已存在 WAL 的改变、新出现的非空 WAL 与 main/journal 改变仍拒绝；这不改变孤立 WAL 的阻断规则。
+已存在 WAL 的改变、新出现的非空 WAL 与 main/journal 改变仍拒绝；下述已证实的 macOS 来源标记变化只允许
+丢弃旧观察后重新准入，不直接放行旧票据。这不改变孤立 WAL 的阻断规则。
+
+macOS 可以在只读探测或随后以 READ_WRITE 打开时，为 main、WAL 或 rollback journal 添加
+`com.apple.provenance`，从而改变 ctime。兼容路径要求至少一个 artifact 的标记明确从无到有，且该文件的
+对象、长度、mtime、属主和权限均未变，其余 authority artifacts 保持不变或符合相同标记条件；另一 namespace
+仍须为空。main 添加标记时，可保留原有零字节 WAL 的可重建例外，但非空 WAL/journal 不允许替换、出现或消失。
+Core 在任何应用写入前丢弃旧观察，完整重新准入一次，并严格消费新票据。existing open 的原连接在重新准入期间
+保持打开，避免关闭连接触发 checkpoint；重新准入不再允许额外 journal recovery 或来源标记重试。一般 ctime
+变化、未知标记状态、数据/权限变化及再次漂移仍拒绝。Windows 的 last-write/size 状态校验不适用此 macOS 例外。
 
 `SQLITE_READONLY_ROLLBACK` / `SQLITE_READONLY_RECOVERY` 表示引擎需要正常日志恢复，不等同于目录权限拒绝。
 Admission 在仍持有 lease 且复核两个 namespace 后，只对原 exact target 做一次 READ_WRITE/NOFOLLOW、无 CREATE、
@@ -126,11 +135,9 @@ SHM 不参与 existing/migration ticket 的绝对字节稳定要求。
 READ_WRITE/NOFOLLOW/NO_MUTEX 打开且不带 CREATE。任何写入前，在同一只读事务重验 contract/schema/classifier、
 完整 receipt（含 applied_at）和 schema cookie，并再次验证文件身份；漂移返回非重试 `authority_contract_changed`。
 
-macOS 首次由新版 App 打开旧 authority 时，系统可能给原 main 文件添加 `com.apple.provenance`，只改变 ctime。
-普通票据仍按完整身份严格拒绝。仅在确认 provenance 从无到有、main 对象/长度/mtime/属主/权限未变、
-WAL 与 journal 无数据变化且另一 namespace 为空时，Core 才可在任何应用迁移写入前丢弃旧票据，
-完整重新准入一次；新旧 source contract 与全部 receipt 必须一致。任一条件不满足或再次漂移仍停止，
-不得把这条兼容路径用于一般 ctime 变化或未知文件替换。
+迁移打开使用同一 macOS 来源标记判定。普通票据仍按完整身份严格拒绝；只有满足上述 artifact 条件，Core
+才可在任何应用迁移写入前丢弃旧票据并完整重新准入一次。迁移还要求新旧 source contract 与全部 receipt 一致；
+任一条件不满足或再次漂移仍停止，不得把这条兼容路径用于一般 ctime 变化或未知文件替换。
 
 复用既有逐版本 IMMEDIATE 事务，DDL/DML、marker 和 receipt 一起提交，失败只回滚当前步骤；重启从缺失步骤继续。
 正常迁移不创建 staging、backup、manifest，不替换 main，不默认执行全库 quick_check/foreign_key_check。关键对象

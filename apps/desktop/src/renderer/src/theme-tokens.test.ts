@@ -488,9 +488,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.agent-message-output > \.agent-message-output-actions\s*\{[^}]*width: fit-content[^}]*justify-content: flex-start[^}]*margin: 3px 0 0 37px/)
     expect(css).toContain('.agent-message-output:hover > .message-actions')
     expect(css).toContain('.message-actions.is-persistent')
-    expect(css).toMatch(/\.message-copy-button,\s*\.message-reply-button,\s*\.message-withdraw-button\s*\{[^}]*width: 28px[^}]*height: 28px/)
+    expect(css).toMatch(/\.message-copy-button,\s*\.message-reply-button,\s*\.message-withdraw-button\s*\{[^}]*width: 28px[^}]*height: 28px[^}]*margin: 0[^}]*place-items: center/)
     expect(css).toMatch(/\.message-copy-button svg,\s*\.message-reply-button svg,\s*\.message-withdraw-button svg\s*\{[^}]*width: 17px[^}]*height: 17px/)
-    expect(css).toMatch(/\.message-actions > button \+ button\s*\{[^}]*margin-left: 1px/)
     expect(css).toMatch(/\.message-long-toggle\s*\{[^}]*min-height: 28px[^}]*margin: 3px 0 -4px -5px[^}]*color: var\(--muted\)/)
     expect(css).toContain('.message-long-toggle[aria-expanded="true"] svg')
     expect(css).not.toContain('.message-long-ellipsis')
@@ -522,9 +521,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)\s*\{\s*:root\s*\{[^}]*--conversation-composer-width:\s*1440px/
     )
-    expect(css).toMatch(
-      /\.conversation-bubble\.agent \.safe-markdown > :where\(pre, \.markdown-code-frame, table\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
-    )
+    expect(css).toContain('--agent-message-prose-width: 780px;')
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-event-card:not\(\.task-event-card\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
     )

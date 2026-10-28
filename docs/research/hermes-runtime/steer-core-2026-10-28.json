@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-28",
+  "baseCommit": "f6ab0c068d287e03a82bc16726127440902e8a25",
+  "scope": "Production Core with official Hermes ACP; same Core Run may span native prompts submitted by Steer. No Desktop UI or Intel hardware acceptance.",
+  "controlled": {
+    "passed": true,
+    "realModel": false,
+    "nativeVersion": "0.22.4",
+    "nativeCommit": "4d04303818b61bf3aa09278af48356315515965b",
+    "transport": "official ACP /steer, production Core, native shared Gateway",
+    "cases": [
+      {
+        "name": "active_two_supplements_and_file_reference",
+        "run": "18296c86-aedc-49a4-b2cf-bee3ecebdf90",
+        "inputs": [
+          {
+            "id": "bb8a2e75-b9c5-408f-a7a6-a01986a2a22e",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-d30763fa-2cef-419b-ad7f-c5b863ac8f31-4",
+            "dispatch_started_at": "2026-10-28T06:01:29.664214+00:00"
+          },
+          {
+            "id": "b90182cc-abd3-4fa0-b417-8200e3ab0099",
+            "status": "accepted",
+            "input_kind": "steer",
+            "native_input_id": "acp-prompt-d30763fa-2cef-419b-ad7f-c5b863ac8f31-5",
+            "dispatch_started_at": "2026-10-28T06:01:31.276582+00:00"
+          },
+          {
+            "id": "29f3ea0a-aaef-4f08-92c1-00c4930db91c",
+            "status": "accepted",
+            "input_kind": "steer",
+            "native_input_id": "acp-prompt-d30763fa-2cef-419b-ad7f-c5b863ac8f31-6",
+            "dispatch_started_at": "2026-10-28T06:01:31.379229+00:00"
+          }
+        ],
+        "result": "BLUE",
+        "sendOwnedByRun": true
+      },
+      {
+        "name": "cold_resume_end_race_cli_and_ordinary_queue",
+        "run": "377a5f0e-aca4-4ae6-a77a-466166a111af",
+        "supplementalMessage": "372733ee-a77b-4e7b-8fa1-8a2411a589a5",
+        "inputs": [
+          {
+            "id": "848024a3-21f5-4e23-844d-f5f0c7f20fe1",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-68462579-a6eb-4506-8dcd-7c0082c3e5b6-3",
+            "dispatch_started_at": "2026-10-28T06:01:36.163967+00:00"
+          },
+          {
+            "id": "dec1c2a9-fda9-4d64-b5eb-eab8088a9402",
+            "status": "accepted",
+            "input_kind": "steer",
+            "native_input_id": "acp-prompt-68462579-a6eb-4506-8dcd-7c0082c3e5b6-4",
+            "dispatch_started_at": "2026-10-28T06:01:36.892904+00:00"
+          }
+        ],
+        "sendOwnedByRun": true
+      },
+      {
+        "name": "cancel_during_native_continuation",
+        "inputs": [
+          {
+            "id": "18f2e0fa-fe66-4135-9e20-696372d1ca04",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-6f06adbf-1e34-40b9-a153-a6515f638ee7-4",
+            "dispatch_started_at": "2026-10-28T06:01:44.084653+00:00"
+          },
+          {
+            "id": "6ec3e208-cbca-4bd8-8637-661e6c1752d5",
+            "status": "delivery_unknown",
+            "input_kind": "steer",
+            "native_input_id": null,
+            "dispatch_started_at": "2026-10-28T06:01:44.855832+00:00"
+          }
+        ],
+        "status": "cancelled",
+        "gatewayAlive": true,
+        "sameSessionNextRun": "611a1b16-a730-429e-926e-7dbf6673716c",
+        "noAutomaticReplay": true
+      },
+      {
+        "name": "lost_receipt_no_replay",
+        "run": "df5e0b7e-8d4e-49b5-8190-b4a8f5fdc4f0",
+        "supplementalMessage": "3dc13035-d70c-4fa0-94e0-e07084463cff",
+        "inputs": [
+          {
+            "id": "f1ffca43-13ba-49e6-9ec2-7ed0abd813da",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-fa7a4657-1a5b-45b6-b19b-47ee01feac6a-4",
+            "dispatch_started_at": "2026-10-28T06:01:52.306867+00:00"
+          },
+          {
+            "id": "2acb817c-961f-484e-92f4-780206230ae1",
+            "status": "delivery_unknown",
+            "input_kind": "steer",
+            "native_input_id": null,
+            "dispatch_started_at": "2026-10-28T06:01:53.020532+00:00"
+          }
+        ],
+        "sendOwnedByRun": true
+      },
+      {
+        "name": "explicit_rejection_uses_normal_queue",
+        "inputs": [
+          {
+            "id": "10111106-c906-41c8-bc63-477bf9851594",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-395a93cf-3727-45a5-b2ae-af6882e9b406-4",
+            "dispatch_started_at": "2026-10-28T06:01:56.002495+00:00"
+          },
+          {
+            "id": "f35a6349-3e75-4637-80d8-09f798c8f818",
+            "status": "not_accepted",
+            "input_kind": "steer",
+            "native_input_id": null,
+            "dispatch_started_at": "2026-10-28T06:01:56.828036+00:00"
+          }
+        ],
+        "nextRun": "63262284-a44c-4d0e-a6c4-6aa98f715146"
+      }
+    ],
+    "acpSummary": {
+      "promptRequests": 14,
+      "steerRequests": 6,
+      "cancellationRequests": 1
+    },
+    "coreSha256": "28f416970e4dcabef23c5a61a1f090c2f844cdf98c2a1bb2f800a248433e1c8e",
+    "probeSha256": "3c94ad564be4fd14ad75c65849130865f8cacac8a9646936fbaac7a58abba040",
+    "upstreamUnmodified": true,
+    "configUnchanged": true,
+    "rawEvidenceSha256": "f30393bad83362f4e9e7dd836e5ad1a15ff90b9d00f47f72ad854d49997edc78",
+    "fixture": "rovai-hermes-core-steer-2AHz3Y",
+    "mainModelRequests": 29,
+    "allProviderRequests": 61,
+    "models": [
+      "native-probe"
+    ],
+    "coreRunStatuses": [
+      {
+        "status": "cancelled",
+        "count": 1
+      },
+      {
+        "status": "failed",
+        "count": 1
+      },
+      {
+        "status": "succeeded",
+        "count": 6
+      }
+    ],
+    "sameSessionNativeAdmissions": [
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 2
+      },
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 3
+      },
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 4
+      },
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 5
+      }
+    ],
+    "sameSessionResumeConnections": 2
+  },
+  "realModel": {
+    "passed": true,
+    "realModel": true,
+    "nativeVersion": "0.22.4",
+    "nativeCommit": "4d04303818b61bf3aa09278af48356315515965b",
+    "transport": "official ACP /steer, production Core, native shared Gateway",
+    "cases": [
+      {
+        "name": "active_two_supplements_and_file_reference",
+        "run": "ba24783b-7f33-4d73-9221-bd282f58e07a",
+        "inputs": [
+          {
+            "id": "3beefe99-4842-4a58-97c1-18ebf59027bc",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-23935914-6c04-46f5-bd17-b552fceb43cc-4",
+            "dispatch_started_at": "2026-10-28T05:55:22.105598+00:00"
+          },
+          {
+            "id": "8229bbe2-10ba-4e9c-8e4c-7030452f31cd",
+            "status": "accepted",
+            "input_kind": "steer",
+            "native_input_id": "acp-prompt-23935914-6c04-46f5-bd17-b552fceb43cc-5",
+            "dispatch_started_at": "2026-10-28T05:55:26.140123+00:00"
+          },
+          {
+            "id": "4bda1c01-1756-4e83-803e-f459a17d8b2a",
+            "status": "accepted",
+            "input_kind": "steer",
+            "native_input_id": "acp-prompt-23935914-6c04-46f5-bd17-b552fceb43cc-6",
+            "dispatch_started_at": "2026-10-28T05:55:26.253108+00:00"
+          }
+        ],
+        "result": "BLUE",
+        "sendOwnedByRun": true
+      },
+      {
+        "name": "cold_resume_end_race_cli_and_ordinary_queue",
+        "run": "b0285149-9d09-4efc-903c-894f0e2120ac",
+        "supplementalMessage": "ed200d6a-14dd-4074-a6d3-3eee324e3031",
+        "inputs": [
+          {
+            "id": "027cd2f2-29ba-450f-9071-8b55a6bab147",
+            "status": "accepted",
+            "input_kind": "start",
+            "native_input_id": "acp-prompt-faeb669b-a9cf-4b52-b25f-b40a4f387cd3-3",
+            "dispatch_started_at": "2026-10-28T05:55:46.674494+00:00"
+          },
+          {
+            "id": "93cbfb02-8ab0-454c-9cee-6a65631d0a69",
+            "status": "accepted",
+            "input_kind": "steer",
+            "native_input_id": "acp-prompt-faeb669b-a9cf-4b52-b25f-b40a4f387cd3-4",
+            "dispatch_started_at": "2026-10-28T05:55:59.008331+00:00"
+          }
+        ],
+        "sendOwnedByRun": true
+      }
+    ],
+    "acpSummary": {
+      "promptRequests": 6,
+      "steerRequests": 3,
+      "cancellationRequests": 0
+    },
+    "coreSha256": "28f416970e4dcabef23c5a61a1f090c2f844cdf98c2a1bb2f800a248433e1c8e",
+    "probeSha256": "b04e890c6bb1ec78ce00700cb19358a6205520aa3c6c75a12a0dab64206358ef",
+    "upstreamUnmodified": true,
+    "configUnchanged": true,
+    "rawEvidenceSha256": "875f32f34479c49eac551ea327f388aac8d76daf3c62d591ea1f8dc0cf28cab4",
+    "fixture": "rovai-hermes-core-steer-bnvFhA",
+    "mainModelRequests": 12,
+    "allProviderRequests": 18,
+    "models": [
+      "gpt-6.1-sol"
+    ],
+    "coreRunStatuses": [
+      {
+        "status": "succeeded",
+        "count": 3
+      }
+    ],
+    "sameSessionNativeAdmissions": [
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 2
+      },
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 3
+      },
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 4
+      },
+      {
+        "status": "terminal",
+        "outcome": "completed",
+        "generation": 5
+      }
+    ],
+    "sameSessionResumeConnections": 2
+  },
+  "earlierAttempts": [
+    {
+      "fixture": "rovai-hermes-core-steer-rotEYk",
+      "outcome": "stopped",
+      "reason": "Probe omitted permission resolution; both supplement receipts were accepted, then native command approval correctly waited. Test Core and Gateway were stopped."
+    },
+    {
+      "fixture": "rovai-hermes-core-steer-YBrBey",
+      "outcome": "probe_cleanup_failed",
+      "reason": "All five case assertions passed, then fixture called nonexistent core.shutdown instead of core.stop. Final controlled run repeats all cases and successful cleanup."
+    }
+  ],
+  "unitFixtureCorrections": [
+    "Terminal test row required ended_at alongside succeeded.",
+    "Hermes fake initialize needed agentInfo.version=0.22.4; a frozen version alone does not satisfy the native launch check."
+  ],
+  "limits": [
+    "Steer does not interrupt a currently executing blocking tool.",
+    "Shared Gateway and effects already dispatched are not owned by ACP cleanup.",
+    "Native image blocks are not submitted by the shared ACP Steer route; this verifies text and explicit file references.",
+    "Diff, compaction observation and per-Run usage are unchanged."
+  ]
+}

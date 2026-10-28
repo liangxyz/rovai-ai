@@ -4,13 +4,13 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Runtime Platform Admission v2
 
 v2 replaces [v1](runtime-platform-admission-v1.md). v1 的平台键、Core 单一真源、既有配置保留和
-digest-bound qualification evidence 规则不变；v2 增加可执行但未完成正式资格验证的 `preview` 状态。
+digest-bound qualification evidence 规则不变；v2 提供 `preview`，以及维护者明确按普通产品开放的 `enabled` 状态。
 
 ## 1. Closed types
 
@@ -22,6 +22,7 @@ export type HostPlatformKey =
   | 'linux-x64'
 
 export type RuntimePlatformAdmissionStatus =
+  | 'enabled'
   | 'qualified'
   | 'preview'
   | 'not_qualified'
@@ -36,7 +37,8 @@ export interface RuntimePlatformAdmission {
 }
 ```
 
-`qualified` 必须有非空 immutable evidence revision，且 `reasonCode = null`。`preview` 必须保留阻止正式资格化的
+`enabled` 表示维护者明确开放普通使用，`reasonCode = null`、`evidenceRevision = null`；不是 Preview，
+也不声称完整平台资格验证已经完成。`qualified` 必须有非空 immutable evidence revision，且 `reasonCode = null`。`preview` 必须保留阻止正式资格化的
 closed reason code，且 `evidenceRevision = null`；它不能被统计或描述为 First-Class/qualified。
 `not_qualified` 与 `unsupported` 的 reason/evidence 规则沿用 v1。
 
@@ -55,16 +57,16 @@ Admission，不是 Renderer-only Settings Preview；后者仍没有 Adapter、In
 
 ## 3. Admission effects
 
-| Consumer | `qualified` | `preview` | `not_qualified` | `unsupported` |
-| --- | --- | --- | --- | --- |
-| discovery / availability check | allowed | allowed | omitted | omitted |
-| managed Installation create/relocate | allowed | allowed | denied | denied |
-| Onboarding / Member selection | enabled | enabled; actual machine status only | disabled: platform unverified | disabled: platform unsupported |
-| diagnostics | platform row + machine facts | platform row + machine facts | platform row only | platform row only |
-| AgentRun preflight | continue | continue with all ordinary runtime/capability blockers | `runtime_platform_not_qualified` | `runtime_platform_unsupported` |
-| migration/default materialization | allowed | allowed | forbidden | forbidden |
+| Consumer | `enabled` | `qualified` | `preview` | `not_qualified` | `unsupported` |
+| --- | --- | --- | --- | --- | --- |
+| discovery / availability check | allowed | allowed | allowed | omitted | omitted |
+| managed Installation create/relocate | allowed | allowed | allowed | denied | denied |
+| Onboarding / Member selection | enabled | enabled | enabled; actual machine status only | disabled: platform unverified | disabled: platform unsupported |
+| diagnostics | platform row + machine facts | platform row + machine facts | platform row + machine facts | platform row only | platform row only |
+| AgentRun preflight | continue with ordinary blockers | continue | continue with all ordinary runtime/capability blockers | `runtime_platform_not_qualified` | `runtime_platform_unsupported` |
+| migration/default materialization | allowed | allowed | allowed | forbidden | forbidden |
 
-Machine facts remain independent. `preview` does not manufacture installation, authentication, model, capability, Session or Ready
+Machine facts remain independent. `enabled` and `preview` do not manufacture installation, authentication, model, capability, Session or Ready
 evidence; all ordinary checks and fail-closed Runtime blockers still apply.
 
 Runtime management presents admitted rows with the reported version and actual machine-state badge. It does not
@@ -86,7 +88,7 @@ artifact and admission decision.
 
 ## 5. Existing configuration preservation
 
-The v1 byte-preserving rule remains for denied rows. `preview` configurations are mutable and executable like admitted rows, but
+The v1 byte-preserving rule remains for denied rows. `enabled` and `preview` configurations are mutable and executable like admitted rows, but
 their runtime/model/permission values still pass the same Adapter schema, Installation and Dispatch validation as qualified rows.
 No fallback Runtime or synthetic default may be created after failure.
 
@@ -164,13 +166,12 @@ ARM64、Windows、子代理或未来版本；Preview 不冒充完整平台资格
 
 ## Hermes 初始准入
 
-2026-10-27 按 User sequence 122 暂缓公开，取代同日 sequence 113 的 macOS 开放决定。
-`hermes-cli` 在 macOS arm64、macOS x64、Windows x64 与 Linux x64 全部为
-`not_qualified / qualification_evidence_missing`，evidenceRevision 均为 null。
-设置、新手引导、成员和 Skills 选择、安装引导、监控筛选均隐藏 Hermes，不显示占位或待支持提示；
-普通 discovery、检查、安装配置和执行由共享 Admission 拒绝。内部 Adapter、历史身份和既有证据保留。
-现有执行证据只覆盖已记录的 macOS arm64 安装，不构成公开准入。兼容策略仍为 >=0.22.4，
-不锁 commit；重新开放需另行确认。
+2026-10-28 按维护者明确要求，Hermes 在 macOS arm64、macOS x64、Windows x64、Linux x64 均普通开放，
+取代此前仅 macOS Preview 的范围。四行均为 `enabled / reasonCode=null / evidenceRevision=null`，
+允许普通 discovery、检查、安装配置、成员选择与执行，不采用 Preview，也不显示实验或资格缺失提示。
+设置、引导、成员和 Skills 选择、安装引导及监控筛选均消费 Core Admission，不另建平台白名单。
+这项开放不伪造完整平台资格证据；既有原生模型记录仍按其目标主机范围解释。
+兼容策略仍为 >=0.22.4，不锁 commit；普通机器与原生协议检查继续执行。
 [当前合同](hermes-managed-runtime-v1.md)与[验证记录](../research/hermes-runtime/README.md)区分原生共享
 Gateway 的受控验收、此前实现的真实 LLM 证据和未完成矩阵；不由一次 Ready 探测推断完整平台资格。
 初始准入理由见 [V1.72-D62](../versions/v1.72/decisions.md#v1-72-d62)，当前接入边界见

@@ -291,6 +291,17 @@ struct AcpActivePrompt {
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
     zcode_input_id: Option<String>,
     codebuddy_request_id: Option<String>,
+    hermes_progress: HermesPromptProgress,
+}
+
+/// Hermes may turn a late slash steer into another native prompt. Keep the
+/// existing Run's route until every submitted request has returned; notifications
+/// and native-session CLI calls still belong to that Run in the meantime.
+#[derive(Debug, Clone, Default)]
+struct HermesPromptProgress {
+    pending_steers: usize,
+    original_terminal: Option<(u64, Value)>,
+    supplement_failure: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1282,6 +1293,7 @@ pub(crate) struct AcpRpcError {
     provider_detail: Option<String>,
     minimax_steer_pre_delivery_rejection: bool,
     hermes_session_missing: bool,
+    hermes_input_admitted: bool,
 }
 
 impl std::fmt::Debug for AcpRpcError {
@@ -1343,6 +1355,7 @@ impl AcpRpcError {
                 .map(str::to_string),
             hermes_session_missing: value["code"] == -32603
                 && value["data"]["details"] == "not_found",
+            hermes_input_admitted: value["data"]["details"] == "admitted_turn_failed",
             minimax_steer_pre_delivery_rejection: value["code"] == -32602
                 && matches!(
                     message.as_str(),
@@ -2671,6 +2684,99 @@ impl AcpHost {
     }
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
+        if self.adapter_kind == AdapterKind::HermesCli {
+            let target = match &pending {
+                PendingRpc::Prompt {
+                    owner,
+                    session_id,
+                    prompt_id,
+                } => Some((owner.clone(), session_id.clone(), prompt_id.clone(), false)),
+                PendingRpc::Response {
+                    steer_target: Some(target),
+                    ..
+                } => Some((
+                    target.owner.clone(),
+                    target.session_id.clone(),
+                    target.prompt_id.clone(),
+                    true,
+                )),
+                _ => None,
+            };
+            if let Some((owner, session_id, prompt_id, supplement)) = target {
+                let terminal = {
+                    let mut routes = self.routes.write().await;
+                    let progress = routes.get_mut(&session_id).and_then(|route| {
+                        if route.owner != owner {
+                            return None;
+                        }
+                        match &mut route.phase {
+                            AcpSessionPhase::PromptActive(prompt)
+                                if prompt.prompt_id == prompt_id =>
+                            {
+                                Some(&mut prompt.hermes_progress)
+                            }
+                            _ => None,
+                        }
+                    });
+                    if let Some(progress) = progress {
+                        if supplement {
+                            progress.pending_steers = progress.pending_steers.saturating_sub(1);
+                            // A proven pre-admission rejection returns this input to
+                            // the normal queue, without failing the original work.
+                            let rejected = matches!(
+                                message["error"]["code"].as_i64(),
+                                Some(-32600 | -32601 | -32602)
+                            );
+                            if !rejected
+                                && message["result"]["stopReason"] != "end_turn"
+                                && progress.supplement_failure.is_none()
+                            {
+                                progress.supplement_failure = Some(message.clone());
+                            }
+                        } else {
+                            progress.original_terminal = Some((id, message.clone()));
+                        }
+                        if progress.pending_steers == 0 {
+                            progress.original_terminal.take().map(|(id, mut original)| {
+                                if original["result"]["stopReason"] == "end_turn"
+                                    && let Some(failure) = progress.supplement_failure.take()
+                                {
+                                    original = failure;
+                                    original["id"] = json!(id);
+                                }
+                                (id, original)
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+                // Settle the correlated input before publishing the aggregate
+                // terminal. No model text or slash notice is used as a receipt.
+                if supplement {
+                    self.complete_single_pending(id, pending, message).await;
+                }
+                if let Some((id, message)) = terminal {
+                    self.complete_single_pending(
+                        id,
+                        PendingRpc::Prompt {
+                            owner,
+                            session_id,
+                            prompt_id,
+                        },
+                        message,
+                    )
+                    .await;
+                }
+                return;
+            }
+        }
+        self.complete_single_pending(id, pending, message).await;
+    }
+
+    async fn complete_single_pending(&self, id: u64, pending: PendingRpc, message: Value) {
         let response_error = message.get("error").map(AcpRpcError::from_response);
         let response = if let Some(error) = response_error.as_ref() {
             Err(self.redact_text(&error.diagnostic()))
@@ -4336,6 +4442,7 @@ impl AcpHost {
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
                 zcode_input_id: None,
                 codebuddy_request_id: None,
+                hermes_progress: HermesPromptProgress::default(),
             });
         }
         self.pending.lock().await.insert(
@@ -5818,7 +5925,7 @@ impl AcpRuntime {
             .await
             .context("ACP Session is unavailable")?;
         let ingress = self.host.ingress_fence.lock().await;
-        let routes = self.host.routes.read().await;
+        let mut routes = self.host.routes.write().await;
         let active = self.host.is_alive() && routes.get(&session).is_some_and(|route|
             route.owner == self.owner && !route.client_terminal_create_cancelled
             && matches!(&route.phase, AcpSessionPhase::PromptActive(p) if p.prompt_id == expected_prompt));
@@ -5863,6 +5970,10 @@ impl AcpRuntime {
             _ => None,
         });
         let (method, params) = match self.adapter_kind() {
+            AdapterKind::HermesCli => (
+                "session/prompt",
+                json!({"sessionId":session,"prompt":[{"type":"text","text":format!("/steer {text}")}]}),
+            ),
             AdapterKind::CodebuddyCli if !codebuddy_legacy => (
                 "session/steer",
                 // An unobserved native owner must not become an unfenced send.
@@ -5906,6 +6017,12 @@ impl AcpRuntime {
         };
         let id = self.host.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, response) = oneshot::channel();
+        if self.adapter_kind() == AdapterKind::HermesCli
+            && let Some(route) = routes.get_mut(&session)
+            && let AcpSessionPhase::PromptActive(prompt) = &mut route.phase
+        {
+            prompt.hermes_progress.pending_steers += 1;
+        }
         // A supplement response is never the authoritative original Prompt
         // terminal. Legacy CodeBuddy returns end_turn before its tool ends.
         self.host.pending.lock().await.insert(
@@ -5924,8 +6041,9 @@ impl AcpRuntime {
                 }),
             },
         );
-        // Some transports cannot atomically bind to a native turn. Retire the
-        // exact Host for every path so no leftover queue reaches a successor.
+        // Some transports cannot atomically bind to a native turn. Do not reuse
+        // this ACP Host after steering. Hermes additionally drains submitted
+        // prompts above; closing its client does not stop the shared Gateway.
         self.host.retire_after_steer.store(true, Ordering::Release);
         timeout(
             Duration::from_secs(10),
@@ -5936,18 +6054,39 @@ impl AcpRuntime {
         .context("ACP active input write timed out")??;
         drop(routes);
         drop(ingress);
-        let result = timeout(
-            Duration::from_secs(if self.adapter_kind() == AdapterKind::ZcodeApp {
-                600
-            } else {
-                45
-            }),
-            response,
-        )
-        .await
-        .context("ACP active input response timed out")?
-        .context("ACP active input response disconnected")?;
+        // A slash steer normally returns immediately, but its native fallback
+        // is a full prompt. Use the Run's existing cancellation/lifetime budget.
+        let result = if self.adapter_kind() == AdapterKind::HermesCli {
+            response
+                .await
+                .context("Hermes supplemental prompt disconnected")?
+        } else {
+            timeout(
+                Duration::from_secs(if self.adapter_kind() == AdapterKind::ZcodeApp {
+                    600
+                } else {
+                    45
+                }),
+                response,
+            )
+            .await
+            .context("ACP active input response timed out")?
+            .context("ACP active input response disconnected")?
+        };
         let result = match result {
+            Err(error) if self.adapter_kind() == AdapterKind::HermesCli => {
+                if let Some(native) = error.downcast_ref::<AcpRpcError>() {
+                    if native.hermes_input_admitted {
+                        // Execution failure is retained in the aggregate terminal;
+                        // the input itself is known to have been admitted.
+                        return Ok(acp_prompt_id(&self.host.host_instance_id, id));
+                    }
+                    if matches!(native.code, Some(-32600 | -32601 | -32602)) {
+                        return Err(rovai_core::steer::ActiveInputNotAccepted.into());
+                    }
+                }
+                return Err(error);
+            }
             Err(error)
                 if self.adapter_kind() == AdapterKind::MinimaxCodeCli
                     && error.downcast_ref::<AcpRpcError>().is_some_and(|e| {
@@ -5985,6 +6124,9 @@ impl AcpRuntime {
             }
             result => result?,
         };
+        if self.adapter_kind() == AdapterKind::HermesCli && result["stopReason"] != "end_turn" {
+            bail!("Hermes did not confirm the supplemental prompt");
+        }
         if self.adapter_kind() == AdapterKind::MinimaxCodeCli
             && (result["mode"] != "steered" || result["turnId"].as_str().is_none_or(str::is_empty))
         {
@@ -13015,6 +13157,7 @@ while IFS= read -r ignored; do :; done
             (AdapterKind::KiroCli, false),
             (AdapterKind::TraeCnCli, false),
             (AdapterKind::MinimaxCodeCli, false),
+            (AdapterKind::HermesCli, false),
         ] {
             for (late, unsupported, bad_owner) in [
                 (false, false, false),
@@ -13023,7 +13166,11 @@ while IFS= read -r ignored; do :; done
                 (true, true, false),
                 (false, false, true),
             ] {
-                if late && unsupported && (kind != AdapterKind::CodebuddyCli || legacy) {
+                if late
+                    && unsupported
+                    && (!matches!(kind, AdapterKind::CodebuddyCli | AdapterKind::HermesCli)
+                        || legacy)
+                {
                     continue;
                 }
                 if bad_owner
@@ -13038,6 +13185,7 @@ while IFS= read -r ignored; do :; done
                             | AdapterKind::TraeCnCli
                             | AdapterKind::CodebuddyCli
                             | AdapterKind::MinimaxCodeCli
+                            | AdapterKind::HermesCli
                     ) || legacy)
                 {
                     continue;
@@ -13091,9 +13239,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'"#
                         format!("{rejection}\nIFS= read -r finish || exit 1\n{terminal}")
                     }
                 } else if unsupported {
-                    format!(
+                    let rejection = format!(
                         "printf '%s\\n' '{{\"id\":{supplement_request},\"error\":{{\"code\":-32601,\"message\":\"Method not found\"}}}}'\nIFS= read -r finish || exit 1\n{terminal}"
-                    )
+                    );
+                    if late {
+                        format!("{terminal}\n{rejection}")
+                    } else {
+                        rejection
+                    }
                 } else if kind == AdapterKind::KiroCli {
                     let queued = r#"printf '%s\n' '{"method":"_kiro.dev/session/update","params":{"sessionId":"session-steer","update":{"sessionUpdate":"AgentExecutionUserMessageQueued","messageId":"native-steer","content":"PRIOR\n\nSTEER"}}}'"#;
                     let queued_result = !bad_owner;
@@ -13120,8 +13273,13 @@ IFS= read -r finish || exit 1
                         )
                     }
                 } else if late {
+                    let continuation = if kind == AdapterKind::HermesCli {
+                        r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-steer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"continuation"}}}}'"#
+                    } else {
+                        ""
+                    };
                     format!(
-                        "{terminal}\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{supplement_request},\"result\":{response}}}'"
+                        "{terminal}\n{continuation}\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{supplement_request},\"result\":{response}}}'"
                     )
                 } else {
                     format!(
@@ -13133,7 +13291,7 @@ IFS= read -r finish || exit 1
                     &format!(
                         r#"#!/bin/sh
 IFS= read -r initialize || exit 1
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}},"authMethods":[{{"id":"cached_token","name":"Cached token"}}]}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"version":"0.22.4"}},"agentCapabilities":{{}},"authMethods":[{{"id":"cached_token","name":"Cached token"}}]}}}}'
 {authentication}
 IFS= read -r original || exit 1
 IFS= read -r supplemental || exit 1
@@ -13147,8 +13305,11 @@ while IFS= read -r ignored; do :; done
                 );
                 let mut frozen = frozen_trae_runtime(&executable);
                 frozen.adapter_kind = kind;
+                if kind == AdapterKind::HermesCli {
+                    frozen.reported_version = Some("0.22.4".into());
+                }
                 frozen.permissions = serde_json::from_value(json!({"adapterKind":kind.as_str(),"schemaVersion":1,
-                    "values": if kind == AdapterKind::QwenCode { json!({"approval_mode":"yolo"}) } else if kind == AdapterKind::KiroCli { json!({"trust_all_tools":"on"}) } else { json!({"permission_mode":"bypassPermissions"}) }})).unwrap();
+                    "values": if kind == AdapterKind::QwenCode { json!({"approval_mode":"yolo"}) } else if kind == AdapterKind::KiroCli { json!({"trust_all_tools":"on"}) } else if kind == AdapterKind::HermesCli { json!({"permission_mode":"dont_ask"}) } else { json!({"permission_mode":"bypassPermissions"}) }})).unwrap();
                 let workspace =
                     AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into());
                 let (incoming, mut receiver) = mpsc::unbounded_channel();
@@ -13290,6 +13451,14 @@ while IFS= read -r ignored; do :; done
                             .is::<rovai_core::steer::ActiveInputNotAccepted>()
                     );
                     host.notify("fixture/finish", json!({})).await.unwrap();
+                } else if late && kind == AdapterKind::HermesCli {
+                    result.unwrap();
+                    assert!(!host.protocol_violated.load(Ordering::Acquire));
+                    let request: Value =
+                        serde_json::from_str(std::fs::read_to_string(&requests).unwrap().trim())
+                            .unwrap();
+                    assert_eq!(request["method"], "session/prompt");
+                    assert_eq!(request["params"]["prompt"][0]["text"], "/steer STEER");
                 } else if late {
                     let error = result.unwrap_err();
                     assert_eq!(
@@ -13382,6 +13551,153 @@ while IFS= read -r ignored; do :; done
                                     .unwrap_err()
                                     .is::<rovai_core::steer::ActiveInputNotAccepted>(),
                                 "a late response cannot prove that the input was never submitted"
+                            );
+                        }
+                    }
+                }
+                if kind == AdapterKind::HermesCli && !late && !unsupported {
+                    // Reuse this transport owner for the aggregate terminal:
+                    // two already-submitted inputs must both settle, in either
+                    // ordering relative to the original terminal.
+                    for (original_first, reply, accepted, rejected) in [
+                        (
+                            true,
+                            json!({"result":{"stopReason":"end_turn"}}),
+                            true,
+                            false,
+                        ),
+                        (
+                            false,
+                            json!({"result":{"stopReason":"end_turn"}}),
+                            true,
+                            false,
+                        ),
+                        (
+                            true,
+                            json!({"error":{"code":-32603,"message":"native failure","data":{"details":"admitted_turn_failed"}}}),
+                            true,
+                            false,
+                        ),
+                        (
+                            true,
+                            json!({"error":{"code":-32603,"message":"connection lost"}}),
+                            false,
+                            false,
+                        ),
+                        (
+                            true,
+                            json!({"error":{"code":-32602,"message":"invalid input"}}),
+                            false,
+                            true,
+                        ),
+                        (
+                            true,
+                            json!({"result":{"stopReason":"cancelled"}}),
+                            false,
+                            false,
+                        ),
+                    ] {
+                        host.bind_session("session-steer", &runtime.owner, AcpSessionPhase::Ready)
+                            .await
+                            .unwrap();
+                        let prepared = host
+                            .prepare_prompt("session-steer", &runtime.owner, "aggregate")
+                            .await
+                            .unwrap();
+                        let mut waiters = Vec::new();
+                        for input in ["first", "second"] {
+                            let runtime = runtime.clone();
+                            let prompt_id = prepared.prompt_id.clone();
+                            waiters.push(tokio::spawn(async move {
+                                runtime.steer(&prompt_id, input, input).await
+                            }));
+                            timeout(Duration::from_secs(2), async {
+                                loop {
+                                    let routes = host.routes.read().await;
+                                    if let AcpSessionPhase::PromptActive(p) =
+                                        &routes["session-steer"].phase
+                                        && p.hermes_progress.pending_steers == waiters.len()
+                                    {
+                                        break;
+                                    }
+                                    drop(routes);
+                                    tokio::task::yield_now().await;
+                                }
+                            })
+                            .await
+                            .unwrap();
+                        }
+                        let _ingress = host.ingress_fence.lock().await;
+                        let original = host
+                            .pending
+                            .lock()
+                            .await
+                            .remove(&prepared.request_id)
+                            .unwrap();
+                        let end =
+                            json!({"id":prepared.request_id,"result":{"stopReason":"end_turn"}});
+                        let mut original = Some(original);
+                        if original_first {
+                            host.complete_pending(
+                                prepared.request_id,
+                                original.take().unwrap(),
+                                end.clone(),
+                            )
+                            .await;
+                        }
+                        for index in 0..2 {
+                            assert!(matches!(
+                                host.routes.read().await["session-steer"].phase,
+                                AcpSessionPhase::PromptActive(_)
+                            ));
+                            let forwarded = host.route_session_message("session-steer", &json!({"method":"session/update","params":{"sessionId":"session-steer","update":{"sessionUpdate":"tool_call","toolCallId":"continuation"}}}), 0).await;
+                            assert!(matches!(forwarded, AcpSessionMessageRoute::Forward { .. }));
+                            let id = prepared.request_id + index + 1;
+                            let pending = host.pending.lock().await.remove(&id).unwrap();
+                            let message = if index == 0 {
+                                json!({"result":{"stopReason":"end_turn"}})
+                            } else {
+                                reply.clone()
+                            };
+                            host.complete_pending(id, pending, message).await;
+                        }
+                        if let Some(original) = original {
+                            assert!(matches!(
+                                host.routes.read().await["session-steer"].phase,
+                                AcpSessionPhase::PromptActive(_)
+                            ));
+                            host.complete_pending(prepared.request_id, original, end)
+                                .await;
+                        }
+                        assert!(matches!(
+                            host.routes.read().await["session-steer"].phase,
+                            AcpSessionPhase::PromptCompleted(_)
+                        ));
+                        let result = waiters.pop().unwrap().await.unwrap();
+                        assert_eq!(result.is_ok(), accepted);
+                        if let Err(error) = result {
+                            assert_eq!(
+                                error.is::<rovai_core::steer::ActiveInputNotAccepted>(),
+                                rejected
+                            );
+                        }
+                        waiters.pop().unwrap().await.unwrap().unwrap();
+                        let final_message = loop {
+                            if let AcpIncoming::Message { message, .. } =
+                                receiver.recv().await.unwrap()
+                                && message["method"] == "rovai/acp_prompt_completed"
+                            {
+                                break message;
+                            }
+                        };
+                        if rejected || reply["result"]["stopReason"] == "end_turn" {
+                            assert_eq!(final_message["params"]["result"]["stopReason"], "end_turn");
+                        } else if reply.get("error").is_some() {
+                            assert!(final_message["params"]["error"].is_string());
+                        } else {
+                            assert_eq!(
+                                final_message["params"]["result"]["stopReason"],
+                                "cancelled"
                             );
                         }
                     }

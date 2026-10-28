@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-delivery-and-agent-run-boundaries
 status: accepted
-last_updated: 2026-10-15
+last_updated: 2026-10-28
 ---
 
 # Public Camp Message、Delivery 与 AgentRun
@@ -160,7 +160,7 @@ Core 在发布时捕获可用的目标 Run／epoch，Scheduler 复用既有 work
 共同 DynamicInputContext Builder 和 Formatter 只读本次来源，新输入读取最新动态事实；启动内容、
 执行配置、Bootstrap 和已物化输入保持冻结。Manifest 可以一 Run 多条，ACK、恢复和历史 fence 关联
 精确 Manifest。正常结束时可证明未提交的来源回普通队列；未知不重放，取消不自动启动后继。
-当前支持 Codex、Claude Code、Pi、CodeBuddy、Qwen Code、Grok Build、Kiro CLI、ZCode、TRAE CLI CN，运输和回执见
+当前支持 Codex、Claude Code、Pi、CodeBuddy、Qwen Code、MiniMax Code、Grok Build、Kiro CLI、ZCode、TRAE CLI CN、Hermes，运输和回执见
 [Message Delivery v18](../contracts/message-delivery-v18.md)。Qwen 只通过原生拉取回调投递；
 CodeBuddy 的补充响应不结束原 Run。Pi 的精确 RPC queued 响应确认接收，不等待消费。
 CodeBuddy/Grok 缺少原生 turn 参数，以 Run/epoch/Session fence 和执行后 Host 回收限制迟到输入；
@@ -177,6 +177,9 @@ Kiro 以当前 Prompt 的逐请求 queued 回执确认，ZCode 以原 Turn 的�
 
 Claude 复用 Stream JSON 和既有输入编号关联回显，允许确认跨越内部 result；接收不承诺原生同轮。
 回执不决定 Run 生命周期，可靠结束后未确认输入单独保持未知，不重发、不阻塞收尾。
+Hermes 复用官方 ACP slash Steer；原生来晚转下一轮时，Core 在同一 Run 内跟踪已提交请求到完成。
+原请求先返回但补充请求尚未结束时，保留活动绑定、CLI 授权及事件归属；最后统一收尾。
+已知结束不再补充，普通 waiting 消息仍由原队列启动；不新增映射表或 Gateway 管理通道。
 已确定且支持插话的启动 Run 先保存 Delivery 意图，初始输入接受后再由同一 Scheduler 物化／投递；
 等待只新增既有 Delivery 归属，不新增正文。启动时补全缺失版本须核验实际冻结程序身份，普通运行资格保持。
 

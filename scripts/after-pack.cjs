@@ -15,12 +15,6 @@ module.exports = async function afterPack(context) {
       originalFilename: appFilename,
       iconPath
     })
-    await stampWindowsExecutable(join(bundledBin, 'rovai-core.exe'), {
-      version,
-      description: 'Rovai AI Core',
-      originalFilename: 'rovai-core.exe',
-      iconPath
-    })
     await stampWindowsExecutable(join(bundledBin, 'rovai-host.exe'), {
       version,
       description: 'Rovai AI Host',
@@ -40,7 +34,6 @@ module.exports = async function afterPack(context) {
   const appName = `${context.packager.appInfo.productFilename}.app`
   const infoPlist = join(context.appOutDir, appName, 'Contents', 'Info.plist')
   const bundledBin = join(context.appOutDir, appName, 'Contents', 'Resources', 'bin')
-  chmodSync(join(bundledBin, 'rovai-core'), 0o755)
   chmodSync(join(bundledBin, 'rovai-host'), 0o755)
   chmodSync(join(bundledBin, 'rovai'), 0o755)
   execFileSync('/usr/libexec/PlistBuddy', [

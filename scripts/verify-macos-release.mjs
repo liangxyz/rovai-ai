@@ -284,31 +284,26 @@ try {
   if (!existsSync(appPath)) throw new Error(`${appName} is missing from the mounted DMG`)
 
   const appExecutable = join(appPath, 'Contents', 'MacOS', executableName)
-  const corePath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')
   const hostPath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai-host')
   const cliPath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai')
-  for (const requiredPath of [appExecutable, corePath, hostPath, cliPath]) {
+  for (const requiredPath of [appExecutable, hostPath, cliPath]) {
     if (!existsSync(requiredPath)) throw new Error(`required binary is missing: ${requiredPath}`)
   }
 
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath])
-  run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', corePath])
   run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', hostPath])
   run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', cliPath])
   report.push('App codesign verification: passed')
-  report.push('rovai-core codesign verification: passed')
   report.push('rovai-host codesign verification: passed')
   report.push('rovai codesign verification: passed')
 
   assertArchitecture('App', appExecutable)
-  assertArchitecture('rovai-core', corePath)
   assertArchitecture('rovai-host', hostPath)
   assertArchitecture('rovai', cliPath)
 
   assertAppMetadata('DMG App', appPath)
 
   signatureDetails('App', appPath, EXPECTED_APP_ID)
-  signatureDetails('rovai-core', corePath)
   signatureDetails('rovai-host', hostPath)
   signatureDetails('rovai', cliPath)
   runMacosTicket('validate', appPath, { cwd: root })
@@ -325,7 +320,7 @@ try {
   signatureDetails('Update ZIP App', zipAppPath, EXPECTED_APP_ID)
   assertArchitecture('Update ZIP App', join(zipAppPath, 'Contents', 'MacOS', executableName))
   assertAppMetadata('Update ZIP App', zipAppPath)
-  for (const binaryName of ['rovai-core', 'rovai-host', 'rovai']) {
+  for (const binaryName of ['rovai-host', 'rovai']) {
     const binaryPath = join(zipAppPath, 'Contents', 'Resources', 'bin', binaryName)
     run('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', binaryPath])
     signatureDetails(`Update ZIP ${binaryName}`, binaryPath)
