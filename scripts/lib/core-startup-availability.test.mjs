@@ -242,10 +242,10 @@ test('a missing Pi executable stays in Runtime availability instead of subsystem
   }
 })
 
-// This owns the Core RPC -> transaction -> private notification seam. Queue
-// ordering/edit semantics remain in pending_camp_input.rs; no Runtime is invoked.
-test('queued input commits notify Desktop without exposing private bodies in public history', async () => {
-  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-queue-events-')))
+// Core owns publication atomicity and metadata-only notifications, not private
+// Draft/Pending editing. The client local-store/sync tests own unsent text retention.
+test('inline publication rolls back failures and notifies Desktop without leaking unsent bodies', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-publication-events-')))
   const dataDir = process.platform === 'win32'
     ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
     : join(fixture, 'data')
@@ -257,63 +257,180 @@ test('queued input commits notify Desktop without exposing private bodies in pub
     await core.ready
     await core.settled()
     const agent = (await core.request('members.list')).find(profile => profile.presence === 'present')
-    const created = await core.request('camps.create', {
-      commandId: randomUUID(), name: 'Private queue notification fixture', workspace: null,
+    assert.equal(agent.runtimeConfiguration, null, 'This fixture must never launch a configured model')
+    const created = await core.request('threads.create', {
+      commandId: randomUUID(), name: 'Publication notification fixture', workspace: null,
       memberAgentIds: [agent.agentId], defaultLeadAgentId: agent.agentId, collaborationMode: 'peer'
     })
     assert.equal(created.status, 'applied')
     const threadId = created.payload.threadId
+    const originalRequest = {
+      commandId: randomUUID(), threadId, content: composerDocumentForAddress({ mode: 'default' }, 'Preserved history'),
+      sourceAttachments: [], quotes: [], replyToThreadMessageId: null, execution: null
+    }
+    const messageHints = () => core.notifications.filter(event => event.method === 'thread.messages.changed'
+      && event.params.threadId === threadId)
+    const publicationInvalidations = () => core.notifications.filter(event => event.method === 'navigation.invalidated'
+      && event.params.threadId === threadId && event.params.reason === 'camp.messages.send')
+    const assertMetadataOnly = (hint) => {
+      assert.deepEqual(Object.keys(hint.params).sort(), ['indexChanged', 'threadId', 'throughGlobalSequence', 'unavailableMessageIds'])
+      assert.equal(hint.params.threadId, threadId)
+      assert.equal(hint.params.indexChanged, true)
+      assert.deepEqual(hint.params.unavailableMessageIds, [])
+      assert.ok(Number.isSafeInteger(hint.params.throughGlobalSequence) && hint.params.throughGlobalSequence > 0)
+    }
+    const original = await core.request('thread.messages.send', originalRequest)
+    assert.equal(original.commandResult.code, 'camp_message.sent')
     await core.close()
+    assert.equal(messageHints().length, 1)
+    assertMetadataOnly(messageHints()[0])
     database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    const history = database.prepare('SELECT * FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(threadId)
+    const sequences = database.prepare('SELECT last_message_sequence, last_delivery_sequence FROM camp WHERE id = ?').get(threadId)
+    const events = database.prepare('SELECT * FROM event_log WHERE camp_id = ? ORDER BY rowid').all(threadId)
     const now = new Date().toISOString()
+    // A historical private row has no authority to publish or block a new send.
     database.prepare(`INSERT INTO pending_camp_input(
       id, camp_id, enqueue_sequence, state, structured_content_json, execution_json, user_id,
       last_attempt_error_code, created_at, updated_at
     ) VALUES ('held-head', ?, 1, 'needs_repair', ?, 'null', 'local_user', 'fixture.hold', ?, ?)`)
       .run(threadId, JSON.stringify([{ kind: 'text', text: 'Private held head' }]), now, now)
-    // A publication transaction must fail before it can create a Run or execute a
-    // model. The scheduler still has to announce the committed needs_repair state.
+    const legacyPending = database.prepare("SELECT * FROM pending_camp_input WHERE id = 'held-head'").get()
+    const assertPublicationUnchanged = (commandId) => {
+      assert.deepEqual(database.prepare('SELECT * FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(threadId), history)
+      assert.deepEqual(database.prepare('SELECT last_message_sequence, last_delivery_sequence FROM camp WHERE id = ?').get(threadId), sequences)
+      assert.deepEqual(database.prepare('SELECT * FROM event_log WHERE camp_id = ? ORDER BY rowid').all(threadId), events)
+      assert.equal(database.prepare('SELECT COUNT(*) AS count FROM camp_message_delivery').get().count, 0)
+      assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run').get().count, 0)
+      assert.equal(database.prepare('SELECT COUNT(*) AS count FROM camp_composer_draft').get().count, 0)
+      assert.equal(database.prepare('SELECT COUNT(*) AS count FROM event_log WHERE command_id = ?').get(commandId).count, 0)
+      assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE payload_json LIKE '%Private refused body%' OR payload_json LIKE '%Private receipt body%'").get().count, 0)
+      assert.deepEqual(database.prepare("SELECT * FROM pending_camp_input WHERE id = 'held-head'").get(), legacyPending)
+    }
     database.exec(`CREATE TRIGGER refuse_fixture_publication BEFORE INSERT ON camp_message
       BEGIN SELECT RAISE(ABORT, 'fixture publication refusal'); END;`)
     database.close()
     database = null
     core = startCore(dataDir, skillRoot, mcpPath)
     await core.ready
-    const draft = await core.request('camp.composerDraft.save', {
-      threadId, expectedRevision: 0, content: composerDocumentForAddress({ mode: 'default' }, 'Private queued body')
+    const refused = {
+      commandId: randomUUID(), threadId, content: composerDocumentForAddress({ mode: 'default' }, 'Private refused body'),
+      sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
+      execution: { taskId: null, purpose: 'publication rollback fixture', completionRole: 'required' }
+    }
+    await assert.rejects(core.request('thread.messages.send', refused), error => {
+      assert.equal(error.code, 'CORE_REQUEST_FAILED')
+      assert.match(error.message, /fixture publication refusal/)
+      return true
     })
-    const result = await core.request('camp.messages.send', {
-      commandId: randomUUID(), threadId, draftRevision: draft.revision,
-      execution: { taskId: null, purpose: 'private queue fixture', completionRole: 'required' }
+    assert.equal(messageHints().length, 0)
+    assert.equal(publicationInvalidations().length, 0)
+    await core.close()
+    // close() drains stdout: a delayed hint must not escape a failed transaction.
+    assert.equal(messageHints().length, 0)
+    assert.equal(publicationInvalidations().length, 0)
+    assert.equal(JSON.stringify(core.notifications).includes('Private refused body'), false)
+    database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    assertPublicationUnchanged(refused.commandId)
+    database.exec('DROP TRIGGER refuse_fixture_publication')
+    const receiptRefused = {
+      ...refused, commandId: randomUUID(), content: composerDocumentForAddress({ mode: 'default' }, 'Private receipt body')
+    }
+    // Fail only after message, Delivery and sequences were written, at the last
+    // receipt boundary. The entire transaction and its collected hint must roll back.
+    database.exec(`CREATE TRIGGER refuse_fixture_receipt BEFORE INSERT ON event_log
+      WHEN NEW.event_type = 'command.result' AND NEW.command_id = '${receiptRefused.commandId}'
+      BEGIN
+        SELECT RAISE(ABORT, 'fixture receipt missing staged message')
+          WHERE NOT EXISTS(SELECT 1 FROM camp_message WHERE camp_id = '${threadId}' AND body = 'Private receipt body');
+        SELECT RAISE(ABORT, 'fixture receipt missing staged Delivery')
+          WHERE NOT EXISTS(SELECT 1 FROM camp_message_delivery d JOIN camp_message m ON m.id = d.message_id
+            WHERE m.camp_id = '${threadId}' AND m.body = 'Private receipt body');
+        SELECT RAISE(ABORT, 'fixture receipt missing staged sequences')
+          WHERE NOT EXISTS(SELECT 1 FROM camp WHERE id = '${threadId}'
+            AND last_message_sequence = ${sequences.last_message_sequence + 1}
+            AND last_delivery_sequence = ${sequences.last_delivery_sequence + 1});
+        SELECT RAISE(ABORT, 'fixture receipt refusal after publication');
+      END;`)
+    database.close()
+    database = null
+    core = startCore(dataDir, skillRoot, mcpPath)
+    await core.ready
+    await assert.rejects(core.request('thread.messages.send', receiptRefused), error => {
+      assert.equal(error.code, 'CORE_REQUEST_FAILED')
+      assert.match(error.message, /fixture receipt refusal after publication/)
+      return true
     })
-    assert.equal(result.commandResult.code, 'pending_input.queued')
-    const item = (await core.request('camp.pendingInputs.get', { threadId })).items[1]
-    const edit = async (action, editToken = null, target = item) => core.request('camp.pendingInputs.edit', {
-      commandId: randomUUID(), command: { threadId, pendingInputId: target.id,
-        expectedRevision: target.revision, editToken, action }
-    })
-    const begun = await edit({ type: 'begin' })
-    assert.equal(begun.status, 'applied')
-    const editing = await core.request('camp.pendingInputs.get', { threadId })
-    assert.equal(editing.editSession.editToken, begun.payload.editToken)
-    assert.equal((await edit({ type: 'cancel' }, begun.payload.editToken)).status, 'applied')
-    assert.equal((await edit({ type: 'delete' }, null, editing.items[0])).status, 'applied')
+    assert.equal(messageHints().length, 0)
+    assert.equal(publicationInvalidations().length, 0)
+    await core.close()
+    assert.equal(messageHints().length, 0)
+    assert.equal(publicationInvalidations().length, 0)
+    assert.equal(/Private refused body|Private receipt body/.test(JSON.stringify(core.notifications)), false)
+    database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    assertPublicationUnchanged(refused.commandId)
+    assertPublicationUnchanged(receiptRefused.commandId)
+    database.exec('DROP TRIGGER refuse_fixture_receipt')
+    database.close()
+    database = null
+    core = startCore(dataDir, skillRoot, mcpPath)
+    await core.ready
+    assert.equal(messageHints().length, 0)
+    const replay = await core.request('thread.messages.send', originalRequest)
+    assert.equal(replay.replayed, true)
+    assert.deepEqual(replay.commandResult, original.commandResult)
+    assert.equal(messageHints().length, 0, 'Receipt replay must not issue a second message-change hint')
+    const publishedRequest = {
+      ...refused, commandId: randomUUID(), content: composerDocumentForAddress({ mode: 'default' }, 'Public delivery body')
+    }
+    const published = await core.request('thread.messages.send', publishedRequest)
+    assert.equal(messageHints().length, 1)
+    assertMetadataOnly(messageHints()[0])
+    const publishedReplay = await core.request('thread.messages.send', publishedRequest)
+    assert.equal(publishedReplay.replayed, true)
+    assert.deepEqual(publishedReplay.commandResult, published.commandResult)
+    assert.equal(messageHints().length, 1, 'An accepted command replay must not duplicate its message-change hint')
+    assert.equal(published.commandResult.status, 'accepted')
+    assert.equal(published.commandResult.code, 'camp_message.deliveries_waiting')
+    assert.equal(published.commandResult.payload.deliveryIds.length, 1)
+    const deliveryId = published.commandResult.payload.deliveryIds[0]
     const deadline = Date.now() + 10_000
-    while (!core.notifications.some(event => event.method === 'camp.pendingInputs.changed' && event.params.reason === 'publication_failed')) {
-      assert.ok(Date.now() < deadline, 'A failed publication must notify the private queue')
+    while (true) {
+      database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
+      const delivery = database.prepare('SELECT status FROM camp_message_delivery WHERE id = ?').get(deliveryId)
+      database.close()
+      database = null
+      if (delivery.status === 'failed') break
+      assert.ok(Date.now() < deadline, 'A committed Delivery must settle its missing Runtime configuration')
       await new Promise(resolve => setTimeout(resolve, 20))
     }
-    const failed = await core.request('camp.pendingInputs.get', { threadId })
-    assert.equal(failed.items.length, 1)
-    assert.equal(failed.items[0].state, 'needs_repair')
-    const invalidations = core.notifications.filter(event => event.method === 'camp.pendingInputs.changed')
-    assert.deepEqual(invalidations.map(event => event.params.reason), ['enqueued', 'edited', 'edited', 'edited', 'publication_failed'])
-    assert.ok(invalidations.every(event => event.params.threadId === threadId && Object.keys(event.params).length === 2))
+    const invalidations = core.notifications.filter(event => event.method === 'navigation.invalidated'
+      && event.params.threadId === threadId && event.params.reason === 'camp.messages.send')
+    assert.ok(invalidations.length > 0)
+    assert.ok(invalidations.every(event => Object.keys(event.params).sort().join(',') === 'reason,scope,threadId'))
+    assert.equal(/Private refused body|Private receipt body|Private held head|Public delivery body/.test(JSON.stringify(core.notifications)), false)
     await core.close()
+    assert.equal(messageHints().length, 1, 'Draining output must reveal exactly one committed-publication hint')
+    assertMetadataOnly(messageHints()[0])
+    assert.equal(/Private refused body|Private receipt body|Private held head|Public delivery body/.test(JSON.stringify(core.notifications)), false)
     database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run').get().count, 0)
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM camp_message').get().count, 0)
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE payload_json LIKE '%Private queued body%'").get().count, 0)
+    const messages = database.prepare('SELECT * FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(threadId)
+    assert.deepEqual(messages.slice(0, history.length), history)
+    assert.deepEqual(messages.map(message => message.body), ['Preserved history', 'Public delivery body'])
+    assert.equal(messages[1].id, published.commandResult.payload.threadMessageId)
+    const delivery = database.prepare('SELECT status, failure_code, claimed_agent_run_id FROM camp_message_delivery WHERE id = ?').get(deliveryId)
+    assert.equal(delivery.status, 'failed')
+    assert.equal(delivery.failure_code, 'runtime_not_configured')
+    const run = database.prepare('SELECT status, last_error_code FROM agent_run WHERE id = ?').get(delivery.claimed_agent_run_id)
+    assert.equal(run.status, 'failed')
+    assert.equal(run.last_error_code, 'runtime_not_configured')
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run').get().count, 1)
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM camp_message_delivery').get().count, 1)
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM event_log WHERE command_id = ?').get(refused.commandId).count, 0)
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM event_log WHERE command_id = ?').get(receiptRefused.commandId).count, 0)
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE command_id = ? AND event_type = 'command.result'").get(publishedRequest.commandId).count, 1)
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE payload_json LIKE '%Private refused body%' OR payload_json LIKE '%Private receipt body%' OR payload_json LIKE '%Private held head%'").get().count, 0)
+    assert.deepEqual(database.prepare("SELECT * FROM pending_camp_input WHERE id = 'held-head'").get(), legacyPending)
   } finally {
     database?.close()
     await core.close()
@@ -322,10 +439,10 @@ test('queued input commits notify Desktop without exposing private bodies in pub
   }
 })
 
-// The library owns aggregation and edit fences. This process test owns the
-// startup -> ready -> send RPC / scheduler seam, including an already emptied queue.
-test('idle camps accept new input and drain backlog after legacy failed-turn recovery', async () => {
-  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-idle-queue-recovery-')))
+// Core recovers published responsibilities, not the retired private Pending queue.
+// Client local-store/send-recovery tests cover rejected and unknown unsent drafts.
+test('idle Threads preserve failed history and drain public Deliveries after restart', async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-idle-delivery-recovery-')))
   const dataDir = process.platform === 'win32'
     ? JSON.parse(execFileSync(binary, ['--prepare-windows-data-root', join(fixture, 'formal')], { encoding: 'utf8' })).core
     : join(fixture, 'data')
@@ -334,41 +451,48 @@ test('idle camps accept new input and drain backlog after legacy failed-turn rec
   let core = startCore(dataDir, skillRoot, mcpPath)
   let database
   const camps = []
-  const sendText = async (threadId, body) => {
-    const current = await core.request('camp.composerDraft.get', { threadId })
-    const draft = await core.request('camp.composerDraft.save', {
-      threadId, expectedRevision: current.revision, content: composerDocumentForAddress({ mode: 'default' }, body)
-    })
-    // No new Run or model is allowed in this transport/scheduler fixture.
-    return core.request('camp.messages.send', {
-      commandId: randomUUID(), threadId, draftRevision: draft.revision, execution: null
-    })
-  }
+  const inline = (threadId, body) => ({
+    commandId: randomUUID(), threadId, content: composerDocumentForAddress({ mode: 'default' }, body),
+    sourceAttachments: [], quotes: [], replyToThreadMessageId: null, execution: null
+  })
   try {
     await core.ready
     await core.settled()
-    const agentId = (await core.request('members.list')).find(profile => profile.presence === 'present').agentId
+    const agent = (await core.request('members.list')).find(profile => profile.presence === 'present')
+    assert.equal(agent.runtimeConfiguration, null, 'Backlog admission must not launch a configured model')
+    const agentId = agent.agentId
     for (const backlog of [false, true]) {
-      const created = await core.request('camps.create', {
-        commandId: randomUUID(), name: 'Idle queue recovery fixture', workspace: null,
+      const created = await core.request('threads.create', {
+        commandId: randomUUID(), name: 'Idle Delivery recovery fixture', workspace: null,
         memberAgentIds: [agentId], defaultLeadAgentId: agentId, collaborationMode: 'peer'
       })
       assert.equal(created.status, 'applied')
       const threadId = created.payload.threadId
-      const first = await sendText(threadId, 'A')
+      const request = inline(threadId, 'A')
+      const first = await core.request('thread.messages.send', request)
       assert.equal(first.commandResult.code, 'camp_message.sent')
-      camps.push({ threadId, backlog, messageId: first.commandResult.payload.threadMessageId, turnId: randomUUID() })
+      const published = []
+      if (backlog) {
+        for (const body of ['B', 'C']) {
+          const sent = await core.request('thread.messages.send', inline(threadId, body))
+          assert.equal(sent.commandResult.code, 'camp_message.sent')
+          published.push({ messageId: sent.commandResult.payload.threadMessageId, body })
+        }
+      }
+      camps.push({ threadId, published, request, first, messageId: first.commandResult.payload.threadMessageId,
+        turnId: randomUUID(), runId: randomUUID(), pendingId: randomUUID() })
     }
     await core.close()
     database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
     const now = new Date().toISOString()
-    for (const { threadId, backlog, messageId, turnId } of camps) {
+    for (const camp of camps) {
+      const { threadId, messageId, turnId, runId, pendingId } = camp
       database.prepare(`INSERT OR IGNORE INTO conversation(id, camp_id, agent_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)`).run(randomUUID(), threadId, agentId, now, now)
       const conversationId = database.prepare('SELECT id FROM conversation WHERE camp_id = ? AND agent_id = ?').get(threadId, agentId).id
       database.prepare(`INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, created_at, updated_at)
         VALUES (?, ?, 'camp_message', ?, 'waiting', ?, ?)`).run(turnId, threadId, messageId, now, now)
-      // Minimal terminal history from the old retry-wait rule, never dispatchable.
+      // Terminal old retry-wait history is preserved, never automatically replayed.
       database.prepare(`INSERT INTO agent_run(
         id, camp_turn_id, conversation_id, trigger_camp_message_id, initial_camp_context_through_sequence,
         initial_conversation_context_through_sequence, responsibility_key, start_reason,
@@ -376,49 +500,88 @@ test('idle camps accept new input and drain backlog after legacy failed-turn rec
         idempotency_key, manual_retry_allowed, last_error_code, created_at, ended_at, updated_at
       ) VALUES (?, ?, ?, ?, 1, 0, 'initial', 'initial', 'fixture', 'required', '{}',
         'failed', ?, 1, 'runtime_launch_failed', ?, ?, ?)`)
-        .run(randomUUID(), turnId, conversationId, messageId, randomUUID(), now, now, now)
+        .run(runId, turnId, conversationId, messageId, randomUUID(), now, now, now)
       database.prepare('UPDATE camp_message SET camp_turn_id = ? WHERE id = ?').run(turnId, messageId)
-      for (const [index, body] of ['B', 'C'].entries()) {
-        database.prepare(`INSERT INTO pending_camp_input(
-          id, camp_id, enqueue_sequence, state, structured_content_json, execution_json, user_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'null', 'local_user', ?, ?)`)
-          .run(randomUUID(), threadId, index + 1, backlog ? 'queued' : 'cancelled', JSON.stringify([{ kind: 'text', text: body }]), now, now)
+      // A leftover private row is a non-publication counterexample, not a queue.
+      database.prepare(`INSERT INTO pending_camp_input(
+        id, camp_id, enqueue_sequence, state, structured_content_json, execution_json, user_id, created_at, updated_at
+      ) VALUES (?, ?, 1, 'queued', ?, 'null', 'local_user', ?, ?)`)
+        .run(pendingId, threadId, JSON.stringify([{ kind: 'text', text: 'Retired private input must not publish' }]), now, now)
+      camp.oldRun = database.prepare('SELECT * FROM agent_run WHERE id = ?').get(runId)
+      camp.oldPending = database.prepare('SELECT * FROM pending_camp_input WHERE id = ?').get(pendingId)
+      camp.history = database.prepare('SELECT * FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(threadId)
+      const membershipVersion = database.prepare('SELECT version FROM camp_member WHERE camp_id = ? AND agent_id = ?').get(threadId, agentId).version
+      // Model already-published work left waiting when the previous Core stopped.
+      for (const message of camp.published) {
+        const sequence = database.prepare('UPDATE camp SET last_delivery_sequence = last_delivery_sequence + 1 WHERE id = ? RETURNING last_delivery_sequence').get(threadId).last_delivery_sequence
+        database.prepare(`INSERT INTO camp_message_delivery(
+          id, camp_id, message_id, source_kind, recipient_agent_id, recipient_membership_version_at_admission,
+          queue_sequence, status, version, created_at, updated_at
+        ) VALUES (?, ?, ?, 'message', ?, ?, ?, 'waiting', 1, ?, ?)`)
+          .run(randomUUID(), threadId, message.messageId, agentId, membershipVersion, sequence, now, now)
       }
     }
     database.close()
     database = null
     core = startCore(dataDir, skillRoot, mcpPath)
     await core.ready
-    for (const { threadId } of camps) {
-      assert.equal((await core.request('camp.pendingInputs.get', { threadId })).executionActive, false,
-        'A legacy failed turn cannot remain an execution blocker after ready')
-    }
-    const direct = await sendText(camps[0].threadId, 'Fresh input after clearing queue')
-    assert.equal(direct.commandResult.code, 'camp_message.sent')
-    assert.equal((await core.request('camp.pendingInputs.get', { threadId: camps[0].threadId })).items.length, 0)
     const deadline = Date.now() + 10_000
-    const publishedCount = () => core.notifications.filter(event => event.method === 'camp.pendingInputs.changed'
-      && event.params.threadId === camps[1].threadId && event.params.reason === 'published').length
-    // Publication commits before its notification is enqueued; an RPC can see
-    // the empty queue first. Wait for both observable outcomes before asserting.
-    while ((await core.request('camp.pendingInputs.get', { threadId: camps[1].threadId })).items.length > 0
-      || publishedCount() < 2) {
-      assert.ok(Date.now() < deadline, 'An idle Camp must drain its backlog without another user action')
+    while (true) {
+      database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
+      const remaining = database.prepare("SELECT COUNT(*) AS count FROM camp_message_delivery WHERE status IN ('waiting', 'claimed')").get().count
+      database.close()
+      database = null
+      if (remaining === 0) break
+      assert.ok(Date.now() < deadline, 'Already public Deliveries must settle without another user send')
       await new Promise(resolve => setTimeout(resolve, 20))
     }
-    assert.equal(publishedCount(), 2)
+    for (const camp of camps) {
+      const replay = await core.request('thread.messages.send', camp.request)
+      assert.equal(replay.replayed, true)
+      assert.deepEqual(replay.commandResult, camp.first.commandResult)
+      const fresh = inline(camp.threadId, 'Fresh input after recovery')
+      const sent = await core.request('thread.messages.send', fresh)
+      assert.equal(sent.commandResult.code, 'camp_message.sent')
+      const repeated = await core.request('thread.messages.send', fresh)
+      assert.equal(repeated.replayed, true)
+      assert.deepEqual(repeated.commandResult, sent.commandResult)
+    }
     await core.close()
     database = new DatabaseSync(join(dataDir, 'rovai.sqlite'), { readOnly: true })
-    for (const { threadId, backlog, turnId } of camps) {
+    for (const { threadId, messageId, turnId, runId, pendingId, published, oldRun, oldPending, history } of camps) {
       const turn = database.prepare('SELECT status, ended_at FROM camp_turn WHERE id = ?').get(turnId)
       assert.equal(turn.status, 'failed')
       assert.ok(turn.ended_at)
-      const bodies = database.prepare('SELECT body FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(threadId).map(row => row.body)
-      assert.deepEqual(bodies, backlog ? ['A', 'B', 'C'] : ['A', 'Fresh input after clearing queue'])
+      assert.deepEqual(database.prepare('SELECT * FROM agent_run WHERE id = ?').get(runId), oldRun)
+      assert.deepEqual(database.prepare('SELECT * FROM pending_camp_input WHERE id = ?').get(pendingId), oldPending)
+      const messages = database.prepare('SELECT * FROM camp_message WHERE camp_id = ? ORDER BY sequence').all(threadId)
+      assert.deepEqual(messages.slice(0, history.length), history)
+      assert.equal(messages.length, history.length + 1)
+      assert.equal(messages[0].id, messageId)
+      assert.equal(messages.at(-1).body, 'Fresh input after recovery')
+      const deliveries = database.prepare('SELECT * FROM camp_message_delivery WHERE camp_id = ? ORDER BY queue_sequence').all(threadId)
+      assert.equal(deliveries.length, published.length)
+      // Assert durable queue order and exact input ownership, not wall-clock order.
+      for (const [index, delivery] of deliveries.entries()) {
+        assert.equal(delivery.message_id, published[index].messageId)
+        assert.equal(delivery.status, 'failed')
+        assert.equal(delivery.failure_code, 'runtime_not_configured')
+        const inputs = database.prepare('SELECT agent_run_id, ordinal, message_id, message_sequence FROM agent_run_input WHERE delivery_id = ?').all(delivery.id)
+        assert.equal(inputs.length, 1)
+        assert.equal(inputs[0].agent_run_id, delivery.claimed_agent_run_id)
+        assert.equal(inputs[0].ordinal, 0)
+        assert.equal(inputs[0].message_id, delivery.message_id)
+        assert.equal(inputs[0].message_sequence, index + 2)
+        const run = database.prepare('SELECT status, last_error_code, predecessor_agent_run_id FROM agent_run WHERE id = ?').get(inputs[0].agent_run_id)
+        assert.equal(run.status, 'failed')
+        assert.equal(run.last_error_code, 'runtime_not_configured')
+        assert.equal(run.predecessor_agent_run_id, null)
+      }
+      assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run WHERE predecessor_agent_run_id = ?').get(runId).count, 0)
+      assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run WHERE conversation_id = ?').get(oldRun.conversation_id).count, 1 + published.length,
+        'Only the original failed Run and the public backlog may create responsibilities')
     }
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM agent_run').get().count, 2,
-      'Startup must neither retry old Runs nor invent new Runs for this non-executing fixture')
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM agent_run WHERE status = 'failed' AND manual_retry_allowed = 1 AND last_error_code = 'runtime_launch_failed'").get().count, 2)
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM camp_message WHERE body = 'Retired private input must not publish'").get().count, 0)
   } finally {
     database?.close()
     await core.close()
