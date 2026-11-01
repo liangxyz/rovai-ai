@@ -86,7 +86,13 @@ pub fn run() -> Result<()> {
         Some(directory)
     };
     let paths = ServerPaths::prepare(&data_dir)?;
-    let token = match rovai_web::stored_administrator_token(&paths.data_dir)? {
+    let stored_token = rovai_web::stored_administrator_token(&paths.data_dir)?;
+    // Web auth is persisted only after Core admits the database. Unlike the
+    // layout and bootstrap token, it is not created by the `token` command.
+    // Legacy Runtime directories are now lazy, so their marker may be absent
+    // even after a Server has been used successfully.
+    let has_stored_web_auth = stored_token.is_some();
+    let token = match stored_token {
         Some(token) => token,
         None => paths.management_token(rovai_web::new_token)?,
     };
@@ -124,7 +130,8 @@ pub fn run() -> Result<()> {
         cli.public_origin.is_some(),
     );
     let diagnostics = super::server_logs::Capture::start(paths.open_log()?, cli.verbose)?;
-    let require_existing_authority = paths.database.try_exists()?
+    let require_existing_authority = has_stored_web_auth
+        || paths.database.try_exists()?
         || paths
             .runtime_camp_files_root
             .join(".runtime-camp-files-root.json")
