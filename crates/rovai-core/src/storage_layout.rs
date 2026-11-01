@@ -1,8 +1,7 @@
 //! Locations only: both entrypoints keep using the same stores and authority
 //! admission. The standalone layout never falls back to Desktop's Home roots.
 use crate::platform::private_storage::{
-    create_private_new_file, open_private_append_file, open_private_read_file,
-    prepare_private_directory,
+    create_data_new_file, open_data_append_file, open_data_read_file, prepare_data_directory,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -56,12 +55,12 @@ impl ServerPaths {
                 );
             }
         }
-        let root = prepare_private_directory(data_dir)?;
+        let root = prepare_data_directory(data_dir)?;
         let paths = Self::from_data_dir(&root)?;
         let marker_path = root.join("server-layout.json");
         if marker_path.try_exists()? {
             let mut bytes = Vec::new();
-            open_private_read_file(&marker_path)?
+            open_data_read_file(&marker_path)?
                 .take(4097)
                 .read_to_end(&mut bytes)?;
             ensure!(bytes.len() <= 4096, "Server layout marker is too large");
@@ -76,7 +75,7 @@ impl ServerPaths {
                 !paths.database.try_exists()?,
                 "server_legacy_layout: existing Rovai data has no standalone-root marker. Keep using its original rovai-host run command and paths; this entrypoint does not move Desktop or legacy preview data. Back up the complete instance before migration."
             );
-            let mut marker = create_private_new_file(&marker_path)?;
+            let mut marker = create_data_new_file(&marker_path)?;
             marker.write_all(&serde_json::to_vec(&LayoutMarker {
                 schema_version: 1,
                 layout: "standalone-root".into(),
@@ -87,7 +86,7 @@ impl ServerPaths {
         // assessment. Do not pre-create its marker or weaken those checks here.
         for directory in [&paths.skill_library_root, &paths.logs] {
             crate::camp_attachment_view::reject_existing_symlink_components(directory)?;
-            prepare_private_directory(directory)?;
+            prepare_data_directory(directory)?;
         }
         Ok(paths)
     }
@@ -100,14 +99,16 @@ impl ServerPaths {
                 token.len() == 64 && token.bytes().all(|value| value.is_ascii_hexdigit()),
                 "Invalid generated management token"
             );
-            let mut file = create_private_new_file(&path)?;
+            let mut file = create_data_new_file(&path)?;
             file.write_all(token.as_bytes())?;
             file.sync_all()?;
         }
         let mut token = String::new();
-        open_private_read_file(&path)?
-            .take(65)
-            .read_to_string(&mut token)?;
+        #[cfg(windows)]
+        let file = crate::platform::private_storage::open_server_token_read_file(&path)?;
+        #[cfg(not(windows))]
+        let file = crate::platform::private_storage::open_private_read_file(&path)?;
+        file.take(65).read_to_string(&mut token)?;
         ensure!(
             token.len() == 64 && token.bytes().all(|value| value.is_ascii_hexdigit()),
             "Stored Server token is invalid; it has not been replaced"
@@ -116,7 +117,7 @@ impl ServerPaths {
     }
 
     pub fn open_log(&self) -> Result<File> {
-        open_private_append_file(&self.logs.join("server.log"))
+        open_data_append_file(&self.logs.join("server.log"))
     }
 
     /// The Host passes the admitted canonical data directory. No directory is
@@ -189,7 +190,7 @@ impl ThreadOutputDirectory {
                 [camp_id],
                 |row| row.get::<_, bool>(0),
             )?,
-            "Camp no longer exists"
+            "Thread no longer exists"
         );
         let output_root = camp_attachment_output_root(database.runtime_camp_files_root(), camp_id)?;
         crate::camp_attachment_view::reject_existing_symlink_components(&output_root)?;
@@ -201,7 +202,7 @@ impl ThreadOutputDirectory {
     }
 }
 
-/// Only the Camp's computed output directory is owned. Source refs are never traversed.
+/// Only the Thread's computed output directory is owned. Source refs are never traversed.
 pub fn remove_camp_attachment_output(runtime_files_root: &Path, camp_id: &str) -> Result<()> {
     let root = camp_attachment_output_root(runtime_files_root, camp_id)?;
     crate::camp_attachment_view::reject_existing_symlink_components(
@@ -249,7 +250,7 @@ mod tests {
     // The older root-admission fixture is Unix-only. This owner preserves its
     // standalone cases and also exercises Windows native private-directory ACLs.
     #[test]
-    fn standalone_runtime_root_preserves_native_admission_and_owner() {
+    fn standalone_runtime_root_preserves_native_layout_without_eager_attachment_storage() {
         use crate::camp_attachment_view::ThreadAttachmentViewStore;
         let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
         let requested = parent.join(format!("rovai-server-layout-{}", uuid::Uuid::new_v4()));
@@ -262,10 +263,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(server.root(), root);
+        let second = ThreadAttachmentViewStore::admit(root, &paths.data_dir, &[]).unwrap();
+        assert_eq!(second.root(), root);
         assert!(
-            ThreadAttachmentViewStore::admit(root, &paths.data_dir, &[]).is_err(),
-            "the standalone root still has one owner"
+            !root.exists(),
+            "admission must not initialize the legacy root"
         );
+        drop(second);
         assert!(
             ThreadAttachmentViewStore::admit(
                 &paths.data_dir.join("instances/wrong/runtime-files"),

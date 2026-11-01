@@ -2,27 +2,31 @@
 document_type: architecture
 authority: mission-architecture
 status: accepted
-last_updated: 2026-09-26
+last_updated: 2026-10-31
 ---
 
 # Missions
 
-Mission is the durable purpose of a public team Camp. Core owns its opaque relational identity, stable display number,
-latest definition, independent business status, activity facts and execution workspace. Camp remains the sole owner of conversation, membership, lead,
+Mission is the durable purpose of a public team Thread. Core owns its opaque relational identity, stable display number,
+latest definition, independent business status, activity facts and execution workspace. Thread remains the sole owner of conversation, membership, lead,
 drafts, published files and execution. Renderer does not create a parallel conversation model.
 
-`MissionService` applies atomic commands through the existing gateway. The scheduler enters preparing
-only after execution admission; the application coordinator then resolves or recovers the Mission workspace
-outside the SQLite lock. Preparation and cleanup admission share a short fence so an accepted cleanup intent
-cannot race reuse of the same workspace. The durable intent then runs under a separate serialized cleanup worker,
-so Git removal does not hold preparation or ordinary Mission operations for unrelated workspaces. Preparation
-persists association before Git work and rechecks claim fences before launching the Runtime. Non-Git projects
+`MissionService` applies atomic commands through the existing gateway. For public batches, the application coordinator
+prepares or recovers the Mission workspace and captures Git facts before claim, outside the SQLite lock.
+Claim revalidates and freezes that actual workspace under [Context Delivery Profile](../contracts/context-delivery-profile-v13.md).
+Mission preparation, cleanup and Thread deletion retain the existing serialized lifecycle gate,
+including the worker's Git operations. An ordinary non-Mission Run can bypass that gate only when its already
+validated canonical execution root is disjoint from every persisted Mission workspace's source, repository,
+Git common directory, worktree, working directory and derived preparation staging path. Ancestor/descendant
+relationships count as overlap; malformed or unavailable ownership information retains the existing wait.
+This does not split Mission locks or weaken shared-resource cleanup admission. Preparation persists association
+before Git work and rechecks claim fences before launching the Runtime. Non-Git projects
 retain their original cwd. A worktree is retained throughout ordinary Mission use. Standalone cleanup records
 two asynchronous steps in its existing association; a later preparing phase restores the branch/worktree
 according to actual resource state.
 
-`MissionGit` reads the source checkout's current local branch and `HEAD` when the first admitted Run enters
-preparing, and again only when both previously managed Git resources have been removed. It uses the resolved
+`MissionGit` reads the source checkout's current local branch and `HEAD` during initial workspace preparation,
+and again only when both previously managed Git resources have been removed. It uses the resolved
 commit, the Host-resolved Git executable and verified ownership to create, restore or clean worktrees. Cleanup
 verifies the directory and managed branch as independent resources, persists the managed-branch OID on the first
 attempt, and removes the verified clean Worktree without force before checking branch use and conditionally deleting
@@ -35,6 +39,10 @@ refusal leaves a ready workspace ready. Startup/periodic recovery scans unfinish
 becomes `cleanup_failed` unless an intact-resource audit proves that no Worktree removal occurred for a still-live
 Mission, in which case the attempt ends back at `ready`; failed rows are never automatically retried. The same audit
 lets an explicit retry or later execution recover legacy non-destructive failures without trusting checkpoint booleans.
+Cleanup availability and command admission use the same occupancy predicate. Nonterminal Runs and waiting
+Deliveries still occupy the workspace; terminal cleanup blocks only for exact Run/epoch keys owned by this
+Core, including other Threads sharing the execution root. Historical missing ACKs alone do not block cleanup
+and are not repaired. The existing in-memory ownership snapshot supplies this request context.
 The cleanup request performs only permission, durable-state, occupancy and idempotency admission; the worker owns
 the only filesystem/Git safety observation. Its ordinary successful attached-worktree path combines identity,
 `HEAD`, managed OID and actual checkout into one Git observation, then uses non-force Worktree removal, one branch
@@ -75,20 +83,20 @@ delivered to Runtime. After its first accepted Mission input, a newer definition
 to Mission Run Facts until an input carrying that version is accepted. `mission get` is a pure read.
 
 Mission keeps its shared UI projection path-free. The Agent read side has two deliberately deep projections:
-`mission.list` queries only number, Camp, title, status and update time, while `MissionAgentInfo` joins one current
+`mission.list` queries only number, Thread, title, status and update time, while `MissionAgentInfo` joins one current
 definition with ordered structured source attachments. Both are available to every effective authenticated
-AgentRun across all Missions and do not reuse the target Camp's mutation authorization. Omitted-ID `mission.get`
-resolves only the authenticated Run's current Camp; an explicit internal `rvm_...` ID resolves directly and never
+AgentRun across all Missions and do not reuse the target Thread's mutation authorization. Omitted-ID `mission.get`
+resolves only the authenticated Run's current Thread; an explicit internal `rvm_...` ID resolves directly and never
 switches the current Mission. `mission.update` and `mission.status` accept no target selector and still require
 the current active membership and exact execution fence.
 
 Status mutation is independent from message publication. `sourceMessageId` is an optional association for every
-status; when present it must resolve to a current public message in the same Camp, and when omitted it clears any
+status; when present it must resolve to a current public message in the same Thread, and when omitted it clears any
 previous association. Core never publishes, searches for or implicitly chooses a message during a status update.
 This does not weaken mutation authorization or change Run admission, cancellation or completion.
 
-Mission execution presentation is derived from Camp-owned queue facts rather than business status. A dedicated
-Mission start Delivery in `waiting`/`claimed`, or any non-terminal AgentRun in the Mission Camp, makes the start
+Mission execution presentation is derived from Thread-owned queue facts rather than business status. A dedicated
+Mission start Delivery in `waiting`/`claimed`, or any non-terminal AgentRun in the Mission Thread, makes the start
 entry unavailable; the same predicate is enforced by `missions.start` in its command transaction. Only
 `queued`/`running`/`waiting` AgentRuns contribute executing members, so an unclaimed Delivery hides an accepted
 start without claiming that execution has begun. Delivery claim emits the ordinary navigation invalidation,
@@ -109,9 +117,9 @@ Deleted numbers are never reused; collision suffixes do not change the number. C
 snapshot has its own dynamic section and acceptance marker, fenced to the native binding/generation.
 No Mission business version is taught to Agents; field patches use last-committed values.
 
-Desktop, wide Web and Mobile share Mission commands and the existing CampWorkspace. Desktop drawer and full
+Desktop, wide Web and Mobile share Mission commands and the existing ThreadWorkspace. Desktop drawer and full
 conversation preserve one mounted composer/preview owner; Mobile uses a status list and full conversation with
-board return, retaining the same Camp draft and preview ownership. Renderer consumes
+board return, retaining the same Thread draft and preview ownership. Renderer consumes
 Core's cleanup capability and does not infer it from Mission status. Deletion defaults to leaving worktree and
 branch in place. Optional cleanup records its intent in the same transaction that deletes the Mission, removes
 the card immediately, and exposes only failed orphan work through the existing cleanup route; retained resources
@@ -128,8 +136,8 @@ explained by [V1.62-D04](../versions/v1.62/decisions.md#v1-62-d04).
 ## Inline member references
 
 Mission descriptions use a closed text/member-reference sequence, with the same stable identity as message
-mentions. The Mission owns content; Camp continues to own membership. User definition transactions reuse the
-Camp member-admission helper to add referenced outsiders atomically with the description, including normal
+mentions. The Mission owns content; Thread continues to own membership. User definition transactions reuse the
+Thread member-admission helper to add referenced outsiders atomically with the description, including normal
 membership events and lifetime generations. A rejected invitation rolls back any earlier additions before its
 command receipt is committed. No message, Delivery, Task or Runtime is created by saving.
 
@@ -147,3 +155,7 @@ authoritative roster and Lead, adds distinct mentioned members, and freezes none
 the Thread. Mission insertion remains in the same transaction. There is no live Team binding or Mission-specific
 Bootstrap path; editing/deleting Teams cannot change existing Mission Threads. General defaults only initialize
 the dialog; Mission creation never writes one-click preferences. See [Mission v13](../contracts/mission-v13.md).
+
+If any Mission has no persisted workspace plan yet, existing records cannot rule out the path its first
+preparation will choose. Ordinary dispatch conservatively retains the gate in this case, including a
+not-yet-started Mission. No filesystem scan or extra coordination state is introduced to remove that wait.

@@ -16,7 +16,7 @@ import { ConversationRunPresence } from './ConversationRunPresence'
 import { MessageQuotePreview } from './MessageQuotePreview'
 import { ConversationRunSource } from './ConversationRunSource'
 import { useRunSourceNavigation } from './useRunSourceNavigation'
-import { conversationRunPresenceTimeline } from './conversation-run-presence'
+import { conversationRunPresenceTimeline, isUserInterruptedRun } from './conversation-run-presence'
 import { PendingThreadDraftPersistence } from './pending-thread-draft'
 import { pastedTextFileName } from './long-text-paste'
 import { MessageModelSummary, ModelSummaryText, ProfileModelFields } from './ThreadModelInformation'
@@ -1248,10 +1248,6 @@ function compareTimelinePresentationOrder(
   return left.createdAt.localeCompare(right.createdAt)
     || TIMELINE_KIND_RANK[left.kind] - TIMELINE_KIND_RANK[right.kind]
     || left.id.localeCompare(right.id)
-}
-
-function isUserInterruptedRun(run: AgentRunView): boolean {
-  return run.status === 'cancelled' && run.cancelReasonCode === 'user_requested_agent_run_stop'
 }
 
 export function campConversationTimeline(
@@ -2645,9 +2641,16 @@ export function ThreadWorkspace({
       visibleThreadMessages
     ]
   )
+  // Applied receipts update both presence and historical markers together while
+  // Core's refreshed projection is in flight; re-entry still uses the Core fact.
+  const [continuedRunIds, setContinuedRunIds] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => setContinuedRunIds(new Set()), [snapshot.thread.id])
   const presenceTimeline = useMemo(() => conversationRunPresenceTimeline(
-    conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady
-  ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady])
+    conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, continuedRunIds
+  ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, continuedRunIds])
+  const retainedStopIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
+    item.kind === 'run_presence' && isUserInterruptedRun(item.slot.run) ? [item.slot.run.id] : []
+  )), [presenceTimeline])
   const historyBoundaryId = anchorWindowBeforeNormal
     ? conversationTimeline.find(item => item.kind === 'camp_message' && item.message.sequence >= normalStart!)?.id : null
   const latestAgentMessageId = useMemo(() => {
@@ -3510,7 +3513,7 @@ export function ThreadWorkspace({
     runSourceNavigation.cancel()
     anchorNavigation.navigation.cancelNavigation()
     const threadId = snapshot.thread.id
-    if (quote.source.scope !== 'camp' || quote.source.campId !== threadId) throw new Error('quote.owner_mismatch')
+    if (quote.source?.scope !== 'camp' || quote.source.campId !== threadId) throw new Error('quote.owner_mismatch')
     const messageId = quote.source.messageId
     setConversationView('conversation')
     setQuoteSourceId(messageId)
@@ -3526,7 +3529,7 @@ export function ThreadWorkspace({
     if (activeThreadIdRef.current !== threadId) return
     const target = timelineScrollRef.current?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(messageId)}"][data-quote-owner="thread:${CSS.escape(threadId)}"]`)
     if (!target) throw new Error('quote.source_unavailable')
-    await revealMessageQuote(quote, target, source.authorType === 'user' ? source.body.replace(/\r\n/gu, '\n') : undefined)
+    revealMessageQuote(target)
   }
 
   const revealReplyParent = async (messageId: string, fromDetails = false): Promise<void> => {
@@ -5475,6 +5478,7 @@ export function ThreadWorkspace({
                         confirming: confirmingRunIds.has(run.id),
                         turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
                       })}
+                      onContinued={runId => setContinuedRunIds(current => new Set(current).add(runId))}
                       onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
                     continue
                   }
@@ -5566,7 +5570,7 @@ export function ThreadWorkspace({
                             ))}
                           </div>
                         )}
-                        {isUserInterruptedRun(run) && (
+                        {isUserInterruptedRun(run) && !retainedStopIds.has(run.id) && (
                           <RunInterruptionMarker run={run} author={author} onOpen={openExecutionProcess} />
                         )}
                       </section>
@@ -5615,6 +5619,8 @@ export function ThreadWorkspace({
                     continue
                   }
                   const campMessage = timelineItem.message
+                  const interruptedRun = timelineItem.interruptedRun && !retainedStopIds.has(timelineItem.interruptedRun.id)
+                    ? timelineItem.interruptedRun : undefined
                   if (campMessage.withdrawn) {
                     previousMessageAuthorKey = null
                     items.push(
@@ -5911,7 +5917,7 @@ export function ThreadWorkspace({
                                 />
                               )}
                               {campMessage.authorType === 'agent'
-                                && trailingResultItems.length === 0 && !timelineItem.interruptedRun
+                                && trailingResultItems.length === 0 && !interruptedRun
                                 && (
                                   <MessageActions
                                     timestamp={messageTimestamp}
@@ -5941,7 +5947,7 @@ export function ThreadWorkspace({
                           )}
                     </article>
                   )
-                  if (trailingResultItems.length > 0 || timelineItem.interruptedRun) {
+                  if (trailingResultItems.length > 0 || interruptedRun) {
                     items.push(
                       <div
                         className={`agent-message-output public-message-output${followsSameAuthor ? ' same-author' : ''}${isGroupContinuation ? ' is-group-continuation' : ''}`}
@@ -5970,8 +5976,8 @@ export function ThreadWorkspace({
                             />
                           ))}
                         </div>}
-                        {timelineItem.interruptedRun && (
-                          <RunInterruptionMarker run={timelineItem.interruptedRun} author={author} onOpen={openExecutionProcess} />
+                        {interruptedRun && (
+                          <RunInterruptionMarker run={interruptedRun} author={author} onOpen={openExecutionProcess} />
                         )}
                         <MessageActions
                           timestamp={messageTimestamp}
@@ -6824,15 +6830,13 @@ export function executionDeliveryQueuePresentation(process: AgentExecutionProces
 } {
   const runs = process.runs.filter(run => run.agentId === agentId && run.invocationKind !== 'single_chat')
   const active = runs.some(run => NON_TERMINAL_RUNS.has(run.status))
-  const cleanup = runs.some(run => !NON_TERMINAL_RUNS.has(run.status)
-    && run.cancelRequestedAt !== null && run.cancelAcknowledgedAt === null)
-  const blocked = active || cleanup || process.waitingDeliveries.some(delivery =>
+  const blocked = active || process.waitingDeliveries.some(delivery =>
     delivery.recipientAgentId === agentId && delivery.waitCondition != null)
   return {
     label: blocked ? '排队中' : '准备中…',
     tone: 'neutral',
     blocked,
-    detail: active ? '等待上一轮完成' : cleanup ? '等待上次执行清理完成' : null
+    detail: active ? '等待上一轮完成' : null
   }
 }
 

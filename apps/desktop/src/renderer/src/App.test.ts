@@ -3084,7 +3084,7 @@ describe('task event projections', () => {
     expect(markup).toContain(longTitle)
     expect(markup).toContain(`aria-label="【飞书话题】${longTitle}，有新回复"`)
     expect(markup).toContain(`title="【飞书话题】${longTitle} · 未读"`)
-    expect(markup).toContain(`class="truncate">【飞书话题】${longTitle}</span>`)
+    expect(markup).toContain(`>【飞书话题】${longTitle}</span>`)
     expect(markup).toContain('管理')
     expect(markup).toContain('aria-label="管理项目“rovai-ai”"')
     expect(markup).toContain('aria-label="管理“快速对话讨论”"')
@@ -4105,7 +4105,11 @@ describe('task event projections', () => {
       .toMatchObject({ label: '排队中', detail: '等待上一轮完成' })
     const cleanupRun = { ...previousRun, status: 'cancelled' as const, cancelRequestedAt: '2020-01-01T00:00:00Z', cancelAcknowledgedAt: null }
     expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [cleanupRun] }))
-      .toMatchObject({ label: '排队中', detail: '等待上次执行清理完成' })
+      .toMatchObject({ label: '准备中…', detail: null, blocked: false })
+    expect(executionDeliveryQueuePresentation({
+      ...queueProcess, runs: [cleanupRun],
+      waitingDeliveries: [{ ...waitingDelivery, waitCondition: 'target_busy' }]
+    })).toMatchObject({ label: '排队中', detail: null, blocked: true })
     expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [{ ...cleanupRun, cancelAcknowledgedAt: '2020-01-01T00:00:01Z' }] }))
       .toMatchObject({ label: '准备中…', blocked: false })
     // Overview / private history cannot supply another member's queue copy.
@@ -5386,7 +5390,7 @@ describe('task event projections', () => {
     expect(unavailableAuthorMarkup).toContain('<strong>洛可</strong>')
   })
 
-  it('renders GFM and literal HTML while suppressing remote images', () => {
+  it('renders GFM while sanitizing HTML and suppressing remote images', () => {
     const markup = renderToStaticMarkup(createElement(
       SafeMarkdown,
       null,
@@ -5398,7 +5402,7 @@ describe('task event projections', () => {
     expect(markup).toContain('<code>PASS</code>')
     expect(markup).not.toContain('<script')
     expect(markup).not.toContain('<img')
-    expect(markup).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(markup).not.toContain('alert(1)')
   })
 
   it('renders durable Task records below a single explicit creation action', () => {
@@ -5911,7 +5915,7 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
   })
 
-  it('keeps literal Runtime markup after a Tool', () => {
+  it('omits Runtime markup with no visible content after a Tool', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'tool-1', agentRunId: 'run-renderless-narration', eventType: 'runtime.action',
       payload: { toolCallId: 'tool-1', title: 'Edit', status: 'completed' },
@@ -5922,8 +5926,7 @@ describe('task event projections', () => {
       createdAt: '2026-08-27T10:45:17Z'
     }], 'run-renderless-narration')
 
-    expect(progress.items.map((item) => item.kind)).toEqual(['tool', 'narration'])
-    expect(progress.items[1]).toMatchObject({ body: '</think>' })
+    expect(progress.items.map((item) => item.kind)).toEqual(['tool'])
   })
 
   it('shows the latest Claude API retry while the AgentRun is still running', () => {

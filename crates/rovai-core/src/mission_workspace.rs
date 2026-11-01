@@ -50,6 +50,65 @@ pub struct MissionWorkspace {
     pub diagnostic: Option<String>,
 }
 
+/// Prove independence using the already persisted preparation/cleanup paths.
+/// Unknown historical paths retain the lifecycle gate; this never probes or
+/// repairs optional worktrees just to prepare an unrelated ordinary Thread.
+pub(crate) fn execution_root_is_disjoint(connection: &Connection, root: &Path) -> Result<bool> {
+    // A first preparation may still be inspecting Git before its plan is
+    // persisted. Existing paths cannot prove independence in that interval.
+    let unplanned: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM mission m WHERE NOT EXISTS(SELECT 1 FROM mission_workspace w WHERE w.mission_id=m.id))",
+        [], |row| row.get(0),
+    )?;
+    if unplanned {
+        return Ok(false);
+    }
+    let normalized = |path: &Path| {
+        path.is_absolute()
+            && !path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+    };
+    if !normalized(root) {
+        return Ok(false);
+    }
+    let mut statement = connection.prepare(
+        "SELECT source_directory,repository_root,git_common_dir,worktree_path,working_directory,preparation_token FROM mission_workspace"
+    )?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        for index in 0..5 {
+            let stored: String = row.get(index)?;
+            let path = Path::new(&stored);
+            if !normalized(path) || crate::git::workspace_paths_overlap(root, path) {
+                return Ok(false);
+            }
+        }
+        let repository: String = row.get(1)?;
+        let token: String = row.get(5)?;
+        if Uuid::parse_str(&token).is_err() {
+            return Ok(false);
+        }
+        let Ok(staging) = staging_root_for(&repository, &token) else {
+            return Ok(false);
+        };
+        if crate::git::workspace_paths_overlap(root, &staging) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn staging_root_for(repository_root: &str, preparation_token: &str) -> Result<PathBuf> {
+    Ok(Path::new(repository_root)
+        .parent()
+        .context("mission.repository_parent_missing")?
+        .join(format!(".rovai-mission-prepare-{preparation_token}")))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MissionWorkspaceCleanupProjection {
@@ -420,13 +479,7 @@ impl MissionGit {
         }
     }
     fn staging_root(workspace: &MissionWorkspace) -> Result<PathBuf> {
-        Ok(Path::new(&workspace.repository_root)
-            .parent()
-            .context("mission.repository_parent_missing")?
-            .join(format!(
-                ".rovai-mission-prepare-{}",
-                workspace.preparation_token
-            )))
+        staging_root_for(&workspace.repository_root, &workspace.preparation_token)
     }
     fn verify_staging_owner(root: &Path, workspace: &MissionWorkspace) -> Result<()> {
         ensure!(
@@ -1752,8 +1805,14 @@ pub fn execution_directory(connection: &Connection, camp_id: &str) -> Result<Opt
     Ok(connection.query_row("SELECT w.working_directory FROM mission_workspace w JOIN mission m ON m.id=w.mission_id WHERE m.camp_id=?1 AND w.state='ready' ORDER BY w.created_at LIMIT 1",[camp_id],|r|r.get(0)).optional()?)
 }
 
-pub fn workspace_in_use(connection: &Connection, workspace: &MissionWorkspace) -> Result<bool> {
-    Ok(connection.query_row(
+pub fn workspace_in_use(
+    connection: &Connection,
+    workspace: &MissionWorkspace,
+    active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
+) -> Result<bool> {
+    use crate::runtime::{RuntimeCleanupScope, runtime_cleanup_blocked_since_connection};
+
+    let pending: bool = connection.query_row(
         "SELECT EXISTS(
             SELECT 1
             FROM agent_run r
@@ -1762,10 +1821,7 @@ pub fn workspace_in_use(connection: &Connection, workspace: &MissionWorkspace) -
                 c.camp_id=?1
                 OR json_extract(r.workspace_json,'$.executionRoot')=?2
             )
-              AND (
-                r.status IN ('queued','running','waiting')
-                OR (r.cancel_requested_at IS NOT NULL AND r.cancel_acknowledged_at IS NULL)
-              )
+              AND r.status IN ('queued','running','waiting')
             UNION ALL
             SELECT 1
             FROM camp_message_delivery d
@@ -1773,13 +1829,27 @@ pub fn workspace_in_use(connection: &Connection, workspace: &MissionWorkspace) -
         )",
         params![workspace.camp_id, workspace.working_directory],
         |row| row.get(0),
-    )?)
+    )?;
+    if pending {
+        return Ok(true);
+    }
+    for scope in [
+        RuntimeCleanupScope::Camp(&workspace.camp_id),
+        RuntimeCleanupScope::ExecutionRoot(&workspace.working_directory),
+    ] {
+        if runtime_cleanup_blocked_since_connection(connection, active_executions, scope)?.is_some()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn cleanup_projection(
     connection: &Connection,
     mission_id: &str,
     camp_id: &str,
+    active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
 ) -> Result<(bool, bool, bool, Option<MissionWorkspaceCleanupProjection>)> {
     let workspaces = load_workspaces(connection, mission_id)?;
     let Some(workspace) = workspaces.first() else {
@@ -1795,7 +1865,7 @@ pub fn cleanup_projection(
         && workspace.execution_host_id == current_host
         && workspace.camp_id == camp_id
         && workspace.state == "ready"
-        && !workspace_in_use(connection, workspace)?;
+        && !workspace_in_use(connection, workspace, active_executions)?;
     let cleanup = if workspace.cleanup_finished() {
         Some(MissionWorkspaceCleanupProjection {
             state: "cleaned".into(),

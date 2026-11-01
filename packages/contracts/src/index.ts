@@ -381,12 +381,13 @@ export interface CommandHealth {
 export interface RuntimeEnvironmentVariable { name: string; value: string }
 
 export interface RuntimeStartupConfiguration {
+  configurationError?: string
   programPath: string | null
   environment: RuntimeEnvironmentVariable[]
 }
 
 export interface RuntimeStartupSettings {
-  commonEnvironment?: { revision: number; environment: Record<string, string> }
+  commonEnvironment?: { revision: number; environment: Record<string, string>; error?: string }
   runtimeKind: AdapterKind
   revision: number
   configuration: RuntimeStartupConfiguration
@@ -1450,23 +1451,15 @@ export type LocalAttachmentOwnerLocator =
 export interface MessageQuoteSnapshot {
   version: 1
   quoteId: string
-  source: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
-  authorAtCapture: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
+  source?: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
+  authorAtCapture?: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
   text: string
   format: 'plain_text'
   capturedAt: string
-  sourceContentDigest: string
-  /** Internal, immutable selection anchor. Never projected into model input. */
-  locator?: { projectionVersion: 1 | 2 | 3; startScalar: number; endScalar: number; projectionDigest: string }
-  snapshotDigest: string
 }
 
 export interface MessageQuoteSelection {
-  currentUserDisplayName?: string
-  messageId: string
-  bodyAtSelection: string
-  startScalar: number
-  endScalar: number
+  messageId?: string
   text: string
 }
 
