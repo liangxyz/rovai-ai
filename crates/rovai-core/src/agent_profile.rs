@@ -5316,8 +5316,9 @@ pub(crate) fn validate_member_identity_input(
     Ok(())
 }
 
-pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 10_000;
-pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 10,000 个字符。";
+pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 20_000;
+pub const IDENTITY_REFLECTION_MAX_SCALARS: usize = 3_000;
+pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 20,000 个字符。";
 
 /// ECMAScript String.trim whitespace, matching the existing identity editor.
 /// U+FEFF is trimmed; U+0085 is retained. Interior formatting is untouched.
@@ -5366,8 +5367,10 @@ pub(crate) fn normalize_member_identity(
         ("workingPrinciples", &working_principles),
         ("growthTopic", &growth_topic),
     ] {
-        if value.chars().count() > 300 {
-            anyhow::bail!("AgentProfile {field} must not exceed 300 characters");
+        if value.chars().count() > IDENTITY_REFLECTION_MAX_SCALARS {
+            anyhow::bail!(
+                "AgentProfile {field} must not exceed {IDENTITY_REFLECTION_MAX_SCALARS} characters"
+            );
         }
     }
     let mut normalized_traits = Vec::with_capacity(personality_traits.len());
@@ -5908,10 +5911,10 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
 #[test]
 fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
     for text in [
-        "中".repeat(10_000),
-        "😀".repeat(10_000),
-        "e\u{0301}".repeat(5_000),
-        "\"\n\u{0000}中😀".repeat(2_000),
+        "中".repeat(PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS),
+        "😀".repeat(PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS),
+        "e\u{0301}".repeat(PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS / 2),
+        "\"\n\u{0000}中😀".repeat(PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS / 5),
     ] {
         let padded = format!(" \u{feff}\r\n{text}\u{3000} ");
         // A final newline/control may be content; padding is normalized before counting.
@@ -5920,7 +5923,10 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
             normalize_professional_responsibilities(&padded).unwrap(),
             expected
         );
-        let too_long = format!("中{}", "😀".repeat(10_000));
+        let too_long = format!(
+            "中{}",
+            "😀".repeat(PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS)
+        );
         assert_eq!(
             normalize_professional_responsibilities(&too_long)
                 .unwrap_err()
@@ -5944,11 +5950,34 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
     assert!(validate_stored_member_identity("A", "", "\u{feff}old\u{feff}", &[], "", "").is_ok());
     for (role, principles, growth) in [
         ("x".repeat(121), String::new(), String::new()),
-        (String::new(), "x".repeat(301), String::new()),
-        (String::new(), String::new(), "x".repeat(301)),
+        (
+            String::new(),
+            "x".repeat(IDENTITY_REFLECTION_MAX_SCALARS + 1),
+            String::new(),
+        ),
+        (
+            String::new(),
+            String::new(),
+            "x".repeat(IDENTITY_REFLECTION_MAX_SCALARS + 1),
+        ),
     ] {
         assert!(normalize_member_identity("A", &role, "", &[], &principles, &growth).is_err());
     }
+    for text in [
+        "中".repeat(IDENTITY_REFLECTION_MAX_SCALARS),
+        "😀".repeat(IDENTITY_REFLECTION_MAX_SCALARS),
+        "e\u{0301}".repeat(IDENTITY_REFLECTION_MAX_SCALARS / 2),
+    ] {
+        let padded = format!("  {text}  ");
+        let normalized = normalize_member_identity("A", "", "", &[], &padded, &padded).unwrap();
+        assert_eq!(normalized.working_principles, text);
+        assert_eq!(normalized.growth_topic, text);
+        let too_long = format!("{text}界");
+        assert!(normalize_member_identity("A", "", "", &[], &too_long, "").is_err());
+        assert!(normalize_member_identity("A", "", "", &[], "", &too_long).is_err());
+    }
+    assert!(normalize_member_identity(&"名".repeat(81), "", "", &[], "", "").is_err());
+    assert!(normalize_member_identity("A", "", "", &["😀".repeat(17)], "", "").is_err());
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
@@ -9556,6 +9585,82 @@ mod slow_tests {
             .expect("legacy handle should remain internally readable");
         assert_eq!(updated_handle, original_handle);
         assert_eq!(updated_profile.display_name, "Builder Prime");
+
+        let fields = [
+            (
+                "professionalResponsibilities",
+                PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS,
+            ),
+            ("workingPrinciples", IDENTITY_REFLECTION_MAX_SCALARS),
+            ("growthTopic", IDENTITY_REFLECTION_MAX_SCALARS),
+        ];
+        let mut identity = serde_json::to_value(create_identity("Long identity", "")).unwrap();
+        for (field, limit) in fields {
+            identity[field] = json!("中".repeat(limit));
+        }
+        let created = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-long-identity",
+                    serde_json::from_value::<CreateAgentProfileCommand>(identity.clone()).unwrap(),
+                ),
+            )
+            .unwrap();
+        let id = created.result.payload["agentId"].as_str().unwrap();
+        let profile = service.get_profile(&database, id).unwrap().unwrap();
+        let saved = serde_json::to_value(&profile).unwrap();
+        for (field, _) in fields {
+            assert_eq!(
+                saved[field], identity[field],
+                "created {field} must not truncate"
+            );
+        }
+        let mut update =
+            serde_json::to_value(update_identity(&profile, &profile.display_name)).unwrap();
+        for (field, limit) in fields {
+            update[field] = json!("😀".repeat(limit));
+        }
+        service
+            .update_profile(
+                &mut database,
+                &user_command(
+                    "update-long-identity",
+                    serde_json::from_value::<UpdateAgentProfileCommand>(update.clone()).unwrap(),
+                ),
+            )
+            .unwrap();
+        let saved =
+            serde_json::to_value(service.get_profile(&database, id).unwrap().unwrap()).unwrap();
+        assert_eq!(saved["version"], 2);
+        for (field, _) in fields {
+            assert_eq!(
+                saved[field], update[field],
+                "updated {field} must not truncate"
+            );
+        }
+        update["expectedVersion"] = saved["version"].clone();
+        for (field, limit) in fields {
+            let mut invalid = update.clone();
+            invalid["teamRole"] = json!("Must not partially save");
+            invalid[field] = json!(format!("{}界", "😀".repeat(limit)));
+            assert!(
+                service
+                    .update_profile(
+                        &mut database,
+                        &user_command(
+                            &format!("reject-long-{field}"),
+                            serde_json::from_value::<UpdateAgentProfileCommand>(invalid).unwrap()
+                        )
+                    )
+                    .is_err()
+            );
+            assert_eq!(
+                serde_json::to_value(service.get_profile(&database, id).unwrap().unwrap()).unwrap(),
+                saved,
+                "rejected {field} must preserve all fields and version"
+            );
+        }
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

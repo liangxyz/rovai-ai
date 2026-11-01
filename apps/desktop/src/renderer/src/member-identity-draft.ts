@@ -14,7 +14,8 @@ export type IdentityDraft = {
   growthTopic: string
 }
 
-export const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS = 10_000
+export const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS = 20_000
+export const IDENTITY_REFLECTION_MAX_SCALARS = 3_000
 
 export const EMPTY_IDENTITY: IdentityDraft = {
   displayName: '',
@@ -74,7 +75,7 @@ export function identityDraftIssue(
   if (unicodeScalarLength(draft.professionalResponsibilities.trim()) > PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS) {
     return {
       field: 'professionalResponsibilities',
-      message: uiAttribute('专业职责最多 10,000 个字符。')
+      message: uiAttribute('专业职责最多 20,000 个字符。')
     }
   }
   if (
@@ -89,11 +90,11 @@ export function identityDraftIssue(
       message: uiAttribute('性格底色最多 6 项，每项必须为 1–16 个字符。')
     }
   }
-  if (unicodeScalarLength(draft.workingPrinciples.trim()) > 300) {
-    return { field: 'workingPrinciples', message: uiAttribute('工作准则最多 300 个字符。') }
+  if (unicodeScalarLength(draft.workingPrinciples.trim()) > IDENTITY_REFLECTION_MAX_SCALARS) {
+    return { field: 'workingPrinciples', message: uiAttribute('工作准则最多 3,000 个字符。') }
   }
-  if (unicodeScalarLength(draft.growthTopic.trim()) > 300) {
-    return { field: 'growthTopic', message: uiAttribute('成长课题最多 300 个字符。') }
+  if (unicodeScalarLength(draft.growthTopic.trim()) > IDENTITY_REFLECTION_MAX_SCALARS) {
+    return { field: 'growthTopic', message: uiAttribute('成长课题最多 3,000 个字符。') }
   }
   return null
 }

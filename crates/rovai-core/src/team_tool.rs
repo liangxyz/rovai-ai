@@ -2602,7 +2602,8 @@ mod tests {
         assert!(
             authorize_member_target(fixture.database.connection(), &run, "agent_4", false).is_err()
         );
-        let full_responsibilities = "😀\n\"中".repeat(2_500);
+        let full_responsibilities =
+            "😀\n\"中".repeat(crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS / 4);
         fixture
             .database
             .connection()
@@ -3226,7 +3227,8 @@ mod tests {
             creation_key: creation_key.clone(),
             display_name: "Nova Test Member".to_string(),
             team_role: "Researcher".to_string(),
-            professional_responsibilities: "😀\n\"中".repeat(2_500),
+            professional_responsibilities: "😀\n\"中"
+                .repeat(crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS / 4),
             personality_traits: vec!["Precise".to_string()],
             working_principles: "State evidence and uncertainty.".to_string(),
             growth_topic: "Shorten feedback loops.".to_string(),
