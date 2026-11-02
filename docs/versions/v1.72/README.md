@@ -6,10 +6,48 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-30
+last_updated: 2026-11-02
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 取消执行条统一保留（2026-11-02）
+
+公开取消 Run 的会话执行条与继续入口改为按 `cancelled` 状态判断，覆盖 App 退出与其他取消原因。
+沿用每位队员最新未受理继续、新 Run 替换与刷新恢复规则；“你已中断”仍仅用于手动停止。
+当前规范见 [Run Process Detail Surface v59](../../contracts/run-process-detail-surface-v59.md)，
+改动和验证归[实施记录](implementation-plan.md#取消执行条统一保留2026-11-02)。
+
+## 项目目录浏览（2026-11-01）
+
+补齐原交互稿尚未接入生产的目录树、Host 搜索与普通变化刷新。双入口共用独立目录开关，文件沿用现有阅读与编辑。
+当前规范为 [File Preview v26](../../contracts/file-preview-v26.md)，取舍见 [D73](decisions.md#v1-72-d73)。
+目录与 sidecar 独立收起，窄窗使用临时抽屉；不增加文件管理、索引或工作副本选择。
+
+可用性收尾采用一次有界列目录、前端本地分批显示、可逆路径定位；移除逐文件登记和只读事件导致的刷新。
+界面对齐 V15 的固定双入口、中性表面、紧凑行号和快速搜索；普通只读 Markdown 链接保留源码/预览切换。
+验证扩展既有 3 项 Rust 目录 owner、Store、主题与真实 Electron 布局/目录 owner；Desktop/Web Host 保存联调沿用原测试。
+本轮原生 UI 与打包验收范围为 macOS arm64；Linux 的事件种类回归不等同 Linux/Windows 整机验收。
+
+## 原生子代理平铺执行记录（2026-11-01）
+
+按 User 确认方案，在独立 worktree 收敛为普通 command：机器人图标、单文本详情、来源隔离、稳定首次记录顺序与既有步骤分组。
+当前规范为 [Surface v58](../../contracts/run-process-detail-surface-v58.md)，取舍见 [D72](decisions.md#v1-72-d72)，
+改动、迁移、测试归属与真实模型边界见[实施记录](subagent-flat-execution.md)。后续按 User 授权以原生 env 关闭 Qoder 后台 Agent，保留同步子代理；不新增调度或自动续跑。
+
+## 轻量文件编辑（2026-10-29）
+
+已有预览链路增加当前项目 UTF-8 文本编辑、手动保存、未保存关闭确认与基本冲突处理；Desktop 和 Web 共用 Rust Host。
+沿用原有界面与 CodeMirror，不新增编辑页面、自动保存或持久草稿。此次编辑交付不包含目录服务；目录由上方独立工作项补齐。
+规范见 [File Preview v24](../../contracts/file-preview-v24.md)，取舍见 [D71](decisions.md#v1-72-d71)。
+验证记录见[实施计划](implementation-plan.md#轻量文件编辑2026-10-29)。
+
+## Mission 详情与复用校验精简（2026-11-01）
+
+单文件 Diff 只验证当前工作区和选中可信路径，移除全清单一致性拒绝与详情中的全仓准备。
+正常 ready 工作区复用的完整身份校验仅执行一次；创建、恢复、删除竞争和 Mission 锁范围保持。
+当前规则见 [Mission v14](../../contracts/mission-v14.md)，回归与隔离验收范围见
+[实施记录](mission-read-simplification.md)。只推送工作分支，不合并或安装。
 
 ## 可选启动与历史维护减重（2026-10-30，实施中）
 

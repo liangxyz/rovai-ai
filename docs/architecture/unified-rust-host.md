@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: unified-rust-host
-last_updated: 2026-10-22
+last_updated: 2026-11-02
 ---
 
 # 统一 Rust Host
@@ -64,10 +64,6 @@ Host 在准入的 Core data-dir 内持久保存私有认证文档，浏览器 In
 
 长期登录 Token 使用 256-bit 系统随机数，本机入口初始化、重复查看/复制或显式重置。
 Desktop 与 Server 使用同一 `web-auth.json` 持久实现，原独立 `server-token` 仅作首次导入；Token 命令优先读取统一文档。
-原生 Server 将启动前已验证的认证文档作为 Core 曾准入的正向证据，连同已有数据库或历史 Runtime 标记，
-复用 `require_existing_authority` 防止主库丢失后被初始化为空库。历史附件根按需创建，不再要求其标记始终存在。
-仅有布局文件或提前执行 Token 命令生成的 `server-token` 不作此证明，首次正常启动仍可初始化；认证文档损坏时拒绝启动，
-不重置凭据。此检查不新增持久标记，也不保证数据库和所有既有证据同时被外部删除后的识别。
 Windows 以已准入数据目录的操作系统权限为信任基础，凭据文件接受正常继承 ACL，不承诺独立受保护的精确权限模板。
 平台适配器只为该文件提供保留路径/身份检查的读取与原子保存，额外 DACL 加固尽力完成；其他私有存储规则不变。
 具体读写与失败语义见 [Host Web v4](../contracts/host-web-v4.md#windows-web-凭据可用性)。
@@ -177,6 +173,8 @@ Mobile 最后复用同一 Web：宽屏 >=1040px，紧凑 768–1039px，手机 <
 Runtime 文件使用根内 `instances/<instance-key>/runtime-files`；Desktop 保留其原平台根。
 路径校验只增加精确的 Server 布局，不放开任意目录或取消既有身份与唯一 owner 检查。
 旧预览数据必须明确提示兼容入口，不能悄悄创建空实例；本轮不迁移 Desktop 数据。
+Runtime root 按使用准备，不能再把旧 root marker 当作唯一的既有实例证据。Server 读取到 Core 准入后才会持久化的
+Web 认证文档时，必须要求已有数据库；主库丢失明确拒绝，不用空库替换，也不引入另一套初始化记录。
 项目与 source 附件、第三方 Agent CLI 安装/认证/会话不被搬进 Server 根，附件语义不变。
 
 正式原生分发目标为 GitHub Releases 预编译包，包含匹配 Host、协议与共享 WebUI。用户无需 clone、Rust

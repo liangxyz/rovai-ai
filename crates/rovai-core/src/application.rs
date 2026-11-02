@@ -820,6 +820,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
         "health.check"
+            | "projectFiles.request"
             | "runtime.status.get"
             | "diagnostics.check"
             | "diagnostics.export"
@@ -2425,6 +2426,7 @@ struct ClaudeInputAcceptanceTarget<'a> {
 }
 
 struct Core {
+    project_files: Arc<crate::project_files::ProjectFiles>,
     execution_wake: crate::execution_wake::ExecutionWake,
     non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Arc<Mutex<Database>>,
@@ -2910,6 +2912,25 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    async fn resolve_project_file(
+        &self,
+        params: &ResolveFilePreviewSourceParams,
+    ) -> Result<Option<crate::file_preview_authority::ResolvedFilePreviewSource>> {
+        let binding = {
+            let database = self.database.lock().await;
+            crate::project_files::binding(&database, &params.camp_id).ok()
+        };
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        let thread = params.camp_id.clone();
+        let reference = params.raw_reference.clone().unwrap_or_default();
+        tokio::task::spawn_blocking(move || {
+            crate::project_files::resolve_source(binding, thread, &reference).ok()
+        })
+        .await
+        .context("Project file resolution failed")
+    }
     async fn attachment_view_gate(&self, camp_id: &str) -> Arc<RwLock<()>> {
         let mut gates = self.attachment_view_gates.lock().await;
         gates
@@ -12052,9 +12073,91 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "projectFiles.request" => {
+                let params: crate::project_files::Request =
+                    serde_json::from_value(request.params.clone())?;
+                let binding = if matches!(params.action.as_str(), "release" | "cancelSearch") {
+                    None
+                } else {
+                    let database = self.database.lock().await;
+                    crate::project_files::binding(&database, &params.thread_id).ok()
+                };
+                Ok(self
+                    .project_files
+                    .request(request.client.id().to_owned(), binding, params)
+                    .await)
+            }
+            "filePreview.readEditable" | "filePreview.saveText" => {
+                let params: crate::file_edit::EditRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let resolved = if params.source["kind"] == "attachment" {
+                    let locator: LocalAttachmentOwnerLocator =
+                        serde_json::from_value(params.source["locator"].clone())?;
+                    let source = {
+                        let database = self.database.lock().await;
+                        rovai_core::local_attachment_source::load_source_attachment_for_client(
+                            &database,
+                            &locator,
+                            &request.client,
+                        )?
+                    };
+                    // Original-file links are editable; managed historical copies are not.
+                    let Some(source) = source else {
+                        return Ok(crate::file_edit::failure("edit_unavailable"));
+                    };
+                    let parent = std::path::Path::new(&source.source_path)
+                        .parent()
+                        .context("Source file has no parent")?
+                        .to_string_lossy()
+                        .into_owned();
+                    Some(
+                        crate::file_preview_authority::ResolvedFilePreviewSource::FileTarget {
+                            camp_id: locator.camp_id().to_owned(),
+                            source_kind: "attachment".into(),
+                            source_identity: source.id,
+                            root_path: parent.clone(),
+                            base_path: parent,
+                            raw_reference: source.source_path,
+                            allow_children: true,
+                        },
+                    )
+                } else if params.source["kind"] == "project_file" {
+                    self.resolve_project_file(&serde_json::from_value(params.source.clone())?)
+                        .await?
+                } else {
+                    let source: ResolveFilePreviewSourceParams =
+                        serde_json::from_value(params.source.clone())?;
+                    if source.kind == "run_evidence"
+                        && source.action.as_deref() != Some("open_current")
+                    {
+                        return Ok(crate::file_edit::failure("edit_unavailable"));
+                    }
+                    let database = self.database.lock().await;
+                    if source.kind == "skill_reference" {
+                        resolve_skill_preview_source(&database, &self.data_dir, &source)?
+                    } else {
+                        resolve_file_preview_source(
+                            &database,
+                            &ManagedBlobStore::new(&self.data_dir),
+                            source,
+                        )?
+                    }
+                };
+                let saving = request.method == "filePreview.saveText";
+                tokio::task::spawn_blocking(move || {
+                    crate::file_edit::execute(params, resolved, saving)
+                })
+                .await
+                .context("File edit task failed")
+            }
             "filePreview.resolveSource" => {
                 let params: ResolveFilePreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
+                if params.kind == "project_file" {
+                    return Ok(serde_json::to_value(
+                        self.resolve_project_file(&params).await?,
+                    )?);
+                }
                 let database = self.database.lock().await;
                 let resolved = if params.kind == "skill_reference" {
                     resolve_skill_preview_source(&database, &self.data_dir, &params)?
@@ -20178,6 +20281,7 @@ async fn run_core(
     )?);
     let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
+        project_files: Arc::new(crate::project_files::ProjectFiles::default()),
         execution_wake: database.execution_wake.clone(),
         delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
         agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
@@ -21863,6 +21967,8 @@ async fn process_agent_run_pi_message(
                         "evidenceId": evidence_id,
                         "revision": evidence.as_ref().and_then(|value| value.revision),
                         "changeSequence": evidence.as_ref().and_then(|value| value.change_sequence),
+                        "sequence": evidence.as_ref().map(|value| value.sequence),
+                        "occurredAt": evidence.as_ref().map(|value| &value.occurred_at),
                         "outputTruncated": evidence.as_ref().and_then(|value| value.output_truncated),
                         "payload": public_payload,
                         "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
@@ -22579,6 +22685,7 @@ async fn process_acp_events(
                             "executionEpoch":execution_epoch,"adapterKind":AdapterKind::ZcodeApp,
                             "nativeMethod":"_zcode/background","evidenceId":evidence.id,
                             "revision":evidence.revision,"changeSequence":evidence.change_sequence,
+                            "sequence":evidence.sequence,"occurredAt":evidence.occurred_at,
                             "outputTruncated":evidence.output_truncated,
                             "payload":evidence.payload,"canonical":evidence.canonical}),
                         );
@@ -23027,6 +23134,8 @@ async fn process_agent_run_acp_delta_batch(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -23302,8 +23411,19 @@ async fn process_agent_run_acp_message(
         )
         .await;
     }
+    let display_params = if method == "session/update" {
+        let Some(params) = runtime
+            .execution_display_params(native_prompt_id, &params)
+            .await
+        else {
+            return;
+        };
+        params
+    } else {
+        params.clone()
+    };
     let completed_action = match runtime
-        .observe_message(native_prompt_id, &method, &params)
+        .observe_message(native_prompt_id, &method, &display_params)
         .await
     {
         Ok(completion) => completion,
@@ -23315,7 +23435,7 @@ async fn process_agent_run_acp_message(
     let (event_type, payload) = normalize_acp_event_with_completion(
         adapter_kind,
         &method,
-        &params,
+        &display_params,
         completed_action.as_ref(),
     );
     if event_type == "runtime.usage" {
@@ -23366,6 +23486,8 @@ async fn process_agent_run_acp_message(
             "evidenceId": evidence_id,
             "revision": evidence.as_ref().and_then(|evidence| evidence.revision),
             "changeSequence": evidence.as_ref().and_then(|evidence| evidence.change_sequence),
+            "sequence": evidence.as_ref().map(|evidence| evidence.sequence),
+            "occurredAt": evidence.as_ref().map(|evidence| &evidence.occurred_at),
             "outputTruncated": evidence.as_ref().and_then(|evidence| evidence.output_truncated),
             "payload": public_payload,
             "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
@@ -23484,6 +23606,16 @@ fn normalize_acp_event_with_completion(
             ("agent.thought.delta", payload)
         }
         Some("tool_call") | Some("tool_call_update") => {
+            if crate::runtime_subagent::acp_lifecycle_notice(adapter_kind, &update) {
+                return ("runtime.event", json!({"lifecycle":true}));
+            }
+            let tool_name = crate::runtime_subagent::acp_tool_name(adapter_kind, &update);
+            let agent_tool = tool_name
+                .as_deref()
+                .is_some_and(|name| crate::runtime_subagent::is_agent_tool(adapter_kind, name));
+            let task_parameters = tool_name.as_deref().is_some_and(|name| {
+                rovai_core::runtime_subagent::exposes_task_parameters(adapter_kind, name)
+            });
             let public_command =
                 acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
                     .or_else(|| completion.and_then(|value| value.public_command.clone()));
@@ -23521,8 +23653,11 @@ fn normalize_acp_event_with_completion(
             let mut payload = json!({
                 "runtimeRootOutput": crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update),
                 "sessionUpdate": update.get("sessionUpdate"),
+                "operationId": update.get("operationId"),
+                "runtimeSource": update.get("runtimeSource"),
                 "toolCallId": update.get("toolCallId"),
-                "toolName": update.get("toolName"),
+                "toolName": tool_name,
+                "runtimeToolType": if agent_tool { Some("agent") } else { None },
                 "status": public_status,
                 "kind": public_kind,
                 "title": update.get("title"),
@@ -23534,8 +23669,12 @@ fn normalize_acp_event_with_completion(
                     (adapter_kind == AdapterKind::MinimaxCodeCli)
                         .then(|| public_acp_content_text(update.pointer("/rawOutput/content")))
                         .flatten()
-                }),
-                "input": public_command,
+                }).or_else(|| task_parameters.then(|| update.get("rawOutput")
+                    .filter(|value| !value.is_null()).and_then(|value| serde_json::to_string_pretty(value).ok())).flatten()),
+                "input": if task_parameters {
+                    update.get("rawInput").filter(|value| !value.is_null())
+                        .and_then(|value| serde_json::to_string_pretty(value).ok())
+                } else { public_command },
                 "rawInputDigest": update
                     .get("rawInput")
                     .and_then(|value| canonical_json_digest(value).ok())
@@ -23624,7 +23763,13 @@ fn normalize_acp_event_with_completion(
             }
             ("runtime.action", payload)
         }
-        Some("plan") => ("runtime.plan", update),
+        Some("plan") => {
+            let root =
+                crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update);
+            let mut update = update;
+            update["runtimeRootOutput"] = json!(root);
+            ("runtime.plan", update)
+        }
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
     }
@@ -23971,6 +24116,8 @@ async fn process_runtime_event(
             "evidenceId": evidence.id,
             "revision": evidence.revision,
             "changeSequence": evidence.change_sequence,
+            "sequence": evidence.sequence,
+            "occurredAt": evidence.occurred_at,
             "outputTruncated": evidence.output_truncated,
             "payload": evidence.payload,
             "canonical": evidence.canonical,
@@ -24156,6 +24303,8 @@ async fn persist_runtime_compaction_display(
             "evidenceId": evidence.id,
             "revision": evidence.revision,
             "changeSequence": evidence.change_sequence,
+            "sequence": evidence.sequence,
+            "occurredAt": evidence.occurred_at,
             "outputTruncated": evidence.output_truncated,
             "payload": evidence.payload,
             "canonical": evidence.canonical,
@@ -25499,6 +25648,8 @@ async fn process_agent_run_codex_delta_batch(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -25555,6 +25706,8 @@ async fn persist_interrupted_codex_activities(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -25739,6 +25892,8 @@ async fn process_agent_run_codex_message(
             "evidenceId": evidence_id,
             "revision": evidence.as_ref().and_then(|evidence| evidence.revision),
             "changeSequence": evidence.as_ref().and_then(|evidence| evidence.change_sequence),
+            "sequence": evidence.as_ref().map(|evidence| evidence.sequence),
+            "occurredAt": evidence.as_ref().map(|evidence| &evidence.occurred_at),
             "outputTruncated": evidence.as_ref().and_then(|evidence| evidence.output_truncated),
             "payload": public_payload,
             "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
@@ -28725,6 +28880,7 @@ mod tests {
         )?);
 
         Ok(Core {
+            project_files: Arc::new(crate::project_files::ProjectFiles::default()),
             execution_wake: database.execution_wake.clone(),
             delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
             agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
@@ -34070,36 +34226,7 @@ done
                 },
             )
             .unwrap();
-        let agent_run_id = sent.result.payload["agentRunIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
-                [&agent_run_id],
-            )
-            .unwrap();
-        // Tool output is bounded before persistence. A plan explanation uses
-        // the ordinary managed-Blob path that this concurrency test reads.
-        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
-        let evidence = ExecutionEvidenceService
-            .record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&data_dir),
-                &agent_run_id,
-                1,
-                "runtime.plan",
-                &json!({
-                    "explanation": secret,
-                    "plan": [],
-                }),
-            )
-            .unwrap()
-            .unwrap();
-        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
-        let evidence_id = evidence.id.clone();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
 
         let mission_git = crate::mission_workspace::MissionGit::new(git_path.clone()).unwrap();
         let repository = mission_git.inspect(&source).await.unwrap().unwrap();
@@ -34132,7 +34259,7 @@ done
         mission_git.materialize(&workspace).await.unwrap();
         workspace.state = "ready".into();
         fs::write(worktree.join("tracked.txt"), "changed\n").unwrap();
-        let database = Database::open_with_runtime_camp_files_root(
+        let mut database = Database::open_with_runtime_camp_files_root(
             &data_dir,
             attachment_views.root(),
             attachment_views.root_identity_digest(),
@@ -34145,6 +34272,57 @@ done
                 [&workspace.id],
             )
             .unwrap();
+        // Current sends enqueue Deliveries. Claim only after the real Mission
+        // workspace is ready instead of expecting the retired immediate Run IDs.
+        let prepared = crate::delivery_queue::capture_prepared_batch_workspace(
+            &database,
+            &camp_id,
+            AgentRunWorkspace {
+                execution_root: workspace.working_directory.clone(),
+                access: "write".into(),
+                isolation: "git_worktree".into(),
+            },
+            json!({"workingDirectory": workspace.working_directory, "branch": workspace.branch}),
+        )
+        .unwrap();
+        let workspaces =
+            crate::delivery_queue::BatchWorkspaces::from([(camp_id.clone(), Ok(prepared))]);
+        let agent_run_id = crate::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+            &mut database,
+            1,
+            &workspaces,
+            &[],
+        )
+        .unwrap()
+        .pop()
+        .expect("ready Mission Delivery should be claimed");
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+        // Tool output is bounded before persistence. A plan explanation uses
+        // the ordinary managed-Blob path that this concurrency test reads.
+        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
+        let evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                &agent_run_id,
+                1,
+                "runtime.plan",
+                &json!({
+                    "explanation": secret,
+                    "plan": [],
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
+        let evidence_id = evidence.id.clone();
+
         let database_path = database.path().to_path_buf();
         drop(database);
         drop(attachment_views);
@@ -34869,6 +35047,76 @@ done
         *core.runtime_search_environment.write().await = Arc::new(
             RuntimeSearchEnvironment::for_test_paths(3, vec![wrapper_root.clone()]),
         );
+
+        // Normal ready reuse performs one complete identity validation. Count
+        // this chain only, not every Git operation involved in dispatch.
+        fs::write(&release, "ready reuse").unwrap();
+        let reused = core
+            .prepare_mission_workspace(&candidate, &source)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reused, prepared);
+        let calls = fs::read_to_string(&invocations).unwrap();
+        for query in ["--show-toplevel", "--git-common-dir", "--git-dir"] {
+            assert_eq!(
+                calls
+                    .lines()
+                    .filter(|line| line.split_whitespace().any(|arg| arg == query))
+                    .count(),
+                1,
+                "normal ready reuse must validate identity once: {query}\n{calls}"
+            );
+        }
+        let admin = std::process::Command::new(&git_path)
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--path-format=absolute", "--git-dir"])
+            .output()
+            .unwrap();
+        assert!(admin.status.success());
+        let admin = PathBuf::from(String::from_utf8(admin.stdout).unwrap().trim());
+        for marker in ["rovai-mission-owner", "gitdir"] {
+            let path = admin.join(marker);
+            let original = fs::read(&path).unwrap();
+            fs::write(&path, "wrong-owner-or-registration").unwrap();
+            assert!(
+                core.prepare_mission_workspace(&candidate, &source)
+                    .await
+                    .is_err(),
+                "ready reuse must still reject an invalid {marker}"
+            );
+            fs::write(&path, original).unwrap();
+        }
+
+        // A non-destructive cleanup failure can become ready inside this call,
+        // but it is still a recovery path and keeps the final validation.
+        {
+            let database = core.database.lock().await;
+            database.connection().execute(
+                "UPDATE mission_workspace SET state='cleanup_failed',diagnostic='mission.workspace_dirty' WHERE camp_id=?1",
+                [&camp_id],
+            ).unwrap();
+        }
+        fs::write(&invocations, "").unwrap();
+        assert!(
+            core.prepare_mission_workspace(&candidate, &source)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let recovery_calls = fs::read_to_string(&invocations).unwrap();
+        assert!(
+            recovery_calls
+                .lines()
+                .filter(|line| line.split_whitespace().any(|arg| arg == "--show-toplevel"))
+                .count()
+                >= 2,
+            "cleanup failure recovery must not take the normal-reuse shortcut: {recovery_calls}"
+        );
+        fs::remove_file(&release).unwrap();
+        fs::remove_file(&entered).unwrap();
+        fs::write(&invocations, "").unwrap();
 
         let prepare_task = tokio::spawn({
             let core = core.clone();
@@ -36747,6 +36995,67 @@ for line in sys.stdin:
 
     #[test]
     fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
+        for (adapter, name) in [
+            (AdapterKind::CopilotCli, "task"),
+            (AdapterKind::QoderCli, "Agent"),
+            (AdapterKind::KimiCodeCli, "TaskOutput"),
+            (AdapterKind::HermesCli, "delegate_task"),
+            (AdapterKind::KiroCli, "subagent"),
+        ] {
+            let input =
+                json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
+            let receipt = json!({"task_id":"native-task","status":"dispatched"});
+            let (event, payload) = normalize_acp_event(
+                adapter,
+                "session/update",
+                &json!({"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"native-call","operationId":"scoped-call",
+                "toolName":name,"kind":"execute","status":"completed","rawInput":input,"rawOutput":receipt,
+                "runtimeSource":{"sessionId":"session","promptId":"prompt"}}}),
+            );
+            assert_eq!(event, "runtime.action");
+            assert_eq!(payload["runtimeToolType"], "agent");
+            assert_eq!(payload["toolName"], name);
+            assert_eq!(payload["operationId"], "scoped-call");
+            assert_eq!(
+                serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+                input
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+                receipt
+            );
+            assert_eq!(payload["status"], "completed");
+        }
+        // Kiro names its call in vendor metadata; the terminal drops that
+        // metadata and returns the report as items/Text, not ACP content.
+        let mut display = crate::runtime_subagent::AcpExecutionDisplay::default();
+        let input = json!({"task":"Read the fixture","mode":"blocking","stages":[{"name":"reader","role":"kiro_default"}]});
+        let started = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","rawInput":input,"_meta":{"kiro":{"toolName":"subagent"}}}
+        })).unwrap();
+        let report =
+            json!({"items":[{"Text":"Pipeline completed: 1 stages finished.\nCHILD_REPORT"}]});
+        let completed = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","kind":"other","status":"completed","rawOutput":report}
+        })).unwrap();
+        assert_eq!(
+            started["update"]["operationId"],
+            completed["update"]["operationId"]
+        );
+        let (_, payload) = normalize_acp_event(AdapterKind::KiroCli, "session/update", &completed);
+        assert_eq!(payload["toolName"], "subagent");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+            report
+        );
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),

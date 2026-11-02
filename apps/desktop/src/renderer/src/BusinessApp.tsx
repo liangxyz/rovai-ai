@@ -1,3 +1,4 @@
+import { prepareFileEditsForQuit } from './file-edit-store'
 import { ThreadReferencePreviewProvider } from './ThreadReferencePreview'
 import { MessageReeditStore } from './message-reedit-store'
 import { MessageWithdrawal } from './message-withdrawal'
@@ -1382,6 +1383,7 @@ export function BusinessApp({
         viewRef.current,
         automationLeaveGuardRef.current
       )
+      await prepareFileEditsForQuit()
     } catch (nextError) {
       setError(uiAttribute("退出应用前未能完成输入操作：{0}", String(errorMessage(nextError))))
       throw nextError
@@ -4418,6 +4420,7 @@ export function BusinessApp({
     <ThreadInterruptionAttentionContext.Provider value={interruptionAttention}>
     <MobileLayoutProvider value={mobile}>
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
+      projectFilesEnabled={!!activeProjectPath}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
     <ThreadReferencePreviewProvider threadId={view === 'camp' ? activeThreadId : null} onOpen={async reference => {
       if (reference.kind === 'thread') await activateThread(reference.id, { reconcileDefaultLead: false })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
-import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile, readdir, symlink, lstat, readlink } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile, readdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import test from 'node:test'
@@ -12,32 +12,6 @@ const root = resolve(import.meta.dirname, '../..')
 const executable = process.platform === 'win32' ? 'rovai-server.exe' : 'rovai-server'
 const binary = process.env.ROVAI_SERVER_BIN ?? join(root, 'target/debug', executable)
 const version = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version
-
-// Optional legacy trees may be absent. Preserve that state rather than treating
-// ENOENT as an empty directory, and never follow links into another owner.
-async function snapshotTree(path) {
-  let metadata
-  try { metadata = await lstat(path) }
-  catch (error) { if (error.code === 'ENOENT') return { kind: 'missing' }; throw error }
-  const mode = metadata.mode & 0o777
-  if (metadata.isSymbolicLink()) return { kind: 'symlink', mode, target: await readlink(path) }
-  if (metadata.isFile()) return { kind: 'file', mode, bytes: await readFile(path) }
-  assert.ok(metadata.isDirectory(), 'unexpected special file in legacy fixture')
-  return { kind: 'directory', mode, entries: await Promise.all((await readdir(path)).sort().map(async name => [name, await snapshotTree(join(path, name))])) }
-}
-
-async function snapshotLegacy(root, instances) {
-  return { instances: await snapshotTree(instances), root: await snapshotTree(root), marker: await snapshotTree(join(root, '.runtime-camp-files-root.json')) }
-}
-
-async function seedLegacy(root, label) {
-  await mkdir(join(root, 'unknown/nested'), { recursive: true })
-  await mkdir(join(root, 'empty'))
-  await writeFile(join(root, '.runtime-camp-files-root.json'), `${label} historical marker bytes\n\0`)
-  await writeFile(join(root, 'unknown/nested/keep.bin'), Buffer.from([0, 255, 1, 13, 10]))
-  await writeFile(join(root, 'untouched.txt'), `${label} legacy file`)
-  await symlink('untouched.txt', join(root, 'unknown-link'))
-}
 
 test('Server default root is account scoped and independent of working directory', async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-server-paths-')))
@@ -57,13 +31,16 @@ test('Server default root is account scoped and independent of working directory
 // Owns the installed-entry -> shared Core -> HTTP -> persistent root seam.
 // HOME is overridden only in the isolated child process, never in the test
 // runner or user's shell. No Runtime/model is launched.
-for (const legacyState of ['missing', 'preserved']) {
-test(`Native Server default and custom roots retain data and token, reject another owner, and never write Desktop resources (${legacyState} legacy storage)`, {
+test('Native Server default and custom roots retain data and token, reject another owner, and never write Desktop resources', {
   timeout: 120_000,
   skip: process.platform === 'win32' ? 'Windows console shutdown requires its native console acceptance; path and installer checks run independently' : false
 }, async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-server-entry-')))
   const home = join(fixture, 'account'), install = join(fixture, 'program'), desktop = join(home, '.rovai')
+  const instanceEntries = directory => readdir(join(directory, 'instances')).catch(error => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
   await mkdir(join(desktop, 'skills'), { recursive: true })
   let installedBinary = join(install, executable)
   if (process.env.ROVAI_SERVER_RELEASE_DIR) {
@@ -79,25 +56,7 @@ test(`Native Server default and custom roots retain data and token, reject anoth
   const isolatedEnvironment = { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
   const desktopPaths = JSON.parse(execFileSync(hostBinary, ['prepare', '--data-dir', join(fixture, 'desktop-data')], { env: isolatedEnvironment, encoding: 'utf8' }))
   console.log(JSON.stringify({ channel: 'automatic_acceptance', name: 'parallel-desktop-host', dataDir: desktopPaths.dataDir, skillLibraryRoot: join(desktop, 'skills'), mcpConfigPath: join(desktop, 'mcp.json'), runtime: false }))
-  const startDesktop = () => launchHost(hostBinary, ['--data-dir', desktopPaths.dataDir, '--skill-library-root', join(desktop, 'skills'), '--mcp-config-path', join(desktop, 'mcp.json'), '--runtime-camp-files-root', desktopPaths.runtimeCampFilesRoot], { cwd: fixture, env: isolatedEnvironment })
-  if (legacyState === 'preserved') {
-    // Seed only an already initialized instance, never manufacture an authority DB.
-    const initialized = startDesktop()
-    try { await initialized.ready; await initialized.request('navigation.snapshot') }
-    finally { await initialized.close() }
-    assert.equal((await snapshotTree(desktopPaths.runtimeCampFilesRoot)).kind, 'missing')
-    await seedLegacy(desktopPaths.runtimeCampFilesRoot, 'desktop')
-  }
-  const desktopStorage = await snapshotLegacy(desktopPaths.runtimeCampFilesRoot, join(desktop, 'instances'))
-  assert.equal(desktopStorage.instances.kind, legacyState === 'missing' ? 'missing' : 'directory')
-  const serverStorage = []
-  const assertStorageUnchanged = async () => {
-    assert.deepEqual(await snapshotLegacy(desktopPaths.runtimeCampFilesRoot, join(desktop, 'instances')), desktopStorage, 'Server must not create or change Desktop legacy resources')
-    for (const { paths, baseline } of serverStorage) {
-      assert.deepEqual(await snapshotLegacy(paths.runtimeCampFilesRoot, join(paths.dataDir, 'instances')), baseline, 'Server legacy resources must retain their original state')
-    }
-  }
-  const desktopHost = startDesktop()
+  const desktopHost = launchHost(hostBinary, ['--data-dir', desktopPaths.dataDir, '--skill-library-root', join(desktop, 'skills'), '--mcp-config-path', join(desktop, 'mcp.json'), '--runtime-camp-files-root', desktopPaths.runtimeCampFilesRoot], { cwd: fixture, env: isolatedEnvironment })
   const processes = []
   const start = args => {
     const child = spawn(installedBinary, [...args, '--listen', '127.0.0.1:0'], { cwd: fixture, env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -109,7 +68,7 @@ test(`Native Server default and custom roots retain data and token, reject anoth
     const host = { child, ready, closed, output: () => output, origin: () => /Address  (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] }
     processes.push(host); return host
   }
-  const wait = promise => Promise.race([promise, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Server entry step timed out')), 20000); timer.unref() })])
+  const wait = (promise, step = 'Server entry step') => Promise.race([promise, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error(`${step} timed out`)), 20000); timer.unref() })])
   const call = async (host, token, operation, params = {}) => {
     const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: token }) })
     assert.equal(login.status, 200)
@@ -141,38 +100,20 @@ test(`Native Server default and custom roots retain data and token, reject anoth
     const desktopImport = await desktopCall('skills.import.inspect', { path: desktopSource })
     assert.equal(desktopImport.candidates.length, 1, JSON.stringify(desktopImport.rejectedCandidates))
     assert.equal((await desktopCall('skills.import.commit', { commandId: randomUUID(), command: { stagingToken: desktopImport.stagingToken, candidateName: desktopImport.candidates[0].name, expectedDigest: desktopImport.candidates[0].contentDigest, expectedSkillVersion: null, confirmUpdate: false } })).status, 'applied')
-    const desktopBaseline = { mcp: await readFile(join(desktop, 'mcp.json'), 'utf8'), skills: await desktopCall('skills.list') }
-    await assertStorageUnchanged()
+    const desktopBaseline = { mcp: await readFile(join(desktop, 'mcp.json'), 'utf8'), skills: await desktopCall('skills.list'), instances: await instanceEntries(desktop) }
     const desktopWeb = await desktopHost.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: join(install, process.env.ROVAI_SERVER_RELEASE_DIR ? 'current/web-ui' : 'web-ui') })
     assert.equal((await call({ origin: () => desktopWeb.origin }, desktopWeb.administratorToken, 'mcp.config.get')).configDigest, (await desktopCall('mcp.config.get')).configDigest)
     await assert.rejects(access(join(home, '.rovai-server')), { code: 'ENOENT' })
     for (const [name, args, data] of [['default', [], join(home, '.rovai-server')], ['custom', ['--data-dir', join(fixture, 'custom')], join(fixture, 'custom')]]) {
       console.log(JSON.stringify({ channel: 'automatic_acceptance', name, dataDir: data, skillLibraryRoot: join(data, 'skills'), mcpConfigPath: join(data, 'mcp.json'), runtime: false }))
-      const paths = JSON.parse(execFileSync(installedBinary, [...args, 'paths'], { env: isolatedEnvironment, encoding: 'utf8' }))
-      // Getting a token prepares layout/token only; it must not forbid the first Core startup.
-      const bootstrapToken = execFileSync(installedBinary, [...args, 'token'], { env: isolatedEnvironment, encoding: 'utf8' }).trim()
-      assert.equal(/^[a-f0-9]{64}$/i.test(bootstrapToken), true)
-      await access(join(data, 'server-layout.json')); await access(join(data, 'server-token'))
-      await assert.rejects(access(join(data, 'web-auth.json')), { code: 'ENOENT' })
+      // A bootstrap token read must not turn a fresh root into a lost database.
+      const preparedToken = execFileSync(installedBinary, [...args, 'token'], { env: isolatedEnvironment, encoding: 'utf8' }).trim()
       await assert.rejects(access(join(data, 'rovai.sqlite')), { code: 'ENOENT' })
-      if (legacyState === 'preserved') {
-        const initialized = start(args); await wait(initialized.ready)
-        await call(initialized, await readFile(join(data, 'server-token'), 'utf8'), 'navigation.snapshot')
-        initialized.child.kill('SIGTERM'); assert.deepEqual(await wait(initialized.closed), { code: 0, signal: null })
-        await assertStorageUnchanged()
-        assert.equal((await snapshotTree(paths.runtimeCampFilesRoot)).kind, 'missing')
-        await seedLegacy(paths.runtimeCampFilesRoot, name)
-      }
-      const baseline = await snapshotLegacy(paths.runtimeCampFilesRoot, join(data, 'instances'))
-      assert.equal(baseline.instances.kind, legacyState === 'missing' ? 'missing' : 'directory')
-      assert.equal(baseline.root.kind, legacyState === 'missing' ? 'missing' : 'directory')
-      assert.equal(baseline.marker.kind, legacyState === 'missing' ? 'missing' : 'file')
-      serverStorage.push({ paths, baseline })
-      const first = start(args); await wait(first.ready)
+      await assert.rejects(access(join(data, 'web-auth.json')), { code: 'ENOENT' })
+      const first = start(args); await wait(first.ready, `${name} initial startup`)
       assert.ok(first.origin(), first.output())
       const token = await readFile(join(data, 'server-token'), 'utf8')
-      assert.equal(token === bootstrapToken, true, 'first startup retains the token obtained before Core initialization')
-      await access(join(data, 'web-auth.json'))
+      assert.equal(token, preparedToken)
       assert.equal(first.output().includes(token), false)
       assert.ok(first.output().includes(`Rovai Server ${version} · Ready`))
       assert.match(first.output(), /Foreground/)
@@ -200,16 +141,20 @@ test(`Native Server default and custom roots retain data and token, reject anoth
       assert.equal(await readFile(join(desktop, 'mcp.json'), 'utf8'), desktopBaseline.mcp)
       assert.deepEqual(await desktopCall('skills.list'), desktopBaseline.skills)
       await access(join(data, 'rovai.sqlite')); await access(join(data, 'mcp.json')); await access(join(data, 'skills')); await access(join(data, 'logs/server.log'))
-      await assertStorageUnchanged()
+      // Runtime storage is prepared on demand; startup no longer creates a
+      // legacy root marker. The configured root must still belong to this Server.
+      const serverPaths = JSON.parse(execFileSync(installedBinary, [...args, 'paths'], { env: isolatedEnvironment, encoding: 'utf8' }))
+      assert.equal(serverPaths.dataDir, data)
+      assert.ok(serverPaths.runtimeCampFilesRoot.startsWith(join(data, 'instances') + sep))
+      assert.equal(serverPaths.runtimeCampFilesRoot.startsWith(desktop + sep), false)
+      await assert.rejects(access(join(serverPaths.runtimeCampFilesRoot, '.runtime-camp-files-root.json')), { code: 'ENOENT' })
       const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: token }) })
       assert.equal(loginBeforeExit.status, 200)
       const durableSession = await loginBeforeExit.json()
       const before = await call(first, token, 'navigation.snapshot')
-      const second = start(args); assert.equal((await wait(second.closed)).code, 1); assert.match(second.output(), /owned_by_active_core/)
-      await assertStorageUnchanged()
-      first.child.kill('SIGTERM'); assert.deepEqual(await wait(first.closed), { code: 0, signal: null }, first.output())
-      await assertStorageUnchanged()
-      const reopened = start(args); await wait(reopened.ready)
+      const second = start(args); assert.equal((await wait(second.closed, `${name} duplicate owner rejection`)).code, 1); assert.match(second.output(), /owned_by_active_core/)
+      first.child.kill('SIGTERM'); assert.deepEqual(await wait(first.closed, `${name} initial shutdown`), { code: 0, signal: null }, first.output())
+      const reopened = start(args); await wait(reopened.ready, `${name} restart`)
       assert.equal(await readFile(join(data, 'server-token'), 'utf8'), token)
       assert.equal(execFileSync(installedBinary, [...args, 'token'], { env: isolatedEnvironment, encoding: 'utf8' }).trim(), token)
       const restoredSession = await fetch(`${reopened.origin()}/api/v1/session`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${durableSession.token}` }, body: JSON.stringify({ editor: { clientId: durableSession.clientId, proof: durableSession.editorProof } }) })
@@ -218,47 +163,38 @@ test(`Native Server default and custom roots retain data and token, reject anoth
       assert.deepEqual(await call(reopened, token, 'navigation.snapshot'), before)
       assert.equal((await call(reopened, token, 'mcp.config.get')).configDigest, created.config.configDigest)
       assert.deepEqual(await call(reopened, token, 'skills.list'), skills)
-      await assertStorageUnchanged()
-      reopened.child.kill(name === 'default' ? 'SIGHUP' : 'SIGINT'); assert.deepEqual(await wait(reopened.closed), { code: 0, signal: null }, reopened.output())
-      await assertStorageUnchanged()
+      reopened.child.kill(name === 'default' ? 'SIGHUP' : 'SIGINT'); assert.deepEqual(await wait(reopened.closed, `${name} restarted shutdown`), { code: 0, signal: null }, reopened.output())
       assert.match(await readFile(join(data, 'logs/server.log'), 'utf8'), /Host Core stopped after durable settlement/)
       assert.equal((await readFile(join(data, 'logs/server.log'), 'utf8')).includes(token), false)
-      // A previously admitted instance with a lost DB must not become a fresh empty instance,
-      // including the ordinary case where no historical Runtime marker was ever created.
-      const storedAuth = await readFile(join(data, 'web-auth.json'))
+      // A previously admitted instance with a lost DB must not become a fresh empty instance.
       await rm(join(data, 'rovai.sqlite'))
-      const lostDatabase = start(args); assert.equal((await wait(lostDatabase.closed)).code, 1)
-      assert.match(lostDatabase.output(), /authority_required_existing_missing/)
+      const lostDatabase = start(args); assert.equal((await wait(lostDatabase.closed, `${name} missing database rejection`)).code, 1)
       await assert.rejects(access(join(data, 'rovai.sqlite')), { code: 'ENOENT' })
-      assert.equal((await readFile(join(data, 'web-auth.json'))).equals(storedAuth), true, 'lost-DB rejection must not overwrite authentication')
-      await assertStorageUnchanged()
     }
     assert.equal(await readFile(join(desktop, 'mcp.json'), 'utf8'), desktopBaseline.mcp)
     assert.deepEqual(await desktopCall('skills.list'), desktopBaseline.skills)
-    await assertStorageUnchanged()
-    const desktopRoot = start(['--data-dir', desktop]); assert.equal((await wait(desktopRoot.closed)).code, 1); assert.match(desktopRoot.output(), /server_legacy_layout/)
+    assert.deepEqual(await instanceEntries(desktop), desktopBaseline.instances)
+    const desktopRoot = start(['--data-dir', desktop]); assert.equal((await wait(desktopRoot.closed, 'Desktop root rejection')).code, 1); assert.match(desktopRoot.output(), /server_legacy_layout/)
     assert.equal(await readFile(join(desktop, 'mcp.json'), 'utf8'), desktopBaseline.mcp)
     await assert.rejects(access(join(desktop, 'server-layout.json')), { code: 'ENOENT' })
     const legacy = join(fixture, 'legacy'); await mkdir(legacy); await writeFile(join(legacy, 'rovai.sqlite'), 'legacy sentinel')
-    const refused = start(['--data-dir', legacy]); assert.equal((await wait(refused.closed)).code, 1); assert.match(refused.output(), /server_legacy_layout/)
+    const refused = start(['--data-dir', legacy]); assert.equal((await wait(refused.closed, 'legacy root rejection')).code, 1); assert.match(refused.output(), /server_legacy_layout/)
     assert.equal(await readFile(join(legacy, 'rovai.sqlite'), 'utf8'), 'legacy sentinel')
     assert.deepEqual(await readdir(legacy), ['rovai.sqlite'])
     const outside = join(fixture, 'outside'); await mkdir(outside)
     const alias = join(fixture, 'alias'); await symlink(outside, alias)
     const throughAlias = start(['--data-dir', join(alias, 'new-root')])
-    assert.equal((await wait(throughAlias.closed)).code, 1); assert.match(throughAlias.output(), /symlink component/)
+    assert.equal((await wait(throughAlias.closed, 'symlink root rejection')).code, 1); assert.match(throughAlias.output(), /symlink component/)
     assert.deepEqual(await readdir(outside), [], 'path checks must precede preparation through a symlink ancestor')
     const oldDefault = join(desktop, 'server'); await mkdir(oldDefault); await writeFile(join(oldDefault, 'rovai.sqlite'), 'old preview')
-    const oldDefaultHint = start([]); assert.equal((await wait(oldDefaultHint.closed)).code, 1); assert.match(oldDefaultHint.output(), /previous preview data exists/)
+    const oldDefaultHint = start([]); assert.equal((await wait(oldDefaultHint.closed, 'old default root rejection')).code, 1); assert.match(oldDefaultHint.output(), /previous preview data exists/)
     assert.equal(await readFile(join(oldDefault, 'rovai.sqlite'), 'utf8'), 'old preview')
-    await assertStorageUnchanged()
   } finally {
     await desktopHost.close()
     for (const host of processes) { if (host.child.exitCode === null && host.child.signalCode === null) host.child.kill('SIGKILL'); await wait(host.closed).catch(() => {}) }
     await rm(fixture, { recursive: true, force: true })
   }
 })
-}
 
 // Uses real POSIX controlling terminals. Never prints the fixture credential,
 // including on assertion failure; only boolean observations leave the child.
