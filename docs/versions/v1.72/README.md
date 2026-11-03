@@ -6,10 +6,37 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Markdown Mermaid 审阅（2026-11-03）
+
+Issue #979 在文件与消息正文中交付自动绘图、源码/图形切换与完整复制、大图缩放和滚动、局部失败及手动重试。
+流式正文按已完整到达的闭合围栏立即出图，同回合明确对应的单聊最终回复保留图表阅读状态。
+复用现有图片展示与代码复制，在专用受限 iframe 内离线渲染和清洗，不新增后端协议；执行控制台保持轻量。
+当前边界见[文件预览架构](../../architecture/file-preview.md#markdown-图表渲染)与
+[图表阅读 UI](../../ui/components/file-preview.md#markdown-图表阅读)；实现、生产验收及资源体积见
+[交付记录](markdown-mermaid.md)。
+
+## 原生 Skills 可用性修复（2026-11-02）
+
+按 User 收敛后的最小范围，统一宽松发现与重验、canonical 目录名称缺省、去重结果一致登记，
+原生名称不再套用受管格式；四类轻量诊断支持定位和刷新。受管校验、访问边界与冻结投递不变。
+确认、输入前后差异和验证归[独立说明](model-context-change-native-skills-availability.md)，
+当前规则归 [Skills Rebuild v2](../../contracts/skills-rebuild-v2.md#原生文档接受与诊断)。
+
+## 专业职责 30,000 字符（2026-11-02）
+
+[R2 独立变更说明](model-context-change-professional-responsibilities-30000.md)合并五点评审与 User 收紧的范围：
+职责 30,000 scalar、相关 Bootstrap 正文 256 KiB、执行包默认 256 KiB；保留现有 claim，隔离旧分派固定预留。
+文内列出最小改动、版本轴不变的依据、内容保留、定向回归及复用 12 Case Gate 的边界。
+已完成字段扩容、正文上限及旧预留解耦；工程与定向回归、OpenCode／Command Code 实跑通过。
+User 后续要求停止通用模型矩阵，已停止并留证；Cline 实跑受现有平台资格限制。
+结果见 [R2 实施记录](model-context-change-professional-responsibilities-30000.md#实施与验收记录2026-11-02)与
+[验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。User 已授权 [PR #987](https://github.com/murray17/rovai-ai/pull/987) 合入 main；
+smoke 摘要匹配补齐同一条 accepted 投递约束，构造数据与既有证据复核通过，未重跑真实模型。
 
 ## 取消执行条统一保留（2026-11-02）
 

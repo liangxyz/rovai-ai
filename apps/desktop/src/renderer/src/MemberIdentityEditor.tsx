@@ -13,7 +13,6 @@ import { DialogControlIcon } from './AppDialog'
 import { MemberAvatarEditor } from './MemberAvatarEditor'
 import {
   identityDraftFor,
-  IDENTITY_REFLECTION_MAX_SCALARS,
   PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS,
   identityDraftIssue,
   unicodeScalarLength,
@@ -405,7 +404,7 @@ export const MemberIdentityEditor = forwardRef<
             {field(
               'workingPrinciples',
               uiAttribute('工作准则'),
-              IDENTITY_REFLECTION_MAX_SCALARS,
+              300,
               true,
               uiAttribute('做事方式、质量标准和协作边界'),
               uiAttribute('修改后用于之后开始的工作。')
@@ -413,7 +412,7 @@ export const MemberIdentityEditor = forwardRef<
             {field(
               'growthTopic',
               uiAttribute('成长课题'),
-              IDENTITY_REFLECTION_MAX_SCALARS,
+              300,
               true,
               uiAttribute('希望逐渐练习或改善的方向'),
               uiAttribute('更换课题会保留已经形成的记忆。')

@@ -80,8 +80,8 @@ pub fn member_create_input_schema() -> Value {
                 "type": "array", "maxItems": 6, "default": [],
                 "items": {"type": "string", "minLength": 1, "maxLength": 16}
             },
-            "workingPrinciples": {"type": "string", "maxLength": crate::agent_profile::IDENTITY_REFLECTION_MAX_SCALARS, "default": ""},
-            "growthTopic": {"type": "string", "maxLength": crate::agent_profile::IDENTITY_REFLECTION_MAX_SCALARS, "default": ""},
+            "workingPrinciples": {"type": "string", "maxLength": 300, "default": ""},
+            "growthTopic": {"type": "string", "maxLength": 300, "default": ""},
             "avatarFile": {
                 "type": "string", "minLength": 1, "maxLength": 4096,
                 "description": "Optional run-readable local PNG, JPEG or GIF path. Rovai normalizes and imports it; the path is never persisted."
@@ -383,44 +383,23 @@ mod tests {
                 json!({"creationKey":"51d668e1-6dc7-4f39-80b2-0555f823715a", "displayName":"Long identity"}),
             ),
         ] {
-            for (field, limit) in [
-                (
-                    "professionalResponsibilities",
-                    crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS,
-                ),
-                (
-                    "workingPrinciples",
-                    crate::agent_profile::IDENTITY_REFLECTION_MAX_SCALARS,
-                ),
-                (
-                    "growthTopic",
-                    crate::agent_profile::IDENTITY_REFLECTION_MAX_SCALARS,
-                ),
+            assert_eq!(
+                schema["properties"]["professionalResponsibilities"]["maxLength"],
+                30_000
+            );
+            for text in [
+                "中".repeat(30_000),
+                "😀".repeat(30_000),
+                "e\u{0301}".repeat(15_000),
             ] {
-                assert_eq!(schema["properties"][field]["maxLength"], json!(limit));
-                for text in [
-                    "中".repeat(limit),
-                    "😀".repeat(limit),
-                    "e\u{0301}".repeat(limit / 2),
-                ] {
-                    input[field] = json!(text);
-                    validate(operation, &input).unwrap();
-                    input[field] = json!(format!("{text}界"));
-                    let error = validate(operation, &input).unwrap_err();
-                    if field == "professionalResponsibilities" {
-                        assert_eq!(
-                            error.to_string(),
-                            crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_TOO_LONG
-                        );
-                    }
-                    input[field] = json!("");
-                }
+                input["professionalResponsibilities"] = json!(format!(" \u{feff}{text}\n"));
+                validate(operation, &input).unwrap();
+                input["professionalResponsibilities"] = json!(format!("{text}界"));
+                assert_eq!(
+                    validate(operation, &input).unwrap_err().to_string(),
+                    crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_TOO_LONG
+                );
             }
-            input["professionalResponsibilities"] = json!(format!(
-                " \u{feff}{}\n",
-                "😀".repeat(crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS)
-            ));
-            validate(operation, &input).unwrap();
             input["professionalResponsibilities"] = json!(" \n");
             validate(operation, &input).unwrap();
             input["professionalResponsibilities"] = Value::Null;

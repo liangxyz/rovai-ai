@@ -158,7 +158,7 @@ last_updated: 2026-10-29
 
 ### 三层身份与命名
 
-专业职责支持 trim 后 0～20,000 个 Unicode scalar values；内部格式保留，超限原子拒绝。工作准则与成长课题 trim 后各最多 3,000 个 Unicode scalar values。本人身份仍完整投递，其他字段限制不变。
+专业职责支持 trim 后 0～10,000 个 Unicode scalar values；内部格式保留，超限原子拒绝。本人身份仍完整投递，其他字段限制不变。
 
 - AgentProfile 使用三个当前身份层：SQLite 内部不可公开的 UUID、工具/模型/审计使用且不可复用的 `agent_<positive integer>`、用户可编辑且全局唯一的 Member Name。数字后缀不表达角色、能力、排序或权威。
 - Agent ID 由应用级单调序列在创建事务中分配；已提交身份即使永久移除也不释放。内置成员使用同一格式和分配合同，不形成领域子类型。
