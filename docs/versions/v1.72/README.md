@@ -6,10 +6,40 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-03
+last_updated: 2026-11-05
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 执行 Tab 恢复与空选中回退（2026-11-05）
+
+按 User 确认的最小范围，当前窗口按 Thread 记住队员／总览 Tab；可见执行页恢复有效选择或回退总览。
+显式关闭只清除当前选择，不被可见空选中的补选逻辑撤销；再次打开仍恢复 Tab。
+不保存具体 Run、历史开合、卡片展开或滚动，不改变当前执行／历史呈现及自动开合条件。
+规则见[会话执行过程](../../ui/components/conversation-workspace.md#thread-执行过程)，实现与验证见
+[实施记录](implementation-plan.md#执行-tab-恢复与空选中回退2026-11-05)。
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+按 User 确认，公开运行计数、运行列表、文件变更卡片与 `thread.runs` 统一按 Run 的直接会话归属读取；
+旧 Turn-only 公开运行不再显示这些执行卡片，不迁移或回填历史数据，当前单聊与消息正文保持。
+当前规则见 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md)、[Thread Runs v2](../../contracts/thread-runs-v2.md) 与
+[读取架构](../../architecture/camp-open-read-path.md)，取舍见 [D75](decisions.md#v1-72-d75)，
+代码与验证见[实施记录](implementation-plan.md#会话执行查询取消旧-turn-回退2026-11-05)。
+
+## 原生成功与空最终文字（2026-11-04，Issue #1012）
+
+按 User 确认的可用性优先规则，Pi、Codex、共享 ACP 与 Antigravity 的有效原生成功允许没有最终文字，
+与 Claude 对齐；空文字不生成消息或 Missing-Send 候选，非空文字继续沿用发送／补发去重。
+ACP 删除整轮问卷否决状态，局部取消保留诊断和不代答语义；真实原生失败、整轮取消、缺少终态及
+Antigravity legacy 空输出／print 超时继续失败。无新状态、重试、Schema、模型输入或界面。
+当前规范为 [Runtime Launch v75](../../contracts/runtime-launch-and-verification-v75.md)与
+[Missing-Send v4](../../contracts/missing-send-recovery-publication-v4.md)；测试归属见
+[开发验证](../../development/testing.md#全-runtime-空成功结果)。已完成定向 Rust、默认 workspace、
+`pnpm typecheck`、`TZ=UTC pnpm test` 与通用文档门禁；本机 Honolulu 时区的两项既有日期断言在 UTC 下通过。
+macOS arm64 使用真实 MiniMax 0.6.12 与本地受控 Provider，通过 completion-only 五项与 questionnaires-only
+十二项场景，覆盖空成功、消息不重复、原生错误、问卷无答案、后继与普通 allow/deny。
+未调用外部模型或进行跨平台真实 Runtime 验收；历史 Run 不回填，不宣称问卷界面已接入。
 
 ## 消息导出（2026-11-03）
 
@@ -510,9 +540,10 @@ Migration 205 从 schema 154 升至 **155**，保留业务行、索引、触发�
 [接入矩阵](../../research/minimax-code-runtime/README.md)分别记录脚本模型、真实模型与未验范围，
 实现交付不等同 Checklist 的 First-Class 资格。没有更换 current_version 或宣布本版本完成。
 
-User seq35/37 确认问卷采用取消、不代答。沿用现有原生 dismiss 与审批防代答，新增准确的
-`runtime_questionnaire_unsupported` 公开提示，非空结束文字或已发送消息不掩盖未承接问卷。
-不改原生配置、Host/Session 身份或模型上下文；后继新指令按原路径继续。
+User seq35/37 确认问卷采用取消、不代答。保留原生 dismiss 与审批防代答，不改原生配置、Host/Session
+身份或模型上下文。原先的整轮 `runtime_questionnaire_unsupported` 覆盖已由
+[Runtime Launch v75](../../contracts/runtime-launch-and-verification-v75.md#局部问卷取消)替代：局部取消保留诊断，
+随后有效原生成功正常完成，后继新指令按原路径继续。
 
 Linux 目标主机按维护者要求完成 14 轴验收，见[独立报告](../../research/minimax-code-runtime/linux-qualification-2026-10-18.md)
 与[不可变证据](../../../qualification/runtime-platform/linux-x64-minimax-code-v1.json)。覆盖真实 Provider、

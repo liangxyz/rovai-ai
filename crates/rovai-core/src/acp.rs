@@ -690,7 +690,6 @@ struct AcpPromptObservation {
     assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
     execution_display: crate::runtime_subagent::AcpExecutionDisplay,
-    unsupported_interaction: bool,
     questionnaire_request_ids: BTreeSet<String>,
     native_usage_message_ids: BTreeSet<String>,
     native_usage_tool_call_ids: BTreeSet<String>,
@@ -705,7 +704,6 @@ impl AcpPromptObservation {
             assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
             execution_display: crate::runtime_subagent::AcpExecutionDisplay::default(),
-            unsupported_interaction: false,
             questionnaire_request_ids: BTreeSet::new(),
             native_usage_message_ids: BTreeSet::new(),
             native_usage_tool_call_ids: BTreeSet::new(),
@@ -1321,6 +1319,7 @@ impl AcpRpcError {
                 data.as_str()
                     .or_else(|| data.get("error").and_then(Value::as_str))
                     .or_else(|| data.get("details").and_then(Value::as_str))
+                    .or_else(|| data.get("message").and_then(Value::as_str))
             })
             .and_then(|detail| sanitize_public_runtime_error(detail, &[]))
             .filter(|detail| detail != &message);
@@ -1366,6 +1365,25 @@ impl AcpRpcError {
             message,
             provider_detail,
         }
+    }
+
+    pub(crate) fn from_prompt_result(kind: AdapterKind, result: &Value) -> Option<Self> {
+        if kind != AdapterKind::CodebuddyCli || result.get("stopReason")?.as_str()? != "refusal" {
+            return None;
+        }
+        // CodeBuddy wraps model-request errors in a successful ACP response.
+        // Read only its terminal error envelope, never arbitrary update metadata.
+        let raw = result
+            .pointer("/_meta/codebuddy.ai~1errorMessage")?
+            .as_str()?;
+        if raw.len() > 64 * 1024 {
+            return None;
+        }
+        let error: Value = serde_json::from_str(raw).ok()?;
+        if error.get("message")?.as_str()?.trim().is_empty() {
+            return None;
+        }
+        Some(Self::from_response(&error))
     }
 
     // Called only for a correlated session/resume or session/load response.
@@ -6237,7 +6255,6 @@ impl AcpRuntime {
             {
                 return Ok(());
             }
-            observation.unsupported_interaction = true;
         }
         // This is a client capability limit, never a user answer or refusal.
         eprintln!("ACP native questionnaire cancelled by unsupported client: {kind:?}");
@@ -6294,9 +6311,6 @@ impl AcpRuntime {
         }
         if method == "session/request_permission" {
             observation.assistant_suffix.observe_tool_activity();
-            observation.unsupported_interaction |=
-                classify_permission_request(self.adapter_kind(), params)
-                    != AcpPermissionRequestKind::Execution;
             return Ok(None);
         }
         if method != "session/update" {
@@ -6336,7 +6350,9 @@ impl AcpRuntime {
                 Some("ask_user" | "request_feature_enable")
             )
         {
-            observation.unsupported_interaction = true;
+            self.host.send_host_diagnostic(
+                "MiniMax native questionnaire has no supported user interface".to_string(),
+            );
         }
         if session_update == Some("agent_message_chunk")
             && crate::runtime::is_root_output(params)
@@ -6448,30 +6464,6 @@ impl AcpRuntime {
             .assistant_suffix
             .candidate()
             .map(|text| self.redact_text(&text))
-    }
-
-    pub async fn has_unsupported_questionnaire(&self, native_prompt_id: &str) -> bool {
-        self.active_observation
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|observation| {
-                observation.prompt_id == native_prompt_id && observation.unsupported_interaction
-            })
-    }
-
-    /// Empty assistant output may only finish an already-published turn once
-    /// native tools have settled and no unsupported questionnaire was invoked.
-    pub async fn allows_empty_final_after_public_send(&self, native_prompt_id: &str) -> bool {
-        self.active_observation
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|observation| {
-                observation.prompt_id == native_prompt_id
-                    && observation.observed_tools.is_empty()
-                    && !observation.unsupported_interaction
-            })
     }
 
     pub async fn missing_send_recovery_candidate(&self, native_prompt_id: &str) -> Option<String> {
@@ -10255,8 +10247,52 @@ mod tests {
         );
 
         for data in [
+            json!({"details": "401 Invalid API key", "message": "shorter message"}),
+            json!({"message": "401 Invalid API key", "private": "must remain private"}),
+        ] {
+            let result = json!({
+                "stopReason": "refusal",
+                "_meta": {"codebuddy.ai/errorMessage": json!({
+                    "code": -32603, "message": "Internal error", "data": data
+                }).to_string()}
+            });
+            let error =
+                AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).unwrap();
+            assert_eq!(
+                error.diagnostic(),
+                "ACP error -32603: Internal error: 401 Invalid API key"
+            );
+            assert!(AcpRpcError::from_prompt_result(AdapterKind::TraeCnCli, &result).is_none());
+            for reason in ["end_turn", "cancelled", "unknown"] {
+                let mut result = result.clone();
+                result["stopReason"] = json!(reason);
+                assert!(
+                    AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).is_none()
+                );
+            }
+        }
+
+        for raw in [
+            Value::Null,
+            json!({"message": "not a serialized envelope"}),
+            json!("not JSON"),
+            json!("[]"),
+            json!(r#"{"message":null}"#),
+            json!(r#"{"message":"  "}"#),
+            json!(
+                json!({"message":"must remain private", "padding":" ".repeat(64 * 1024)})
+                    .to_string()
+            ),
+        ] {
+            let result = json!({"stopReason":"refusal", "_meta":{"codebuddy.ai/errorMessage":raw}});
+            assert!(AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).is_none());
+        }
+
+        for data in [
             json!("provider failed with api_key=must-not-leak"),
             json!({ "error": "provider failed with api_key=must-not-leak" }),
+            json!({ "details": "provider failed with api_key=must-not-leak" }),
+            json!({ "message": "provider failed with api_key=must-not-leak" }),
         ] {
             let redacted_detail = AcpRpcError::from_response(&json!({
                 "code": -32603,
@@ -10273,6 +10309,8 @@ mod tests {
             json!({ "detail": "must remain private" }),
             json!({ "error": { "message": "must remain private" } }),
             json!({ "error": ["must remain private"] }),
+            json!({ "message": { "error": "must remain private" } }),
+            json!({ "details": ["must remain private"] }),
             json!(["must remain private"]),
             json!(42),
             json!(false),
@@ -15645,24 +15683,28 @@ while IFS= read -r ignored; do :; done
         );
         assert!(
             !runtime
-                .allows_empty_final_after_public_send(prompt_id)
-                .await,
-            "tool still in progress"
+                .active_observation
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .observed_tools
+                .is_empty()
         );
         runtime.observe_message(prompt_id, "session/update", &json!({"update":{
             "sessionUpdate":"tool_call_update", "toolCallId":"tool-read", "status":"completed"
         }})).await.unwrap();
         assert!(
             runtime
-                .allows_empty_final_after_public_send(prompt_id)
+                .active_observation
+                .lock()
                 .await
+                .as_ref()
+                .unwrap()
+                .observed_tools
+                .is_empty()
         );
-        assert!(!runtime.has_unsupported_questionnaire(prompt_id).await);
-        assert!(
-            !runtime
-                .allows_empty_final_after_public_send("stale-prompt")
-                .await
-        );
+        assert!(runtime.final_agent_message("stale-prompt").await.is_none());
         runtime
             .observe_message(
                 prompt_id,
@@ -15673,14 +15715,7 @@ while IFS= read -r ignored; do :; done
             )
             .await
             .unwrap();
-        assert!(
-            !runtime
-                .allows_empty_final_after_public_send(prompt_id)
-                .await,
-            "dismissed question is not a completed answer"
-        );
-        assert!(runtime.has_unsupported_questionnaire(prompt_id).await);
-        assert!(!runtime.has_unsupported_questionnaire("stale-prompt").await);
+        assert!(runtime.final_agent_message(prompt_id).await.is_none());
         runtime
             .observe_message(
                 prompt_id,
@@ -15692,10 +15727,9 @@ while IFS= read -r ignored; do :; done
             )
             .await
             .unwrap();
-        assert!(runtime.final_agent_message(prompt_id).await.is_some());
-        assert!(
-            runtime.has_unsupported_questionnaire(prompt_id).await,
-            "assistant text does not resolve a dismissed questionnaire"
+        assert_eq!(
+            runtime.final_agent_message(prompt_id).await.as_deref(),
+            Some("Waiting for your answer.")
         );
 
         host.shutdown().await;

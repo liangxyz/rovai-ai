@@ -456,13 +456,27 @@ impl NativeSkillDiscoveryRequest<'_> {
                 });
             }
         }
+        let mut disabled_ids = HashSet::new();
         scan.skills.retain(|skill| {
             let path = Path::new(&skill.canonical_path);
-            !disabled_names.contains(&skill.name)
+            let enabled = !disabled_names.contains(&skill.name)
                 && !disabled_paths.contains(path)
                 && path
                     .parent()
-                    .is_none_or(|folder| !disabled_paths.contains(folder))
+                    .is_none_or(|folder| !disabled_paths.contains(folder));
+            if !enabled {
+                disabled_ids.insert(skill.id.clone());
+            }
+            enabled
+        });
+        // Recoverable metadata of explicitly disabled entries is not actionable;
+        // read failures stay reported because they never produced an entry.
+        scan.diagnostics.retain(|diagnostic| {
+            diagnostic.kind != NativeSkillDiagnosticKind::Metadata
+                || diagnostic
+                    .skill_id
+                    .as_ref()
+                    .is_none_or(|id| !disabled_ids.contains(id))
         });
         scan.skills.sort_by(|left, right| {
             left.name
@@ -860,10 +874,11 @@ fn scan_root(
             scan_root(adapter, scope, &entry, seen, scan);
             continue;
         }
-        // Preserve native entry links, but surface failed resolution instead of
-        // silently turning metadata errors into is_dir()/is_file() == false.
+        // Preserve native entry links. Links to absent targets are not candidates;
+        // other failed resolution is surfaced instead of becoming is_dir() == false.
         let metadata = match fs::metadata(&entry) {
             Ok(metadata) => metadata,
+            Err(error) if missing_path(&entry, &error) => continue,
             Err(error) => {
                 scan.diagnostics
                     .push(NativeSkillDiagnostic::new(FileRead, &entry, error));
@@ -921,10 +936,14 @@ fn scan_root(
     }
 }
 
+/// Absent paths and links whose target is absent are not candidates; loops,
+/// permissions and other resolution failures remain reportable.
 fn missing_path(path: &Path, error: &std::io::Error) -> bool {
     error.kind() == std::io::ErrorKind::NotFound
-        && fs::symlink_metadata(path)
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        && fs::symlink_metadata(path).map_or_else(
+            |error| error.kind() == std::io::ErrorKind::NotFound,
+            |metadata| metadata.file_type().is_symlink(),
+        )
 }
 
 fn native_skill_id(canonical: &Path) -> String {
@@ -1580,6 +1599,54 @@ mod tests {
                 .len(),
             1
         );
+
+        // A disabled entry's recoverable metadata is not reported; a broken
+        // disable config and real read failures still are.
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: review\ndescription: [list]\n---\nBody\n",
+        )
+        .unwrap();
+        let blocked = home.join(".agents/skills/blocked");
+        fs::create_dir_all(&blocked).unwrap();
+        fs::create_dir(blocked.join("SKILL.md")).unwrap();
+        let enabled = discovery
+            .discover(AdapterKind::CodexCli, None, true, true, &configuration)
+            .unwrap();
+        assert_eq!(enabled.skills.len(), 1);
+        assert!(enabled.diagnostics.iter().any(|item| {
+            item.kind == NativeSkillDiagnosticKind::Metadata
+                && item.skill_id.as_deref() == Some(enabled.skills[0].id.as_str())
+        }));
+        fs::write(
+            codex_home.join("config.toml"),
+            "[[skills.config]]\nname = \"review\"\nenabled = false\n",
+        )
+        .unwrap();
+        let disabled = discovery
+            .discover(AdapterKind::CodexCli, None, true, false, &configuration)
+            .unwrap();
+        assert!(disabled.skills.is_empty());
+        assert!(
+            !disabled
+                .diagnostics
+                .iter()
+                .any(|item| item.kind == NativeSkillDiagnosticKind::Metadata)
+        );
+        assert!(disabled.diagnostics.iter().any(|item| {
+            item.kind == NativeSkillDiagnosticKind::FileRead
+                && item.path.ends_with("blocked/SKILL.md")
+        }));
+        fs::write(codex_home.join("config.toml"), "[skills\n").unwrap();
+        let broken = discovery
+            .discover(AdapterKind::CodexCli, None, true, false, &configuration)
+            .unwrap();
+        assert_eq!(broken.skills.len(), 1);
+        assert!(broken.diagnostics.iter().any(|item| {
+            item.kind == NativeSkillDiagnosticKind::Metadata
+                && item.skill_id.is_none()
+                && item.path.ends_with("config.toml")
+        }));
         fs::remove_dir_all(fixture).unwrap();
     }
 
@@ -1820,6 +1887,13 @@ mod tests {
             use std::os::unix::fs::{PermissionsExt, symlink};
             let broken = failures.join("dangling");
             symlink(failures.join("absent"), &broken).unwrap();
+            fs::create_dir(failures.join("dangling-entry")).unwrap();
+            symlink(
+                failures.join("absent/SKILL.md"),
+                failures.join("dangling-entry/SKILL.md"),
+            )
+            .unwrap();
+            symlink(failures.join("good"), failures.join("linked-good")).unwrap();
             let loop_path = failures.join("loop");
             symlink(&loop_path, &loop_path).unwrap();
             let denied = failures.join("denied");
@@ -1830,15 +1904,20 @@ mod tests {
             let result = scan_directory(&failures, AdapterKind::CodexCli);
             let blocked_root = scan_directory(&denied, AdapterKind::CodexCli);
             fs::set_permissions(&denied, fs::Permissions::from_mode(0o700)).unwrap();
-            for path in [&broken, &loop_path] {
-                assert!(
-                    result
-                        .diagnostics
-                        .iter()
-                        .any(|item| item.path == path.to_string_lossy()
-                            && item.kind == NativeSkillDiagnosticKind::FileRead)
-                );
-            }
+            // Links whose targets are absent are not candidates and not diagnostics.
+            assert!(
+                !result
+                    .diagnostics
+                    .iter()
+                    .any(|item| { item.path.contains("dangling") || item.path.contains("absent") })
+            );
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|item| item.path == loop_path.to_string_lossy()
+                        && item.kind == NativeSkillDiagnosticKind::FileRead)
+            );
             if permission_denied {
                 assert!(
                     result
@@ -1852,6 +1931,34 @@ mod tests {
                 );
             }
             assert!(result.skills.iter().any(|skill| skill.name == "good"));
+
+            let only_dangling = fixture.join("only-dangling");
+            fs::create_dir(&only_dangling).unwrap();
+            for name in ["lark-mail", "lark-doc"] {
+                symlink(fixture.join("removed").join(name), only_dangling.join(name)).unwrap();
+            }
+            let result = scan_directory(&only_dangling, AdapterKind::CodexCli);
+            assert!(result.skills.is_empty());
+            assert!(result.diagnostics.is_empty());
+            let dangling_root = fixture.join("dangling-root");
+            symlink(fixture.join("removed-root"), &dangling_root).unwrap();
+            let result = scan_directory(&dangling_root, AdapterKind::CodexCli);
+            assert!(result.skills.is_empty() && result.diagnostics.is_empty());
+
+            let linked_only = fixture.join("linked-only");
+            fs::create_dir(&linked_only).unwrap();
+            symlink(failures.join("good"), linked_only.join("linked-good")).unwrap();
+            let result = scan_directory(&linked_only, AdapterKind::CodexCli);
+            assert!(result.diagnostics.is_empty());
+            assert_eq!(result.skills.len(), 1);
+            assert_eq!(
+                result.skills[0].canonical_path,
+                failures
+                    .join("good/SKILL.md")
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+            );
         }
         let complete = fixture.join("complete-discovery");
         fs::create_dir(&complete).unwrap();
