@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-02
+last_updated: 2026-11-05
 ---
 
 # 长期接口合同
@@ -33,7 +33,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp Message Send v29](camp-message-send-v29.md)
 - [Thread Reference v1](thread-reference-v1.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
 - [AgentRun Continuation v4](agent-run-continuation-v4.md)
-- [Camp Open Projection v30](camp-open-projection-v30.md)
+- [Camp Open Projection v31](camp-open-projection-v31.md)
 - [Notification Episode v12](notification-episode-v12.md)
 - [Desktop Shortcuts v2](desktop-shortcuts-v2.md)
 - [Host Web v9](host-web-v9.md)
@@ -152,6 +152,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
 | [Member Creation Flow v1（当前）](member-creation-flow-v1.md) | AI 优先入口、可用协助者、原子静态入队回执与配置链接 |
+| [Camp Open Projection v30（历史）](camp-open-projection-v30.md) | Task 能力决定字段省略和查询准入；公开 Run 的 Turn 回退由 v31 退役 |
 | [Camp Open Projection v29（历史）](camp-open-projection-v29.md) | 惰性锚点预览补充实际回复队员的姓名与头像，保留索引、正文窗口及旧 Host 兼容 |
 | [Camp Open Projection v28（历史）](camp-open-projection-v28.md) | Run 与公开消息共用冻结模型 / 强度投影，补齐执行行模型信息；兼容旧 Host |
 | [Camp Open Projection v27（历史）](camp-open-projection-v27.md) | Run 投影冻结的启动公开消息边界，初始执行行不回插到已领取输入；读取与分页边界不变 |
@@ -174,7 +175,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v74（当前）](runtime-launch-and-verification-v74.md) | 共享模型目录归一化、失败保留配置与缓存、原生 Runtime 接受显式配置；继承 PATH 与环境规则 |
+| [Runtime Launch and Verification v76（当前）](runtime-launch-and-verification-v76.md) | CodeBuddy refusal 原生错误详情解析，复用共享脱敏、公开 failure 与 RunCard 展示 |
+| [Runtime Launch and Verification v75（历史）](runtime-launch-and-verification-v75.md) | 全 Runtime 按有效原生成功完成，允许空最终文字；局部问卷取消不覆盖后续成功 |
+| [Runtime Launch and Verification v74（历史）](runtime-launch-and-verification-v74.md) | 共享模型目录归一化、失败保留配置与缓存、原生 Runtime 接受显式配置；继承 PATH 与环境规则 |
 | [Runtime Launch and Verification v72（历史）](runtime-launch-and-verification-v72.md) | Command Code 1.88 原生 HOME、官方 Mod、ACP MCP、按 Binding 身份复用与启动失败材料所有权 |
 | [Runtime Launch and Verification v71（历史）](runtime-launch-and-verification-v71.md) | 通用 ACP Host 同时接受字符串 `error.data` 与 `error.data.error`；共用脱敏、输入确认与失败分类，不回填旧 Run |
 | [Runtime Launch and Verification v70（历史）](runtime-launch-and-verification-v70.md) | 继承环境输入规则；Claude 复用私有 settings 与进程环境，CodeBuddy 只注入后台启动变量，原生配置与 Session 保持自有边界 |
@@ -438,7 +441,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Collaboration State v4（当前）](collaboration-state-v4.md) | peers 恰好 ID、名称、团队角色，职责不参与协作摘要 |
 | [Collaboration State v3（历史）](collaboration-state-v3.md) | 模型正文删除 schemaVersion，peer、Lead 与 digest 业务语义不变 |
 | [Collaboration State v2（历史）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Thread Runs v1（当前）](thread-runs-v1.md) | 公开执行和排队查询；统一 items、可空 Run ID、实时预览和动态分页 |
+| [Thread Runs v2（当前）](thread-runs-v2.md) | 公开 Run 只按直接会话归属读取，取消 Turn-only 回退；排队聚合、预览和动态分页保持 |
+| [Thread Runs v1（历史）](thread-runs-v1.md) | 公开执行和排队查询；其旧 Turn 归属回退由 v2 退役 |
 | [Camp History v11（历史）](camp-history-v11.md) | 正常 timeline/reply-chain/item 统一 addressing，撤回项保持独立形状 |
 | [Camp History v10（历史）](camp-history-v10.md) | 显式 read/search 可见 claim 前消息，撤回后 read 返回英文状态项；保留按需实时读取与 1–100 诚实分页 |
 | [Camp History v9（历史）](camp-history-v9.md) | 按需实时读取；`camp.read` 默认 20、显式整数 1–100、诚实分页 |
@@ -539,7 +543,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Current User Attention v3 (historical)](current-user-attention-v3.md) | v2 精确确认加同 CampTurn 一卡、逐 Mention acknowledgement、最早未确认 action 与导航版本绑定；不含普通会话可见即已读 |
 | [Current User Attention v2 (historical)](current-user-attention-v2.md) | v1 当前用户注意力加 Message Mention 独立已读、锚点导航、焦点确认与 Markdown 保真；不含 Episode 聚合 |
 | [Current User Attention v1 (historical)](current-user-attention-v1.md) | 当前用户身份、结构化内容与原子通知基线；不含独立已读、锚点窗口与 Markdown 保真勘误 |
-| [Missing-Send Recovery Publication v3（当前）](missing-send-recovery-publication-v3.md) | 原生正常结束且本轮已有效发送时允许空 final；问卷不得作为执行审批自动代答 |
+| [Missing-Send Recovery Publication v4（当前）](missing-send-recovery-publication-v4.md) | 原生成功不要求文字或先前发送；空 final 不创建消息，非空候选继续去重补发 |
+| [Missing-Send Recovery Publication v3（历史）](missing-send-recovery-publication-v3.md) | 原生正常结束且本轮已有效发送时允许空 final；问卷不得作为执行审批自动代答 |
 | [Missing-Send Recovery Publication v2（历史）](missing-send-recovery-publication-v2.md) | v1 candidate/replay 不变；普通输出与 Missing-Send 均受 frozen membership lifetime publication fence 约束 |
 | [Missing-Send Recovery Publication v1（历史）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
 | [Pending Camp Activation v5（当前）](pending-camp-activation-v5.md) | User 首条输入原子邀请、激活与发布，拒绝回滚及幂等并发 |

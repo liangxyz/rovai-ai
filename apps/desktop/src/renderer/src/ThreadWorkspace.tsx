@@ -1,6 +1,6 @@
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
-import { exportMessageMarkdown, type MessageExportEntry } from './message-export'
-import { nativeSkillDiagnosticText } from './native-skill-diagnostics'
+import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
+import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
 import { isReferenceAtom, isReferenceSegment, projectReference } from './thread-reference'
 import { ReplyDetails } from './ReplyDetails'
@@ -187,6 +187,7 @@ import { AgentMessageContent } from './AgentMessageContent'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useExecutionPreviewHost, useOptionalFilePreview } from './FilePreviewContext'
+import { EXECUTION_OVERVIEW_SCOPE, rememberExecutionTab, restoredExecutionTab } from './execution-tab-selection'
 import {
   agentRunFileChangeHasReviewableDiff,
   agentRunFileChangesPreviewTarget,
@@ -667,7 +668,10 @@ export type AgentExecutionProcess = {
   waitingDeliveries: MessageDeliveryView[]
 }
 
-const EXECUTION_OVERVIEW_SCOPE = '__execution_overview__'
+function executionTabForSnapshot(snapshot: ThreadSnapshot): string {
+  return restoredExecutionTab(snapshot.thread.id,
+    agentExecutionProcesses(snapshot.agentRuns, snapshot.messageDeliveries).map(process => process.agentId))
+}
 
 export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'waitReason'>): boolean {
   return NON_TERMINAL_RUNS.has(run.status)
@@ -2141,6 +2145,7 @@ export function ThreadWorkspace({
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
   )
+  const [workspaceEntryTab] = useState(() => workspaceEntrySelection ? executionTabForSnapshot(snapshot) : null)
   const workspaceEntryRunningRun = workspaceEntrySelection?.focusedRun ?? null
   const [executionPlacementPending, setExecutionPlacementPending] = useState(false)
   const [executionPlacementError, setExecutionPlacementError] = useState<{
@@ -2153,11 +2158,20 @@ export function ThreadWorkspace({
   )
   const [executionShortcutCollapsed, setExecutionShortcutCollapsed] = useState(false)
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(
-    workspaceEntrySelection?.selectedAgentId ?? null
+    workspaceEntryTab
   )
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(
-    workspaceEntrySelection?.focusedRun.id ?? null
+    workspaceEntryTab === EXECUTION_OVERVIEW_SCOPE ? workspaceEntrySelection?.focusedRun.id ?? null : null
   )
+  const executionSelectionClosed = useRef(false)
+  const executionSelectionSurface = useRef<string | null>(null)
+  const selectExecutionTab = useCallback((agentId: string | null): void => {
+    if (agentId !== null) {
+      executionSelectionClosed.current = false
+      rememberExecutionTab(snapshot.thread.id, agentId)
+    }
+    setExecutionDrawerAgentId(agentId)
+  }, [snapshot.thread.id])
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
     sequence: workspaceEntryRunningRun ? 1 : 0,
     moveDomFocus: false
@@ -2463,8 +2477,9 @@ export function ThreadWorkspace({
     if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     const entrySelection = executionWorkspaceEntrySelection(snapshot.agentRuns)
     const runningRun = entrySelection?.focusedRun ?? null
-    setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
-    setExecutionDrawerFocusedRunId(entrySelection?.focusedRun.id ?? null)
+    const selectedTab = runningRun ? executionTabForSnapshot(snapshot) : null
+    selectExecutionTab(selectedTab)
+    setExecutionDrawerFocusedRunId(selectedTab === EXECUTION_OVERVIEW_SCOPE ? runningRun?.id ?? null : null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: false
@@ -2490,7 +2505,8 @@ export function ThreadWorkspace({
     snapshot.agentRuns,
     workspaceEntrySnapshotReady,
     suppressExecutionAutoOpen,
-    rightPreviewBlocksExecutionAutoOpen
+    rightPreviewBlocksExecutionAutoOpen,
+    selectExecutionTab
   ])
   useLayoutEffect(() => {
     if (workspaceEntryInspectorHandled.current) return
@@ -2522,8 +2538,9 @@ export function ThreadWorkspace({
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
     const runningRun = entrySelection?.focusedRun ?? null
-    setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
-    setExecutionDrawerFocusedRunId(entrySelection?.focusedRun.id ?? null)
+    const selectedTab = runningRun ? executionTabForSnapshot(snapshot) : null
+    selectExecutionTab(selectedTab)
+    setExecutionDrawerFocusedRunId(selectedTab === EXECUTION_OVERVIEW_SCOPE ? runningRun?.id ?? null : null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: false
@@ -2537,7 +2554,7 @@ export function ThreadWorkspace({
     } else if (runningRun && executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady])
+  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady, selectExecutionTab])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -2775,6 +2792,26 @@ export function ThreadWorkspace({
   const executionDrawerProfile = executionDrawerProcess && !executionDrawerOverview
     ? profileById.get(executionDrawerProcess.agentId) ?? null
     : null
+  useLayoutEffect(() => {
+    const visible = replyExecutionVisible || (executionPlacement === 'bottom'
+      ? executionDrawerAgentId !== null && !executionShortcutCollapsed
+      : executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab,
+        Boolean(filePreview?.paneVisible && filePreview.activeTab?.kind === 'execution')))
+    const surface = visible ? `${snapshot.thread.id}:${replyExecutionVisible ? 'reply' : executionPlacement}` : null
+    if (executionSelectionSurface.current !== surface) {
+      executionSelectionSurface.current = surface
+      executionSelectionClosed.current = false
+    }
+    // Closing a selection is intentional even when another host, such as reply details, stays visible.
+    if (!workspaceEntrySnapshotReady || !visible || executionSelectionClosed.current
+      || executionDrawerProcess || executionProcessByAgentId.size === 0) return
+    selectExecutionTab(restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys()))
+    setExecutionDrawerFocusedRunId(null)
+    setExecutionDrawerFocusRequest(request => ({ sequence: request.sequence + 1, moveDomFocus: false }))
+  }, [executionPlacement, executionDrawerAgentId, executionDrawerProcess, executionShortcutCollapsed,
+    inspectorVisible, inspectorSurfaceTab, filePreview?.paneVisible, filePreview?.activeTab?.kind,
+    replyExecutionVisible, workspaceEntrySnapshotReady, snapshot.thread.id, executionProcessByAgentId,
+    selectExecutionTab])
   const executionDrawerInstallation = executionDrawerProfile?.runtimeConfiguration
     ? runtimeEditorInstallation(
         installations,
@@ -3742,13 +3779,13 @@ export function ThreadWorkspace({
     } else if (executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-    setExecutionDrawerAgentId(run.agentId)
+    selectExecutionTab(run.agentId)
     setExecutionDrawerFocusedRunId(run.id)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: true
     }))
-  }, [executionPlacement, filePreview, inspectorTab, notificationFocus, onOpenInspector, snapshot.agentRuns, snapshot.thread.id])
+  }, [executionPlacement, filePreview, inspectorTab, notificationFocus, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, selectExecutionTab])
 
   useEffect(() => {
     if (!notificationFocus?.active || notificationFocus.kind === 'single_chat') return undefined
@@ -5004,7 +5041,7 @@ export function ThreadWorkspace({
       executionDrawerReturnAgentIdRef.current = null
     }
     setExecutionShortcutCollapsed(false)
-    setExecutionDrawerAgentId(agentId)
+    selectExecutionTab(agentId)
     setExecutionDrawerFocusedRunId(focusedRunId)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
@@ -5026,7 +5063,7 @@ export function ThreadWorkspace({
     if (trigger) executionDrawerTriggerRef.current = trigger
     setExecutionShortcutCollapsed(false)
     executionDrawerReturnAgentIdRef.current = EXECUTION_OVERVIEW_SCOPE
-    setExecutionDrawerAgentId(EXECUTION_OVERVIEW_SCOPE)
+    selectExecutionTab(EXECUTION_OVERVIEW_SCOPE)
     setExecutionDrawerFocusedRunId(null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
@@ -5034,9 +5071,16 @@ export function ThreadWorkspace({
     }))
   }
 
+  const openPreferredExecutionTab = (moveDomFocus = true, trigger: HTMLButtonElement | null = null): void => {
+    const agentId = restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys())
+    if (agentId === EXECUTION_OVERVIEW_SCOPE) openExecutionOverview(trigger, moveDomFocus)
+    else openExecutionProcess(agentId, trigger, { moveDomFocus })
+  }
+
   const closeExecutionProcess = (): void => {
     executionEntryInteractionThreadId.current = snapshot.thread.id
-    setExecutionDrawerAgentId(null)
+    executionSelectionClosed.current = true
+    selectExecutionTab(null)
     setExecutionDrawerFocusedRunId(null)
   }
 
@@ -5156,21 +5200,14 @@ export function ThreadWorkspace({
   })
   const publicMessagesJoin = (message: ThreadMessageView, next: ThreadMessageView): boolean =>
     shortPublicMessages.has(message.id) && samePublicMessageSegment(groupingMessage(message), groupingMessage(next))
-  const exportEntry = (message: ThreadMessageView, excerpt?: string): MessageExportEntry => {
+  const exportEntry = (message: ThreadMessageView): MessageExportEntry => {
     const names = new Map(messageMentionNames.map(member => [member.agentId, member.displayName]))
     const parent = message.replyToThreadMessageId ? replyParentById.get(message.replyToThreadMessageId) : null
-    const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
     const index = presenceTimeline.findIndex(item => item.kind === 'camp_message' && item.message.id === message.id)
     const next = index >= 0 ? presenceTimeline[index + 1] : undefined
-    return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
+    return createMessageExportEntry(message, { memberById, names, currentUserName, avatarDataUrl: currentUserProfile.avatarDataUrl, parent,
       nextGroupedMessageId: next?.kind === 'camp_message' && publicMessagesJoin(message, next.message) ? next.message.id : null,
-      avatarRef: memberById.get(message.authorId)?.avatarRef ?? null,
-      avatarDataUrl: message.authorType === 'user' ? currentUserProfile.avatarDataUrl : null,
-      runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []),
-      recipients: message.addressedAgentIds.map(id => names.get(id) ?? uiAttribute('不可用队员')),
-      markdown: exportMessageMarkdown(message.body, message.content, names, currentUserName),
-      reply: [parent ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${exportMessageMarkdown(parent.body, parent.content, names, currentUserName).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}` : '', ...quoted].filter(Boolean).join('\n') || null,
-      ...(excerpt === undefined ? {} : { excerpt }) }
+      runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []) })
   }
   const openSelectedExport = (): void => messageExport.open(messageExport.eligible.filter(m => messageExport.selected.has(m.id)).map(m => exportEntry(m)))
   const executionDrawer = executionDrawerProcess ? (
@@ -5215,7 +5252,7 @@ export function ThreadWorkspace({
     const opened = executionPlacement === 'bottom' ? executionDrawerAgentId !== null && !executionShortcutCollapsed
       : executionPlacement === 'right' ? rightExecutionVisible : inspectorVisible && inspectorSurfaceTab === 'execution'
     if (!opened) {
-      if (executionDrawerAgentId === null) openExecutionOverview()
+      if (executionDrawerAgentId === null) openPreferredExecutionTab()
       else if (executionPlacement === 'right') filePreview?.openExecution()
       else if (executionPlacement === 'inspector') { setExecutionInspectorActive(true); onOpenInspector?.(inspectorTab) }
       else setExecutionShortcutCollapsed(false)
@@ -5711,8 +5748,10 @@ export function ThreadWorkspace({
                   ) : undefined
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.deliveryKind === 'public_a2a'
-                    && !delivery.continuationRequest
-                    && delivery.messageId === campMessage.id
+                    && (delivery.continuationRequest
+                      ? campMessage.authorType === 'user'
+                        && (delivery.inputMessageIds ?? [delivery.messageId]).includes(campMessage.id)
+                      : delivery.messageId === campMessage.id)
                   )
                   const userMessageRuns = campMessage.authorType === 'user'
                     ? snapshot.agentRuns.filter((run) =>
@@ -6113,7 +6152,7 @@ export function ThreadWorkspace({
                 if (tab === 'tasks' && !tasksEnabled) return
                 if (tab === 'execution' && executionPlacement === 'right') {
                   onCloseInspector()
-                  if (executionDrawerAgentId === null) openExecutionOverview(null, false)
+                  if (executionDrawerAgentId === null) openPreferredExecutionTab(false)
                   else filePreview?.openExecution()
                   return
                 }
@@ -6216,6 +6255,7 @@ export function ThreadWorkspace({
               selectedAgentId={executionShortcutCollapsed ? null : executionDrawerAgentId}
               onOpen={openExecutionProcess}
               onOpenOverview={openExecutionOverview}
+              onExpand={trigger => openPreferredExecutionTab(true, trigger)}
               onClose={closeExecutionProcess}
               onPlacementMenuIntent={captureExecutionPlacementMenuReadingPosition}
               onPlacementMenuOpenChange={trackExecutionPlacementMenu}
@@ -6385,10 +6425,6 @@ export function ThreadWorkspace({
           ownerKey={`thread:${snapshot.thread.id}`}
           messages={visibleThreadMessages}
           disabled={composerInteractionDisabled}
-          onExport={selection => {
-            const message = messageExport.eligible.find(m => m.id === selection.messageId)
-            if (message) messageExport.open([exportEntry(message, selection.text)])
-          }}
           onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
         />
         <div className="composer-box">
@@ -6584,7 +6620,7 @@ export function ThreadWorkspace({
               pendingInviteIds={pendingInviteIds}
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
-              skillCatalogErrors={[...composerSkillCatalog.candidates.errors, ...(composerSkillCatalog.candidates.diagnostics ?? []).map(nativeSkillDiagnosticText)]}
+              skillCatalogErrors={[...composerSkillCatalog.candidates.errors, ...nativeSkillCatalogNotices(composerSkillCatalog.candidates.diagnostics ?? [])]}
               skillCatalogRefreshFailed={composerSkillCatalog.refreshFailed}
               skillCatalogRefreshing={skillCatalogRefreshing}
               onNeedSkills={() => refreshSkillCatalogRef.current?.()}
@@ -6929,6 +6965,7 @@ function RunPulse({
   revealRequest = 0,
   onOpen,
   onOpenOverview,
+  onExpand,
   onClose,
   onPlacementMenuIntent,
   onPlacementMenuOpenChange,
@@ -6947,6 +6984,7 @@ function RunPulse({
   revealRequest?: number
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onOpenOverview(trigger: HTMLButtonElement): void
+  onExpand?(trigger: HTMLButtonElement): void
   onClose(): void
   onPlacementMenuIntent(): void
   onPlacementMenuOpenChange(open: boolean): void
@@ -7076,7 +7114,10 @@ function RunPulse({
         aria-controls="agent-execution-drawer"
         aria-label={selectedAgentId === null ? uiAttribute("展开执行详情") : uiAttribute("收起执行详情")}
         onClick={(event) => {
-          if (selectedAgentId === null) onOpenOverview(event.currentTarget)
+          if (selectedAgentId === null) {
+            if (onExpand) onExpand(event.currentTarget)
+            else onOpenOverview(event.currentTarget)
+          }
           else onClose()
         }}
       >
@@ -8415,21 +8456,37 @@ function UserMessageDeliveryReceipt({
     if (!runByAgentId.has(run.agentId)) runByAgentId.set(run.agentId, run)
   }
   const ordered = message.addressedAgentIds.map((agentId) => {
-    const delivery = deliveries.find(d => d.recipientAgentId === agentId)
-    const run = allRuns.find(r => r.id === delivery?.targetAgentRunId) ?? runByAgentId.get(agentId) ?? null
+    let delivery = deliveries.find(d => d.recipientAgentId === agentId && !d.continuationRequest)
+    const boundRun = allRuns.find(r => r.id === delivery?.targetAgentRunId)
+    const latestRun = runByAgentId.get(agentId)
+    let run = delivery?.requestedMode === 'steer' ? boundRun ?? latestRun ?? null
+      : latestRun && (!boundRun || latestRun.createdAt >= boundRun.createdAt) ? latestRun : boundRun ?? null
+    if (delivery?.requestedMode !== 'steer') {
+      const continuation = deliveries.filter(d => d.recipientAgentId === agentId && d.continuationRequest)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      const runDelivery = deliveries.find(d => d.targetAgentRunId === run?.id)
+      // A queued continuation has no Run yet. Once claimed, its own Run or a
+      // newer input Run owns the receipt; the original Delivery stays historical.
+      if (continuation && (!run || continuation.targetAgentRunId === run.id
+        || continuation.createdAt >= (runDelivery?.createdAt ?? run.createdAt))) {
+        delivery = continuation
+        run = allRuns.find(r => r.id === continuation.targetAgentRunId) ?? null
+      }
+    }
+    const deliveryOwnsStatus = delivery?.requestedMode === 'steer' || !run || delivery?.targetAgentRunId === run.id
     // Classify each target once. A Steer receipt describes delivery, even when
     // its target Run later finishes; ordinary targets describe execution.
     const status = delivery?.requestedMode === 'steer' && delivery.inputDeliveryStatus === 'accepted' ? 'steered'
-      : delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
-      : delivery?.status === 'failed' || run?.status === 'failed' ? 'failed'
-      : delivery?.status === 'cancelled' || run?.status === 'cancelled' ? 'stopped'
+      : deliveryOwnsStatus && delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
+      : (deliveryOwnsStatus && delivery?.status === 'failed') || run?.status === 'failed' ? 'failed'
+      : (deliveryOwnsStatus && delivery?.status === 'cancelled') || run?.status === 'cancelled' ? 'stopped'
       : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? delivery.dispatchPhase === 'attempting' ? 'steerSending' : 'steerPending'
       : run?.status === 'succeeded' || (!run && delivery?.status === 'settled') ? 'completed'
       : run && agentRunIsStarting(run) ? 'starting'
-      : delivery?.status === 'waiting' || !run ? 'pending'
+      : (deliveryOwnsStatus && delivery?.status === 'waiting') || !run ? 'pending'
       : 'inProgress'
     return { agentId, delivery, run, status }
-  })
+  }).filter(item => item.run !== null || item.delivery !== undefined)
   const steered = ordered.filter(item => item.status === 'steered')
   const unknown = ordered.filter(item => item.status === 'unknown')
   const steerPending = ordered.filter(item => item.status === 'steerPending')
@@ -8494,6 +8551,7 @@ function UserMessageDeliveryReceipt({
               const displayName = member?.displayName ?? agentId
               const statusLabel = status === 'failed' ? uiAttribute('执行失败')
                 : status === 'stopped' ? uiAttribute('已停止')
+                : status === 'pending' ? uiAttribute('待处理')
                 : delivery?.requestedMode === 'steer'
                   ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收')
                     : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('是否送达待核对')
@@ -8502,7 +8560,7 @@ function UserMessageDeliveryReceipt({
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
                 <span><strong>{displayName}</strong><small>{statusLabel}</small></span>
-                {delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
+                {status === 'unknown' && delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
                   setChecking(delivery.id); setCheckResult(null)
                   try {
                     const status = await onReconcile(delivery.id)
@@ -10008,17 +10066,6 @@ export function defaultRecipientMentionAgentId(
     && message.addressedAgentIds.length === 1
     ? message.addressedAgentIds[0]
     : null
-}
-
-function campMessageAuthorLabel(
-  message: ThreadMessageView,
-  memberById: ReadonlyMap<string, ThreadSnapshot['members'][number]>,
-  currentUserName: string
-): string {
-  // Channel admission is Owner-only; this label does not change the stored author.
-  if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
-  if (message.authorType === 'system') return uiAttribute("系统")
-  return memberById.get(message.authorId)?.displayName ?? message.authorId
 }
 
 function ReplyParentQuote({

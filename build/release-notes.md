@@ -1,39 +1,31 @@
-# Rovai AI v0.5.7
+# Rovai AI v0.5.9
 
 <!-- lang:zh-CN -->
 
-本次更新新增消息导出和 Mermaid 图表阅读，将工作准则、成长课题的上限提高到 3,000 字符，并修复本机 Skills、执行状态和 Windows Antigravity 的使用问题。
+本次更新支持从侧栏导出完整会话，减少打开和切换会话时的查询开销，并修复执行状态显示和智能体收尾时的误判。
 
-- 【功能】**支持消息多选与导出。** 可多选公屏中已加载的消息，也可导出选中的文字，预览后保存为 HTML、PNG 或 Markdown。支持修改导出标题，选择保留作者、时间和发送对象等信息。
-- 【功能】**支持直接查看 Mermaid 图表。** Markdown 文件预览及公屏、单聊中的队员回复可显示流程图、时序图等，支持图形与源码切换、复制和大图缩放。流式回复中的完整图块会先行显示，无需等待整条回复结束。
-- 【功能】**工作准则和成长课题分别由 300 提高到 3,000 字符。** 可以填写更完整的做事方式、质量要求和成长方向，保留正文中的换行与格式。
-- 【修复】**完善本机 Skill 的发现、引用和预览。** 说明文件头部信息缺失或异常时，仍可发现和选择可读的 Skill；支持中文、下划线名称筛选，并完善大文件预览及异常提示。
-- 【修复】**修正 Claude Code 的执行结束判断。** 不再因收到结果后等待状态事件而提前报错；空回复、不支持的提问和收尾清理异常不会覆盖已经确认的成功结果。
-- 【修复】**补充消息结果待核对时，不再连带阻塞后续输入。** 通道仍有效时，可以继续发送新的补充消息；待核对的原消息不会被自动重发。
-- 【修复】**减少本机智能体更新造成的执行中断。** 优化 Codex、Pi 等智能体的进程复用，程序文件更新或准备新执行时，避免误回收其他会话仍在使用的进程。
-- 【修复】**修复 Windows 下 Antigravity 执行 Shell 命令失败的问题。** 解决部分程序路径导致正常命令被误报为“Shell Injection Detected”的情况。
-- 【界面】**提醒操作文字跟随当前主题配色。** 修复“查看下一条”仍显示固定蓝色的问题。
+感谢 @caoshuisi 在 Issue #1012 中反馈 Pi 执行结束后被误判为失败，以及 CodeBuddy 报错原因不明确的问题。
 
-感谢 @liangxyz 在 [#706](https://github.com/murray17/rovai-ai/issues/706) 中反馈角色设定长度不足的问题，@liuqiong0319 反馈本机 Skill 发现问题，以及 @arschlochnop 在 [#979](https://github.com/murray17/rovai-ai/issues/979) 中提出 Mermaid 图表预览需求。
-
-[完整变更](https://github.com/liangxyz/rovai-ai/compare/v0.5.6...v0.5.7)
+- 【功能】**支持从侧栏导出完整会话。** 在会话菜单选择「导出会话」，无需先滚动加载历史消息，即可预览并保存为 HTML、PNG 或 Markdown。需要导出片段时可多选消息，选中文字后的浮条仅提供引用。
+- 【界面】**优化手机端的导出预览。** 长按会话可打开导出菜单，HTML 预览随屏幕宽度排版，底部按钮更便于触控。
+- 【性能】**减少打开和切换会话时对无关历史的扫描。** 执行数量、执行列表和文件变更按当前会话读取。部分旧版执行卡片及其文件变更会从公屏的相应列表中移除，历史消息和原始记录仍保存在数据库中。
+- 【修复】**重新执行后，消息回执会跟随最新状态。** 执行失败或手动停止后再次执行，回执会随新一轮更新，「查看执行」也会打开新一轮的记录。同时修复没有投递或执行记录却误显示「待处理」的问题。
+- 【修复】**修复智能体正常结束却被判为失败的问题。** Pi、Codex、Antigravity 及部分 ACP 智能体明确返回成功时，即使没有最后一条文字回复，执行也会正常结束。
+- 【修复】**CodeBuddy 执行卡片会显示具体报错。** 模型请求失败时，如果 CodeBuddy 返回了鉴权失败、请求参数有误等详情，可直接在执行卡片中查看。
+- 【交互】**项目收起后再展开，从第一页显示会话。** 普通项目、置顶项目和快速对话均先显示 5 条未置顶会话，可点击「查看更多」继续加载。
 
 ---
 
 <!-- lang:en -->
 
-This release adds message export and Mermaid diagram reading, raises the working principles and growth topic limits to 3,000 characters each, and fixes native Skills, execution status, and Antigravity on Windows.
+This release adds full conversation export, reduces the amount of history scanned when opening or switching conversations, and fixes how execution status and Agent completion are reported.
 
-- [Feature] **Select and export messages.** Select loaded messages in the public conversation, or export selected text, then preview and save it as HTML, PNG, or Markdown. Edit the export title and choose whether to include authors, timestamps, recipients, and other information.
-- [Feature] **Read Mermaid diagrams directly.** Markdown file previews and teammate replies in public conversations and Single Chat can display flowcharts, sequence diagrams, and more. Switch between diagrams and source, copy the source, and zoom into larger diagrams. Complete diagram blocks appear during streaming without waiting for the entire reply to finish.
-- [Feature] **Working principles and growth topic now support 3,000 characters each, up from 300.** Save more detailed working methods, quality requirements, and growth goals while retaining line breaks and formatting.
-- [Fix] **Improve native Skill discovery, selection, and preview.** Readable Skills remain discoverable and selectable when their header metadata is missing or malformed. Filtering supports Chinese characters and underscores, with better large-file previews and diagnostics.
-- [Fix] **Correct Claude Code completion handling.** Waiting for status events after a result no longer causes premature failure. Empty final text, unsupported questionnaires, and cleanup errors do not override a confirmed successful result.
-- [Fix] **A supplemental message awaiting confirmation no longer blocks later inputs.** New supplemental messages can proceed while the channel remains valid. The original unconfirmed message is not automatically resent.
-- [Fix] **Reduce execution interruptions after local Agent updates.** Improve process reuse for Codex, Pi, and other supported Agents. Updating program files or preparing a new execution no longer incorrectly retires processes still serving other conversations.
-- [Fix] **Fix Antigravity Shell command failures on Windows.** Resolve executable path handling that could cause valid commands to be rejected with “Shell Injection Detected”.
-- [UI] **Reminder actions follow the active theme.** Fix the “View next” action retaining a fixed blue color.
+Thanks to @caoshuisi for reporting Pi runs being marked as failed after completion and unclear CodeBuddy errors in Issue #1012.
 
-Thanks to @liangxyz for reporting role-description length limits in [#706](https://github.com/murray17/rovai-ai/issues/706), @liuqiong0319 for reporting native Skill discovery issues, and @arschlochnop for requesting Mermaid previews in [#979](https://github.com/murray17/rovai-ai/issues/979).
-
-[Full changelog](https://github.com/liangxyz/rovai-ai/compare/v0.5.6...v0.5.7)
+- [Feature] **Export a full conversation from the sidebar.** Choose “Export thread” from the conversation menu to preview and save the conversation as HTML, PNG, or Markdown without scrolling back to load older messages. To export an excerpt, select multiple messages. The text-selection toolbar now offers only quoting.
+- [UI] **Improve export preview on phones.** Long-press a conversation to open the export menu. The HTML preview fits the screen width, and the buttons are easier to tap.
+- [Performance] **Scan less unrelated history when opening or switching conversations.** Run counts, run lists, and file changes are read for the current conversation. Some older run cards and their file changes are removed from these lists. Messages and original records are retained in the database.
+- [Fix] **Show the latest run status after retrying.** After a failed or manually stopped run is retried, the message receipt follows the new attempt and “View run” opens it. Receipts no longer show “Pending” when there is no delivery or run record.
+- [Fix] **Recognize successful runs without a final text reply.** When Pi, Codex, Antigravity, or a supported ACP Agent reports success, the run can complete without a final chat message.
+- [Fix] **Show the error details returned by CodeBuddy.** When a model request fails, the run card shows available details, such as an authentication error or invalid request parameters.
+- [UX] **Show the first page of conversations when a group is reopened.** Regular projects, pinned projects, and Quick Chat initially show five unpinned conversations. Use “Show more” to load additional entries.
