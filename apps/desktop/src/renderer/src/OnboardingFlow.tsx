@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
 import hermesLogo from './assets/runtime-logos/hermes.png'
 import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
 import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
@@ -47,6 +48,7 @@ import zcodeLogo from './assets/runtime-logos/zcode.png'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import kimiLogo from './assets/runtime-logos/kimi.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
+import kiloLogo from './assets/runtime-logos/kilo.svg'
 import piLogo from './assets/runtime-logos/pi.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
@@ -66,6 +68,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'codex-cli': codexLogo,
   'copilot-cli': copilotLogo,
   'opencode-cli': openCodeLogo,
+  'kilo-cli': kiloLogo,
   'kiro-cli': kiroLogo,
   'qoder-cli': qoderLogo,
   'codebuddy-cli': codeBuddyLogo,
@@ -89,6 +92,7 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'codex-cli': 'Codex CLI',
   'copilot-cli': 'GitHub Copilot',
   'opencode-cli': 'OpenCode',
+    'kilo-cli': 'Kilo',
   'kiro-cli': 'Kiro',
   'qoder-cli': 'Qoder',
   'codebuddy-cli': 'CodeBuddy',
@@ -185,7 +189,7 @@ export function OnboardingFlow({
     <div className="onboarding-shell">
       <header className="onboarding-header">
         <div className="onboarding-lockup" aria-label="Rovai AI">
-          <OnboardingBrandMark compact />
+          <RovaiBrandMark className="onboarding-brand-mark compact" wide />
           <strong>Rovai AI</strong>
         </div>
         <div className="onboarding-header-actions">
@@ -261,7 +265,7 @@ function WelcomeStep({
   const t = useUiText()
   return (
     <section className="onboarding-welcome" aria-labelledby="onboarding-welcome-title">
-      <div className="onboarding-welcome-mark"><OnboardingBrandMark /></div>
+      <div className="onboarding-welcome-mark"><RovaiBrandMark className="onboarding-brand-mark" wide /></div>
       <h1 id="onboarding-welcome-title">{t('欢迎来到 Rovai')}</h1>
       <p>{t('选一位队员，开始你的第一次协作。')}</p>
       <button className="primary-button conversation-primary-button onboarding-primary" type="button" disabled={busy} onClick={onContinue}>
@@ -785,22 +789,6 @@ function runtimeRowDetail(presentation: RuntimeStatusPresentation): string {
     unknown: '尚无可靠检查结果',
     unconfigured: '尚未配置'
   })[presentation.status]
-}
-
-function OnboardingBrandMark({ compact = false }: { compact?: boolean }): React.JSX.Element {
-  return (
-    <svg
-      className={compact ? 'onboarding-brand-mark compact' : 'onboarding-brand-mark'}
-      data-brand-mark="horizon"
-      data-brand-layout="separated"
-      viewBox="0 0 72 56"
-      aria-hidden="true"
-    >
-      <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" />
-      <path d="M8 49.5 Q36 37.5 64 49.5" fill="none" />
-      <circle className="brand-rendezvous-point" cx="36" cy="43.5" r="2.6" />
-    </svg>
-  )
 }
 
 function RefreshIcon(): React.JSX.Element {

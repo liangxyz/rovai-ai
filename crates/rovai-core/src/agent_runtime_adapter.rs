@@ -31,10 +31,11 @@ use crate::{
         DSH_LINUX_X64_EVIDENCE_REVISION, DSH_MACOS_ARM64_EVIDENCE_REVISION,
         DSH_MACOS_X64_EVIDENCE_REVISION, DSH_WINDOWS_X64_EVIDENCE_REVISION,
         GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
-        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-        MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION, MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION,
-        MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION, PI_MACOS_ARM64_EVIDENCE_REVISION,
-        PI_MACOS_X64_EVIDENCE_REVISION, PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
+        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, KILO_WINDOWS_X64_EVIDENCE_REVISION,
+        MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION,
+        MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION, MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION,
+        PI_MACOS_ARM64_EVIDENCE_REVISION, PI_MACOS_X64_EVIDENCE_REVISION,
+        PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
         RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
         ZCODE_MACOS_ARM64_EVIDENCE_REVISION, ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
     },
@@ -420,6 +421,7 @@ pub enum SkillDeliveryGroupKey {
     Codex,
     Pi,
     Opencode,
+    Kilo,
     Copilot,
     ClaudeCompatible,
     Antigravity,
@@ -440,10 +442,11 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
+        Self::Kilo,
         Self::Copilot,
         Self::ClaudeCompatible,
         Self::Antigravity,
@@ -468,6 +471,7 @@ impl SkillDeliveryGroupKey {
             Self::Codex => "codex",
             Self::Pi => "pi",
             Self::Opencode => "opencode",
+            Self::Kilo => "kilo",
             Self::Copilot => "copilot",
             Self::ClaudeCompatible => "claude_compatible",
             Self::Antigravity => "antigravity",
@@ -493,6 +497,7 @@ impl SkillDeliveryGroupKey {
             Self::Codex => Path::new(".codex/skills"),
             Self::Pi => Path::new(".pi/skills"),
             Self::Opencode => Path::new(".opencode/skills"),
+            Self::Kilo => Path::new(".kilo/skills"),
             Self::Copilot => Path::new(".github/skills"),
             Self::ClaudeCompatible => Path::new(".claude/skills"),
             Self::Antigravity => Path::new(".agent/skills"),
@@ -522,6 +527,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "codex" => Ok(Self::Codex),
             "pi" => Ok(Self::Pi),
             "opencode" => Ok(Self::Opencode),
+            "kilo" => Ok(Self::Kilo),
             "copilot" => Ok(Self::Copilot),
             "claude_compatible" => Ok(Self::ClaudeCompatible),
             "antigravity" => Ok(Self::Antigravity),
@@ -818,6 +824,22 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             )
         };
+        if kind == AdapterKind::KiloCli {
+            return match platform {
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    KILO_WINDOWS_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::MacosArm64
+                | HostPlatformKey::MacosX64
+                | HostPlatformKey::LinuxX64 => RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                ),
+            };
+        }
         if kind == AdapterKind::HermesCli {
             return RuntimePlatformAdmission::enabled(kind, platform);
         }
@@ -986,7 +1008,7 @@ impl AgentRuntimeAdapterRegistry {
                 "sandbox_mode": "danger-full-access",
                 "approval_policy": "never",
             }),
-            AdapterKind::Pi => json!({}),
+            AdapterKind::Pi | AdapterKind::KiloCli => json!({}),
             AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
             AdapterKind::ClineCli => json!({"mode":"act", "auto_approve":"true"}),
             AdapterKind::CommandCodeCli => json!({"permission_mode":"bypass"}),
@@ -1064,7 +1086,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
-            AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
+            AdapterKind::ClineCli | AdapterKind::KiloCli => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -1090,6 +1112,13 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
                 SkillDiscoveryVerification::Verified,
+            ),
+            AdapterKind::KiloCli => native_skill_discovery(
+                [
+                    SkillDeliveryGroupKey::Kilo,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
             ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
@@ -1142,6 +1171,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
             AdapterKind::Pi => unsupported_external_mcp_projection(),
+            AdapterKind::KiloCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -1193,6 +1223,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
+            AdapterKind::KiloCli => acp_capability_snapshot(observation, Vec::new()),
             AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
             AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
             AdapterKind::QoderCli => {
@@ -1242,6 +1273,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => codex_permission_options(),
             AdapterKind::Pi => pi_permission_options(),
+            AdapterKind::KiloCli => Vec::new(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -1578,15 +1610,12 @@ impl CodexCliAdapterPolicy {
         observation: CodexProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         let ready = observation.probe_status == "ready";
-        let models = if ready {
-            observation
-                .raw_model_catalog
-                .as_ref()
-                .and_then(|catalog| codex_models(catalog).ok())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // A native catalog remains valid evidence even if a later schema check fails.
+        let models = observation
+            .raw_model_catalog
+            .as_ref()
+            .and_then(|catalog| codex_models(catalog).ok())
+            .unwrap_or_default();
         let mut capabilities = observation.capabilities;
         for capability in [
             "model.list",
@@ -2579,7 +2608,10 @@ fn acp_capability_snapshot(
             ]
         } else if matches!(
             adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness
+                | AdapterKind::CommandCodeCli
+                | AdapterKind::ClineCli
+                | AdapterKind::KiloCli
         ) {
             &[
                 "acp.initialize",
@@ -2870,20 +2902,16 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
-    if adapter_kind == AdapterKind::MinimaxCodeCli {
+    if adapter_kind == AdapterKind::KiloCli {
         let current = acp_runtime_model_id_from_session(session_result);
         let effort = session_result["configOptions"]
             .as_array()
-            .and_then(|options| {
-                options
-                    .iter()
-                    .find(|option| option["id"] == "thinkingEffort")
-            })
+            .and_then(|options| options.iter().find(|option| option["id"] == "effort"))
             .and_then(acp_model_option);
         for model in &mut models {
-            // MiniMax advertises effort for the selected model only.
+            // These ACP agents advertise effort for the selected model only.
             model.options = if let Some(options) = session_result
-                .pointer("/_meta/rovaiMinimaxModelOptions")
+                .pointer("/_meta/rovaiModelOptions")
                 .and_then(|all| all.get(&model.id))
             {
                 options
@@ -2898,6 +2926,43 @@ pub fn acp_model_catalog_for_adapter(
                 Vec::new()
             };
         }
+    }
+    if adapter_kind == AdapterKind::HermesCli {
+        for option in models.iter_mut().flat_map(|model| &mut model.options) {
+            option.scope = RuntimeOptionScope::Session;
+            option.default_value = None;
+        }
+    }
+    if adapter_kind == AdapterKind::MinimaxCodeCli {
+        let observation = minimax_model_options_from_session(session_result).ok();
+        for model in &mut models {
+            model.options.clear();
+            let metadata = model.runtime_metadata.get_or_insert_with(|| json!({}));
+            metadata["modelOptionsContext"] =
+                session_result["_meta"]["rovaiModelOptionsContext"].clone();
+            if let Some((current, options)) = &observation
+                && current == &model.id
+            {
+                model.options = options.clone();
+                metadata["modelOptionsResolved"] = json!(true);
+                metadata["modelOptionsObservedAt"] =
+                    session_result["_meta"]["rovaiModelOptionsObservedAt"].clone();
+            } else {
+                metadata["modelOptionsResolved"] = json!(false);
+            }
+            if let Some(default) = session_result.pointer("/_meta/rovaiCatalogDefaultModel") {
+                model.is_default = default.as_str() == Some(model.id.as_str());
+            }
+        }
+    }
+
+    if adapter_kind == AdapterKind::MinimaxCodeCli {
+        models.sort_by(|left, right| {
+            right
+                .is_default
+                .cmp(&left.is_default)
+                .then_with(|| left.display_name.cmp(&right.display_name))
+        });
     }
 
     if matches!(
@@ -3034,6 +3099,111 @@ pub fn acp_model_catalog_for_adapter(
 
 /// A model switch returns the complete option state. Never retain the previous
 /// model's reasoning option when the response omits it.
+/// A complete native configuration is different from a lossy catalog parse.
+/// Missing effort is valid; malformed effort or contradictory identity is not.
+pub(crate) fn minimax_model_id_from_session(session: &Value) -> Result<String> {
+    let config = session
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .context("MiniMax options response did not return configOptions")?;
+    let models = config
+        .iter()
+        .filter(|option| option["id"] == "model")
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        models.len() == 1,
+        "MiniMax options response must identify exactly one model"
+    );
+    anyhow::ensure!(
+        config
+            .iter()
+            .all(|option| option.is_object()
+                && option["id"].as_str().is_some_and(|id| !id.is_empty())),
+        "MiniMax configOptions were malformed"
+    );
+    let current = models[0]["currentValue"]
+        .as_str()
+        .filter(|id| !id.trim().is_empty())
+        .context("MiniMax options response did not identify its current model")?;
+    if let Some(reported) = session.pointer("/models/currentModelId") {
+        anyhow::ensure!(
+            reported.as_str() == Some(current),
+            "MiniMax options response contained contradictory model identities"
+        );
+    }
+    Ok(current.to_owned())
+}
+
+pub(crate) fn minimax_model_options_from_session(
+    session: &Value,
+) -> Result<(String, Vec<ModelOptionDescriptor>)> {
+    let current = minimax_model_id_from_session(session)?;
+    let config = session["configOptions"].as_array().unwrap();
+    let efforts = config
+        .iter()
+        .filter(|option| option["id"] == "thinkingEffort")
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        efforts.len() <= 1,
+        "MiniMax options response contained duplicate thinkingEffort"
+    );
+    let mut options = Vec::new();
+    if let Some(effort) = efforts.first() {
+        anyhow::ensure!(
+            effort["type"] == "select",
+            "MiniMax thinkingEffort was not a select option"
+        );
+        let values = effort["options"]
+            .as_array()
+            .context("MiniMax thinkingEffort options were malformed")?;
+        anyhow::ensure!(
+            values.iter().all(|value| value
+                .get("value")
+                .or_else(|| value.get("id"))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())),
+            "MiniMax thinkingEffort values were malformed"
+        );
+        anyhow::ensure!(
+            effort.get("currentValue").is_none_or(Value::is_string),
+            "MiniMax thinkingEffort current value was malformed"
+        );
+        options.extend(acp_model_option(effort));
+    }
+    Ok((current.to_owned(), options))
+}
+
+pub(crate) fn minimax_model_config_after_selection(
+    previous: &Value,
+    response: &Value,
+    requested: &str,
+) -> Result<Value> {
+    let (current, _) = minimax_model_options_from_session(response)?;
+    anyhow::ensure!(
+        current == requested,
+        "MiniMax did not confirm the requested model {requested}"
+    );
+    let mut session = previous.clone();
+    // Keep the initial directory, replace the entire selected configuration.
+    session["configOptions"] = response["configOptions"].clone();
+    let available = previous
+        .pointer("/models/availableModels")
+        .and_then(Value::as_array)
+        .filter(|models| !models.is_empty())
+        .cloned()
+        .or_else(|| {
+            previous["configOptions"]
+                .as_array()?
+                .iter()
+                .find(|option| option["id"] == "model")?["options"]
+                .as_array()
+                .cloned()
+        })
+        .context("MiniMax initial Session did not return a model directory")?;
+    session["models"] = json!({"currentModelId":current, "availableModels":available});
+    Ok(session)
+}
+
 pub fn dsh_model_config_after_selection(
     previous: &Value,
     response: &Value,
@@ -3983,6 +4153,7 @@ mod tests {
             ),
             (AdapterKind::Pi, json!({})),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
+            (AdapterKind::KiloCli, json!({})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (
                 AdapterKind::ClaudeCodeCli,
@@ -4069,6 +4240,13 @@ mod tests {
                 *models,
                 "normalization is idempotent"
             );
+        }
+        let hermes = acp_model_catalog_for_adapter(AdapterKind::HermesCli, &acp).unwrap();
+        for option in hermes.iter().flat_map(|model| &model.options) {
+            assert_eq!(option.scope, RuntimeOptionScope::Session);
+            assert_eq!(option.default_value, None);
+            assert!(!option.values.iter().any(|choice| choice.value == "default"));
+            assert!(option.values.iter().any(|choice| choice.value == "high"));
         }
         let auto = catalogs[0].iter().find(|model| model.id == "auto").unwrap();
         assert_eq!(auto.display_name, "Auto");
@@ -4242,6 +4420,97 @@ mod tests {
             models[1].options.is_empty(),
             "effort must not leak across models"
         );
+        let mut empty = mini.clone();
+        empty["configOptions"][0]["currentValue"] = json!("m:provider:other:v:fast");
+        empty["configOptions"].as_array_mut().unwrap().pop();
+        let replaced =
+            minimax_model_config_after_selection(&mini, &empty, "m:provider:other:v:fast").unwrap();
+        let without_effort =
+            acp_model_catalog_for_adapter(AdapterKind::MinimaxCodeCli, &replaced).unwrap();
+        let chosen = without_effort
+            .iter()
+            .find(|model| model.id == "m:provider:other:v:fast")
+            .unwrap();
+        assert!(chosen.options.is_empty());
+        assert_eq!(
+            chosen.runtime_metadata.as_ref().unwrap()["modelOptionsResolved"],
+            true
+        );
+        for bad in [
+            json!({}),
+            json!({"configOptions":null}),
+            json!({"configOptions":[]}),
+            json!({"configOptions":[{"id":"model","currentValue":"other"}]}),
+            json!({"models":{"currentModelId":"other"},"configOptions":mini["configOptions"]}),
+            json!({"configOptions":[mini["configOptions"][0],{"id":"thinkingEffort","type":"select","options":[{"value":42}]}]}),
+            json!({"configOptions":[mini["configOptions"][0],{"id":"thinkingEffort","type":"select"}]}),
+        ] {
+            assert!(
+                minimax_model_config_after_selection(&mini, &bad, "m:provider:model:u").is_err(),
+                "{bad}"
+            );
+        }
+        let mut explicit_empty = mini.clone();
+        explicit_empty["configOptions"][1]["options"] = json!([]);
+        let (_, empty_options) = minimax_model_options_from_session(&explicit_empty).unwrap();
+        assert!(empty_options.is_empty());
+        let mut malformed = mini.clone();
+        malformed["configOptions"][1]["options"] = json!(false);
+        let malformed =
+            acp_model_catalog_for_adapter(AdapterKind::MinimaxCodeCli, &malformed).unwrap();
+        assert!(
+            malformed.iter().all(
+                |model| model.runtime_metadata.as_ref().unwrap()["modelOptionsResolved"] != true
+            )
+        );
+        let kilo = json!({"configOptions":[
+            {"id":"model","type":"select","currentValue":"local/variant-model","options":[{"value":"local/variant-model","name":"Variant model"},{"value":"local/plain","name":"Plain"}]},
+            {"id":"effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
+        ]});
+        let models = acp_model_catalog_for_adapter(AdapterKind::KiloCli, &kilo).unwrap();
+        assert_eq!(models[0].options[0].key, "effort");
+        assert!(
+            models[1].options.is_empty(),
+            "Kilo effort is advertised only for its selected model"
+        );
+        for (kind, mut session, key) in [(AdapterKind::KiloCli, kilo, "effort")] {
+            let entries = session["configOptions"][0]["options"]
+                .as_array_mut()
+                .unwrap();
+            let other_id = entries[1]["value"].as_str().unwrap().to_owned();
+            entries.push(json!({"value":"plain-model","name":"Plain model"}));
+            entries.push(json!({"value":"unavailable-model","name":"Unavailable model"}));
+            session["_meta"]["rovaiModelOptions"] = json!({
+                other_id.clone(): [{"key":key,"label":"Effort","valueType":"enum",
+                    "values":[{"value":"medium","label":"Medium"},{"value":"max","label":"Max"}],
+                    "defaultValue":"medium","scope":"session"}],
+                "plain-model": []
+            });
+            let models = acp_model_catalog_for_adapter(kind, &session).unwrap();
+            let current = models.iter().find(|model| model.is_default).unwrap();
+            assert_eq!(current.options[0].default_value.as_deref(), Some("high"));
+            let other = models.iter().find(|model| model.id == other_id).unwrap();
+            assert_eq!(other.options[0].key, key);
+            assert_eq!(other.options[0].default_value.as_deref(), Some("medium"));
+            assert_eq!(
+                other.options[0]
+                    .values
+                    .iter()
+                    .map(|choice| choice.value.as_str())
+                    .collect::<Vec<_>>(),
+                ["medium", "max"]
+            );
+            for id in ["plain-model", "unavailable-model"] {
+                assert!(
+                    models
+                        .iter()
+                        .find(|model| model.id == id)
+                        .unwrap()
+                        .options
+                        .is_empty()
+                );
+            }
+        }
         let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
         assert_eq!(command[0].id, "command-code-cli://runtime-default");
@@ -5646,6 +5915,14 @@ mod tests {
             &[SkillDeliveryGroupKey],
             SkillDiscoveryVerification,
         )] = &[
+            (
+                AdapterKind::KiloCli,
+                &[
+                    SkillDeliveryGroupKey::Kilo,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             (
                 AdapterKind::HermesCli,
                 &[SkillDeliveryGroupKey::Hermes],

@@ -1,3 +1,8 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
+import { InlineProjectFileReference } from './InlineProjectFileReference'
+import { projectFileLink } from './project-file-reference'
+import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
+import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
 import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
@@ -32,7 +37,7 @@ import type { MemberCreationView } from '@contracts'
 import { CopyIcon } from './CopyIcon'
 import { newCommandId } from '../../shared/command-id'
 import { useMobileLayout } from './MobileLayout'
-import { useThreadClient, useEditingRecovery, type ThreadClient } from './camp-client'
+import { useThreadClient, useThreadConnection, useEditingRecovery, type ThreadClient } from './camp-client'
 import { useExecutionDisclosureAnchor } from './useExecutionDisclosureAnchor'
 import { useExecutionMetrics, useExecutionMetricsVisibility } from './useExecutionMetrics'
 import { executionUsageTotal } from './execution-metrics-reader'
@@ -1001,11 +1006,12 @@ export type NotificationFocusTarget = {
   requestId: number
   conversationId?: string
   agentRunId?: string
-  kind: 'approval' | 'camp_turn' | 'agent_run' | 'camp_message' | 'single_chat' | 'mission' | 'task'
+  kind: 'native_interaction' | 'approval' | 'camp_turn' | 'agent_run' | 'camp_message' | 'single_chat' | 'mission' | 'task'
   subjectId?: string
   threadTurnId: string | null
   messageId?: string
   approvalId?: string
+  interactionId?: string
   active?: boolean
 }
 export type VisibleNotificationSources = {
@@ -1480,6 +1486,7 @@ export function structuredThreadContentPlainText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   const parts = content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return `@${currentUserName}`
@@ -1522,6 +1529,7 @@ function structuredThreadContentMarkdownText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
@@ -1592,17 +1600,13 @@ export function QuickChatWorkspace({
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
           {recentThreads.length === 0 && <>
-          <svg className="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
-            <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" fill="currentColor" />
-            <path d="M8 49.5 Q36 37.5 64 49.5" stroke="currentColor" strokeWidth="5" fill="none" strokeLinecap="round" />
-            <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="36" cy="43.5" r="2.6" />
-          </svg>
+          <RovaiBrandMark className="quick-chat-mark" width={96} height={66} wide />
           <h2>{hasAvailableMember ? uiAttribute("开始一段协作") : uiAttribute("还没有可用的队员")}</h2>
           <p className="quick-chat-subline">{hasAvailableMember ? uiAttribute("选好队员，写下你想完成的事。") : uiAttribute("先添加队员或完成运行配置。")}</p>
-          <div className="quick-chat-empty">
+          <div className={`quick-chat-empty${hasAvailableMember ? '' : ' quick-chat-empty-unavailable'}`}>
             {hasAvailableMember
               ? <button className="quick-chat-create" type="button" onClick={onNewConversation}><span aria-hidden="true">＋</span><UiText zh={"新对话"} /></button>
-              : <><button className="quick-chat-create" type="button" onClick={onOpenMembers}><UiText zh={"前往队员"} /></button><button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}><UiText zh={"查看智能体"} /></button></>}
+              : <><button className="quick-chat-create" type="button" onClick={onOpenMembers}><UiText zh={"前往队员"} /></button><button className="quick-chat-secondary" type="button" onClick={onOpenRuntimeSettings}><UiText zh={"查看智能体"} /></button></>}
           </div>
           </>}
           {recentThreads.length > 0 && (
@@ -1645,7 +1649,8 @@ export function ThreadWorkspace({
   userAnchorNavigation,
   missionBoard = null,
   previewTabsInPane = false,
-  suppressExecutionAutoOpen = false,
+  executionAutoOpen = false,
+  suppressExecutionAutoOpen: suppressExecutionAutoOpenForSurface = false,
   initialComposerDraft = null,
   memberCreation = false,
   onPendingDraftChange,
@@ -1672,6 +1677,7 @@ export function ThreadWorkspace({
   onRemoveMember,
   onTasksChanged,
   onResolveApproval,
+  onRespondInteraction,
   cancellingTurnIds = new Set<string>(),
   cancellingRunIds = new Set<string>(),
   confirmingRunIds = new Set<string>(),
@@ -1708,6 +1714,7 @@ export function ThreadWorkspace({
   userAnchorNavigation?: ThreadUserAnchorNavigation
   missionBoard?: React.ReactNode
   previewTabsInPane?: boolean
+  executionAutoOpen?: boolean
   suppressExecutionAutoOpen?: boolean
   initialComposerDraft?: ThreadComposerDraftView | null
   memberCreation?: boolean
@@ -1734,7 +1741,8 @@ export function ThreadWorkspace({
   onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
   onRemoveMember?(preview: ThreadMemberRemovalPreview): Promise<ThreadMemberRemoveOutcome>
   onTasksChanged(): Promise<void>
-  onResolveApproval(approval: ActionApprovalView, optionId: string): void
+  onResolveApproval(approval: ActionApprovalView, optionId: string): void | Promise<void>
+  onRespondInteraction?(interaction: NativeInteractionView, answer: NativeInteractionAnswer): Promise<NativeInteractionResult>
   cancellingTurnIds?: ReadonlySet<string>
   cancellingRunIds?: ReadonlySet<string>
   confirmingRunIds?: ReadonlySet<string>
@@ -1863,6 +1871,7 @@ export function ThreadWorkspace({
     hasUnavailableAtom: false,
     memberAgentIds: []
   })
+  const [fileInsertionPending, setFileInsertionPending] = useState(false)
   const singleChatLeaveGuardRef = useRef<(() => ThreadLeavePreparation) | null>(null)
   const bindSingleChatLeaveGuard = useCallback((guard: (() => ThreadLeavePreparation) | null): void => {
     singleChatLeaveGuardRef.current = guard
@@ -1876,6 +1885,7 @@ export function ThreadWorkspace({
   const [composerInviteMessage, setComposerInviteMessage] = useState<string | null>(null)
   const [routingMutating, setRoutingMutating] = useState(false)
   const mobile = useMobileLayout()
+  const suppressExecutionAutoOpen = !executionAutoOpen || mobile || suppressExecutionAutoOpenForSurface
   const composerSubmittingRef = useRef(false)
   const routingMutatingRef = useRef(false)
   const composerLockAwaitingDisabledCommitRef = useRef(false)
@@ -2761,7 +2771,7 @@ export function ThreadWorkspace({
   const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
-  const composerSendDisabled = composerSendIsDisabled({
+  const composerSendDisabled = fileInsertionPending || composerSendIsDisabled({
     hasSendablePayload,
     hasAvailableRecipient,
     hasUnavailableMention,
@@ -2819,7 +2829,11 @@ export function ThreadWorkspace({
       )
     : null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
-  const previousPendingApprovalCount = useRef(pendingApprovals.length)
+  const nativeInteractions = snapshot.nativeInteractions ?? []
+  useEffect(() => {
+    if (snapshot.nativeInteractions) retainInteractionDrafts({ threadId: snapshot.thread.id, conversationId: null }, new Set(snapshot.nativeInteractions.map(request => request.id)))
+  }, [snapshot.thread.id, snapshot.nativeInteractions])
+  const previousPendingInteractionCount = useRef(pendingApprovals.length + nativeInteractions.length)
   const executionEventsByRunId = useMemo(
     () => groupExecutionEventsByRunId(
       snapshot.agentRuns,
@@ -3719,14 +3733,14 @@ export function ThreadWorkspace({
   }), [draftCoordinator, snapshot.thread.id, publishedMessageSequence])
 
   useEffect(() => {
-    const previousCount = previousPendingApprovalCount.current
-    previousPendingApprovalCount.current = pendingApprovals.length
-    if (conversationFind.open) return
-    if (pendingApprovals.length >= previousCount) return
-    if (pendingApprovals.length === 0) {
+    const previousCount = previousPendingInteractionCount.current
+    const count = pendingApprovals.length + nativeInteractions.length
+    previousPendingInteractionCount.current = count
+    if (conversationFind.open || count >= previousCount) return
+    if (count === 0 && (document.activeElement === document.body || approvalDockRef.current?.contains(document.activeElement))) {
       composerEditorRef.current?.focus()
     }
-  }, [conversationFind.open, pendingApprovals.length])
+  }, [conversationFind.open, pendingApprovals.length, nativeInteractions.length])
 
   useEffect(() => {
     if (
@@ -3758,7 +3772,7 @@ export function ThreadWorkspace({
   }, [memberCreation, snapshot.thread.id, snapshot.thread.activationState, busy, draftLoadState.state])
 
   useEffect(() => {
-    if (!notificationFocus?.active || ['approval', 'single_chat'].includes(notificationFocus.kind)) return
+    if (!notificationFocus?.active || ['approval', 'native_interaction', 'single_chat'].includes(notificationFocus.kind)) return
     setConversationView('conversation')
     if (notificationFocus.kind === 'task' && notificationFocus.subjectId) {
       if (!tasksEnabled) return
@@ -3814,7 +3828,7 @@ export function ThreadWorkspace({
       frame = window.requestAnimationFrame(present)
     }
     const present = (): void => {
-      if (notificationFocus.kind === 'approval') {
+      if (['approval', 'native_interaction'].includes(notificationFocus.kind)) {
         return
       }
       if (notificationFocus.kind === 'task' || notificationFocus.kind === 'mission') {
@@ -4300,7 +4314,7 @@ export function ThreadWorkspace({
     ) return
     const threadId = snapshot.thread.id
     const composerHandle = composerHandleRef.current
-    if (!composerHandle) return
+    if (!composerHandle || composerHandle.hasPendingFileInsertion()) return
     followTimelineAfterUserSend(threadId)
     composerSubmittingRef.current = true
     setComposerSubmitting(true)
@@ -4313,13 +4327,14 @@ export function ThreadWorkspace({
     try {
       composerHandle.adoptHistoryPreview()
       await attachmentPreparationQueue.current
-      const flushed = await composerHandle.flush()
+      const flushed = await composerHandle.flush({ forSubmission: true })
       const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error(uiAttribute('Composer Draft 尚未就绪。'))
       const currentSnapshot = activeSnapshotRef.current
       const routedDraft = materializeLocalContinuation(frozenDraft, currentSnapshot.members)
       if (routedDraft.content.segments.some(segment => segment.kind === 'atom' && isReferenceAtom(segment.atom))
         && !routedDraft.content.segments.some(segment => segment.kind === 'text' && segment.text.trim())
+        && !routedDraft.content.segments.some(segment => segment.kind === 'atom' && (segment.atom.type === 'project_file_reference' || segment.atom.type === 'skill'))
         && !routedDraft.attachments.length) throw new Error(uiAttribute('请补充本轮内容'))
       // Flush can change recipients; keep the execution snapshot from this
       // submission so an ended target cannot turn into a successor's Steer.
@@ -4356,6 +4371,7 @@ export function ThreadWorkspace({
         pendingDraftPersistence.current!.acknowledgeActivation(threadId)
       }
       if (mountedThreadId.current === threadId
+        && !suppressExecutionAutoOpen
         && (sendReceipt.deliveryIds.length || sendReceipt.agentRunIds.length)) {
         setSubmittedExecutionRequests((current) => [...current, {
           ...sendReceipt,
@@ -6321,22 +6337,25 @@ export function ThreadWorkspace({
           onDragLeave={leaveAttachmentDropSurface}
           onDrop={dropAttachments}
         >
-          {pendingApprovals.length > 0 && (
-            <ApprovalDock
+          <ApprovalDock
               approvals={pendingApprovals}
+              interactions={nativeInteractions}
+              agentRuns={snapshot.agentRuns}
+              threadId={snapshot.thread.id}
+              onRespond={onRespondInteraction}
+              onNotice={onNotify}
               profileById={profileById}
               busy={busy}
               onResolve={onResolveApproval}
               containerRef={approvalDockRef}
-              focusRequest={notificationFocus?.kind === 'approval' && notificationFocus.active
+              focusRequest={notificationFocus && ['approval', 'native_interaction'].includes(notificationFocus.kind) && notificationFocus.active
                 ? notificationFocus.requestId
                 : null}
-              focusApprovalId={notificationFocus?.kind === 'approval'
-                ? notificationFocus.approvalId ?? null
+              focusApprovalId={notificationFocus && ['approval', 'native_interaction'].includes(notificationFocus.kind)
+                ? notificationFocus.interactionId ?? notificationFocus.approvalId ?? null
                 : null}
               onFocusPresented={onNotificationFocusPresented}
-            />
-          )}
+          />
 
           {runtimeRecovery && runtimeRecovery.targets.length > 0 && (
             <RuntimeRecoveryDock
@@ -6589,7 +6608,7 @@ export function ThreadWorkspace({
             <StructuredMentionComposer
               ref={composerHandleRef}
               id="camp-message"
-              referenceScope={{ threadId: snapshot.thread.id, client }}
+              referenceScope={{ threadId: snapshot.thread.id, client, projectBound: snapshot.thread.projectBindingKind === 'directory' }}
               draftIdentity={`${snapshot.thread.id}:composer`}
               inputHistory={() => threadInputHistory(visibleThreadMessages)}
               onEffectiveDocumentChange={content => {
@@ -6607,6 +6626,7 @@ export function ThreadWorkspace({
               persistDocument={(content) => saveStructuredDraft(snapshot.thread.id, content)}
               waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
               onLocalStatusChange={setComposerLocalStatus}
+              onFileInsertionPendingChange={setFileInsertionPending}
               onPersistenceErrorChange={setComposerPersistenceError}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
@@ -9477,179 +9497,225 @@ function ThreadMembersPanel({
   )
 }
 
+const connectedSnapshot = (): boolean => true
+const noConnectionSubscription = (): (() => void) => () => undefined
+
 export function ApprovalDock({
-  approvals,
-  profileById,
-  busy,
-  onResolve,
-  containerRef,
-  focusRequest,
-  focusApprovalId,
-  onFocusPresented
+  approvals, interactions = [], agentRuns = [], threadId = '', conversationId = null, onRespond, onNotice,
+  profileById, busy, onResolve, containerRef, focusRequest, focusApprovalId, onFocusPresented
 }: {
   approvals: ActionApprovalView[]
+  interactions?: NativeInteractionView[]
+  agentRuns?: Pick<AgentRunView, 'id' | 'agentId'>[]
+  threadId?: string
+  conversationId?: string | null
+  onRespond?(interaction: NativeInteractionView, answer: NativeInteractionAnswer): Promise<NativeInteractionResult>
+  onNotice?(message: string): void
   profileById: Map<string, AgentProfile>
   busy: boolean
-  onResolve(approval: ActionApprovalView, optionId: string): void
+  onResolve(approval: ActionApprovalView, optionId: string): void | Promise<void>
   containerRef: RefObject<HTMLElement | null>
   focusRequest: number | null
   focusApprovalId: string | null
   onFocusPresented?(requestId: number): void
-}): JSX.Element {
+}): JSX.Element | null {
   const t = useUiText()
-  const [activeIndex, setActiveIndex] = useState(0)
+  const connection = useThreadConnection()
+  const draftScope = useMemo(() => ({ threadId, conversationId }), [threadId, conversationId])
+  const connected = useSyncExternalStore(connection?.subscribe ?? noConnectionSubscription, connection?.getSnapshot ?? connectedSnapshot, connectedSnapshot)
+  const [uncertain, setUncertain] = useState<Set<string>>(() => new Set())
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [expandedReasonIds, setExpandedReasonIds] = useState<Set<string>>(() => new Set())
+  const [completed, setCompleted] = useState<Set<string>>(() => new Set())
+  const [submitting, setSubmitting] = useState<Set<string>>(() => new Set())
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [now, setNow] = useState(Date.now)
+  const inFlight = useRef(new Set<string>())
   const contentId = useId()
   const presentedFocusRequest = useRef<number | null>(null)
-  const currentIndex = Math.min(activeIndex, approvals.length - 1)
-  const approval = approvals[currentIndex]
-  const previousApprovals = useRef({ ids: approvals.map((item) => item.id), activeId: approval.id })
-  const sourceLabel = `${profileById.get(approval.agentId)?.displayName ?? approval.agentId} · ${runtimeAdapterLabel(approval.adapterKind)}`
-  const showReason = Boolean(approval.reason?.trim())
-    && normalizedApprovalText(approval.reason ?? '') !== normalizedApprovalText(approval.actionSummary)
+  const arrival = useRef(new Map<string, number>())
+  const pending = [
+    ...approvals.map(approval => ({ id: approval.id, approval, interaction: null as NativeInteractionView | null, createdAt: 0 })),
+    ...interactions.map(interaction => ({ id: interaction.id, approval: null as ActionApprovalView | null, interaction, createdAt: interaction.createdAt }))
+  ].map(item => {
+    if (!arrival.current.has(item.id)) arrival.current.set(item.id, arrival.current.size)
+    return { ...item, order: arrival.current.get(item.id)! }
+  }).filter(item => !completed.has(item.id) && (!item.interaction?.expiresAt || now < item.interaction.expiresAt || inFlight.current.has(item.id)))
+    .sort((a, b) => a.order - b.order)
+  const currentIndex = Math.max(0, pending.findIndex(item => item.id === activeId))
+  const item = pending[currentIndex]
+  const approval = item?.approval
+  const interaction = item?.interaction
+  const question = interaction?.questions[0]
+  const agentId = approval?.agentId ?? agentRuns.find(run => run.id === interaction?.agentRunId)?.agentId ?? ''
+  const sourceLabel = `${profileById.get(agentId)?.displayName ?? agentId} · ${approval ? runtimeAdapterLabel(approval.adapterKind) : 'Pi'}`
+  const previousActive = useRef<string | null>(null)
 
   useEffect(() => {
-    if (activeIndex >= approvals.length) setActiveIndex(Math.max(approvals.length - 1, 0))
-  }, [activeIndex, approvals.length])
-
+    if (!interactions.some(request => request.expiresAt !== null)) return
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [interactions])
   useEffect(() => {
-    const previous = previousApprovals.current
-    const ids = approvals.map((item) => item.id)
-    previousApprovals.current = { ids, activeId: approval.id }
-    if (ids.some((id) => !previous.ids.includes(id))) setCollapsed(false)
-    setExpandedReasonIds((expanded) => {
-      const retained = new Set([...expanded].filter((id) => ids.includes(id)))
-      return retained.size === expanded.size ? expanded : retained
-    })
-    if (ids.includes(previous.activeId)) return undefined
-    setCollapsed(false)
-    const frame = window.requestAnimationFrame(() => {
-      containerRef.current
-        ?.querySelector<HTMLElement>('[data-approval-summary]')
-        ?.focus({ preventScroll: true })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [approvals, approval.id, containerRef])
-
+    retainInteractionDrafts(draftScope, new Set(interactions.filter(request =>
+      !completed.has(request.id) && (request.expiresAt === null || request.expiresAt > now || inFlight.current.has(request.id))
+    ).map(request => request.id)))
+  }, [draftScope, interactions, completed, now])
+  useEffect(() => {
+    const old = previousActive.current
+    const ids = pending.map(request => request.id)
+    if (!ids.includes(activeId ?? '') && item) setActiveId(item.id)
+    previousActive.current = item?.id ?? null
+    setExpandedReasonIds(expanded => new Set([...expanded].filter(id => ids.includes(id))))
+    // Appending another member's question never changes the current request or focus.
+    if (old && !ids.includes(old) && item && (document.activeElement === document.body || containerRef.current?.contains(document.activeElement))) {
+      containerRef.current?.querySelector<HTMLElement>('[data-approval-summary]')?.focus({ preventScroll: true })
+    }
+  }, [pending.map(request => request.id).join('|'), activeId, item?.id, containerRef])
   useEffect(() => {
     if (focusRequest === null || presentedFocusRequest.current === focusRequest) return
     setCollapsed(false)
-    if (focusApprovalId) {
-      const targetIndex = approvals.findIndex((candidate) => candidate.id === focusApprovalId)
-      if (targetIndex >= 0) setActiveIndex(targetIndex)
-    }
-  }, [approvals, focusApprovalId, focusRequest])
-
+    if (focusApprovalId && pending.some(request => request.id === focusApprovalId)) setActiveId(focusApprovalId)
+  }, [focusRequest, focusApprovalId, pending.map(request => request.id).join('|')])
   useEffect(() => {
-    if (focusRequest === null || presentedFocusRequest.current === focusRequest || collapsed) return undefined
-    if (focusApprovalId && approval.id !== focusApprovalId) return undefined
-    let frame: number | null = null
-    let scrolled = false
-    let focusObserved = false
-    const present = (): void => {
-      const target = containerRef.current?.querySelector<HTMLElement>(focusApprovalId
-        ? `[data-approval-summary="${CSS.escape(focusApprovalId)}"]`
-        : '[data-approval-summary]')
-      if (!target) {
-        frame = window.requestAnimationFrame(present)
-        return
-      }
-      if (!scrolled) {
-        scrolled = true
-        target.scrollIntoView({
-          block: 'center',
-          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
-        })
-      }
-      if (focusObserved && document.activeElement === target) {
-        presentedFocusRequest.current = focusRequest
-        onFocusPresented?.(focusRequest)
-        return
-      }
-      target.focus({ preventScroll: true })
-      focusObserved = document.activeElement === target
-      frame = window.requestAnimationFrame(present)
-    }
-    frame = window.requestAnimationFrame(present)
-    return () => {
-      if (frame !== null) window.cancelAnimationFrame(frame)
-    }
-  }, [activeIndex, approval.id, collapsed, containerRef, focusApprovalId, focusRequest, onFocusPresented])
+    if (focusRequest === null || presentedFocusRequest.current === focusRequest || collapsed || !item) return
+    if (focusApprovalId && item.id !== focusApprovalId) return
+    const frame = requestAnimationFrame(() => {
+      const target = containerRef.current?.querySelector<HTMLElement>('[data-approval-summary]')
+      target?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+      target?.focus({ preventScroll: true })
+      if (document.activeElement === target) { presentedFocusRequest.current = focusRequest; onFocusPresented?.(focusRequest) }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [item?.id, collapsed, focusRequest, focusApprovalId, containerRef, onFocusPresented])
 
-  return (
-    <section className={collapsed ? 'approval-dock is-collapsed' : 'approval-dock'} aria-label={uiAttribute("{0} 项待审批", String(approvals.length))} ref={containerRef}>
-      <header>
-        <div className="approval-dock-heading" tabIndex={-1} data-approval-summary={approval.id}
-          aria-label={`${approval.actionSummary}, ${sourceLabel}`}>
-          <strong title={approval.actionSummary}>{approval.actionSummary}</strong>
-          <span title={sourceLabel}>{sourceLabel}</span>
-        </div>
-        <nav aria-label={uiAttribute("审批请求控制")}>
-          {approvals.length > 1 && (
-            <>
-            <button type="button" aria-label={uiAttribute("上一项审批")} aria-disabled={currentIndex === 0} onClick={(event) => {
-              event.currentTarget.focus({ preventScroll: true })
-              if (currentIndex > 0) setActiveIndex(currentIndex - 1)
-            }}>‹</button>
-            <span>{currentIndex + 1} / {approvals.length}</span>
-            <button type="button" aria-label={uiAttribute("下一项审批")} aria-disabled={currentIndex === approvals.length - 1} onClick={(event) => {
-              event.currentTarget.focus({ preventScroll: true })
-              if (currentIndex < approvals.length - 1) setActiveIndex(currentIndex + 1)
-            }}>›</button>
-            </>
-          )}
-          <button
-            className="approval-dock-collapse"
-            type="button"
-            aria-label={collapsed ? uiAttribute("展开审批详情") : uiAttribute("收起审批详情")}
-            aria-expanded={!collapsed}
-            aria-controls={contentId}
-            onClick={() => setCollapsed((value) => !value)}
-          >
-            {collapsed ? '⌄' : '⌃'}
-          </button>
-        </nav>
-      </header>
-      {!collapsed && <div
-        className="approval-dock-scroll"
-        id={contentId}
-        data-approval-id={approval.id}
-      >
-        {showReason && <ApprovalReason key={approval.id} reason={approval.reason!}
-          expanded={expandedReasonIds.has(approval.id)}
-          onToggle={() => setExpandedReasonIds((previous) => {
-            const next = new Set(previous)
-            if (next.has(approval.id)) next.delete(approval.id)
-            else next.add(approval.id)
-            return next
-          })} />}
-        <pre tabIndex={0} role="region" aria-label={uiAttribute("完整审批请求，可滚动")}>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
-        <div className="approval-dock-actions">
-          {approval.options.map(option => {
-            const label = approvalOptionLabel(approval, option, t)
-            return (
-              <button
-                className={`runtime-option option-${option.kind}`}
-                type="button"
-                key={option.optionId}
-                data-option-id={option.optionId}
-                onClick={() => onResolve(approval, option.optionId)}
-                disabled={busy}
-                title={label}
-                aria-label={label}
-              >
-                {label}
-              </button>
-            )
-          })}
-          {approval.options.length === 0 && (
-            <p className="approval-option-error"><UiText zh={"当前智能体未提供可无损回传的原生选项，请求无法提交。"} /></p>
-          )}
-        </div>
+  if (!item) return null
+  const requestBusy = submitting.has(item.id) || (Boolean(approval) && busy)
+  const questionDisabled = requestBusy || !connected || uncertain.has(item.id) || interaction?.status === 'unknown' || !onRespond
+  const showReason = approval && Boolean(approval.reason?.trim())
+    && normalizedApprovalText(approval.reason ?? '') !== normalizedApprovalText(approval.actionSummary)
+  const changeRequest = (index: number): void => {
+    if (pending[index]) setActiveId(pending[index].id)
+  }
+  const submit = async (answer: NativeInteractionAnswer | string): Promise<void> => {
+    if (inFlight.current.has(item.id)) return
+    inFlight.current.add(item.id)
+    setSubmitting(current => new Set(current).add(item.id))
+    setErrors(current => { const next = { ...current }; delete next[item.id]; return next })
+    try {
+      if (approval && typeof answer === 'string') await onResolve(approval, answer)
+      else if (interaction && typeof answer !== 'string' && onRespond) {
+        const result = await onRespond(interaction, answer)
+        if (result.status === 'failed') { setErrors(current => ({ ...current, [item.id]: t('提交失败，内容已保留') })); return }
+        if (result.status === 'unknown' || result.status === 'pending') {
+          setUncertain(current => new Set(current).add(item.id))
+          setErrors(current => ({ ...current, [item.id]: t('提交结果待核对，内容已保留') }))
+          return
+        }
+        if (result.status === 'expired' || result.status === 'unavailable') {
+          onNotice?.(t(result.status === 'expired' ? '回答期限已过' : '请求已失效'))
+        }
+        setCompleted(current => new Set(current).add(item.id))
+      }
+    } catch (error) {
+      const resultUncertain = Boolean(interaction) && !(error && typeof error === 'object' && 'requestNotSent' in error && error.requestNotSent === true)
+      if (resultUncertain) setUncertain(current => new Set(current).add(item.id))
+      setErrors(current => ({ ...current, [item.id]: t(resultUncertain ? '提交结果待核对，内容已保留' : '提交失败，内容已保留') }))
+    } finally {
+      inFlight.current.delete(item.id)
+      setSubmitting(current => { const next = new Set(current); next.delete(item.id); return next })
+    }
+  }
+  return <section className={`approval-dock pending-dock${interaction ? ' is-question' : ''}${collapsed ? ' is-collapsed' : ''}`}
+    aria-label={uiAttribute('{0} 项待处理', String(pending.length))} ref={containerRef}>
+    <header>
+      <div className="approval-dock-heading" tabIndex={-1} data-approval-summary={item.id}
+        aria-label={`${approval?.actionSummary ?? question?.title ?? ''}, ${sourceLabel}`}>
+        <strong title={approval?.actionSummary}>{approval?.actionSummary ?? t('等待回答')}</strong>
+        {approval && <span title={sourceLabel}>{sourceLabel}</span>}
+      </div>
+      <nav className="pending-pagination" aria-label={uiAttribute('待处理请求控制')}>
+        <button type="button" aria-label={uiAttribute('上一项请求')} aria-disabled={currentIndex === 0}
+          onClick={event => { event.currentTarget.focus({ preventScroll: true }); changeRequest(currentIndex - 1) }}><PendingChevron direction="left" /></button>
+        <span className="pending-page-count">{currentIndex + 1} / {pending.length}</span>
+        <button type="button" aria-label={uiAttribute('下一项请求')} aria-disabled={currentIndex === pending.length - 1}
+          onClick={event => { event.currentTarget.focus({ preventScroll: true }); changeRequest(currentIndex + 1) }}><PendingChevron direction="right" /></button>
+        <button className="approval-dock-collapse" type="button"
+          aria-label={collapsed ? uiAttribute('展开待处理') : uiAttribute('收起待处理')}
+          aria-expanded={!collapsed} aria-controls={contentId} onClick={() => setCollapsed(value => !value)}>
+          <PendingChevron direction={collapsed ? 'up' : 'down'} />
+        </button>
+      </nav>
+    </header>
+    {!collapsed && <div className="approval-dock-scroll pending-content" id={contentId} data-approval-id={item.id}>
+      {approval ? <>
+        {showReason && <ApprovalReason key={approval.id} reason={approval.reason!} expanded={expandedReasonIds.has(approval.id)}
+          onToggle={() => setExpandedReasonIds(previous => { const next = new Set(previous); if (next.has(approval.id)) next.delete(approval.id); else next.add(approval.id); return next })} />}
+        <pre tabIndex={0} role="region" aria-label={uiAttribute('完整审批请求，可滚动')}>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
+        <div className="approval-dock-actions">{approval.options.map(option => {
+          const label = approvalOptionLabel(approval, option, t)
+          return <button className={`runtime-option option-${option.kind}`} type="button" key={option.optionId}
+            data-option-id={option.optionId} onClick={() => void submit(option.optionId)} disabled={requestBusy || !connected}
+            title={label} aria-label={label}>{label}</button>
+        })}{approval.options.length === 0 && <p className="approval-option-error"><UiText zh="当前智能体未提供可无损回传的原生选项，请求无法提交。" /></p>}</div>
+      </> : interaction && question && <div>
+        <div className="pending-owner"><MemberAvatar agentId={agentId} avatarRef={profileById.get(agentId)?.avatarRef ?? null}
+          displayName={profileById.get(agentId)?.displayName ?? agentId} size="execution" decorative />{sourceLabel}</div>
+        <h3 id={`native-question-${interaction.id}`}>{question.title}</h3>
+        {question.description !== null && <p className="native-question-description">{question.description}</p>}
+        {question.kind === 'select' && <div className="native-question-options" role="group" aria-labelledby={`native-question-${interaction.id}`}>
+          {question.options.map(option => <button type="button" className="native-question-option" key={option.id}
+            disabled={questionDisabled} onClick={() => void submit({ kind: 'select', optionId: option.id })}>
+            <span>{option.label}</span><PendingChevron direction="right" /></button>)}
+        </div>}
+        <NativeQuestionAnswer key={interaction.id} interaction={interaction} draftScope={draftScope} disabled={questionDisabled}
+          submitting={requestBusy} now={now} onSubmit={answer => void submit(answer)} />
       </div>}
-    </section>
-  )
+      {(errors[item.id] || interaction?.status === 'unknown') && <p className="pending-error" role="alert">{errors[item.id] ?? t('提交结果待核对，内容已保留')}</p>}
+    </div>}
+  </section>
+}
+
+function PendingChevron({ direction }: { direction: 'left' | 'right' | 'up' | 'down' }): JSX.Element {
+  return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={direction === 'left' ? 'm12 5-5 5 5 5' : direction === 'right' ? 'm8 5 5 5-5 5' : direction === 'up' ? 'm5 12 5-5 5 5' : 'm5 7 5 5 5-5'} />
+  </svg>
+}
+
+function NativeQuestionAnswer({ interaction, draftScope, disabled, submitting, now, onSubmit }: {
+  interaction: NativeInteractionView; draftScope: InteractionDraftScope; disabled: boolean; submitting: boolean; now: number
+  onSubmit(answer: NativeInteractionAnswer): void
+}): JSX.Element {
+  const t = useUiText()
+  const question = interaction.questions[0]
+  const [text, setText] = useState(() => interactionDraft(draftScope, interaction.id, question.prefill ?? ''))
+  const inputProps = { className: 'native-question-input', value: text,
+    'aria-labelledby': `native-question-${interaction.id}`, placeholder: question.placeholder ?? undefined,
+    // Connection recovery keeps this draft mounted; only actions are fenced.
+    readOnly: submitting,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setText(event.target.value); saveInteractionDraft(draftScope, interaction.id, event.target.value)
+    },
+    onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing && !disabled && (!question.multiline || event.metaKey || event.ctrlKey)) {
+        event.preventDefault(); onSubmit({ kind: 'input', value: text })
+      }
+    }
+  }
+  return <>
+    {question.kind === 'input' && (question.multiline ? <textarea {...inputProps} rows={4} /> : <input {...inputProps} type="text" />)}
+    <footer className="native-question-actions">
+      <span className="pending-submit-status" role="status">{submitting ? t('提交中…') : interaction.expiresAt !== null ? t('{0} 秒后失效', String(Math.max(0, Math.ceil((interaction.expiresAt - now) / 1000)))) : ''}</span>
+      <div>
+        {interaction.canSkip && <button className="quiet-button compact native-question-secondary" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'skip' })}><UiText zh="跳过" /></button>}
+        {question.kind === 'confirm' ? <>
+          <button className="quiet-button compact native-question-secondary" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'confirm', confirmed: false })}><UiText zh="否" /></button>
+          <button className="primary-button compact" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'confirm', confirmed: true })}><UiText zh="是" /></button>
+        </> : question.kind === 'input' && <button className="primary-button compact" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'input', value: text })}><UiText zh="提交" /></button>}
+      </div>
+    </footer>
+  </>
 }
 
 function approvalOptionLabel(
@@ -10475,6 +10541,7 @@ export function StructuredMessageBody({
             </span>
           )
         }
+        if (segment.kind === 'project_file_reference') return <InlineProjectFileReference key={`file-${index}`} file={segment} files={content.filter(item => item.kind === 'project_file_reference')} />
         if (isReferenceSegment(segment)) return <InlineThreadReference key={`reference-${index}`} segment={segment} />
         if (segment.kind === 'skill_mention') {
           return (

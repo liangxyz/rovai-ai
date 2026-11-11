@@ -6,6 +6,7 @@ export function runtimeAdapterLabel(kind: string): string {
     'codex-cli': 'Codex CLI',
     pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
+    'kilo-cli': 'Kilo',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',
@@ -33,6 +34,23 @@ export type MemberRuntimeConfigurationPresentation = {
   summary: string
 }
 
+type RuntimeEffortOption = {
+  key: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
+  label: string
+}
+
+export function runtimeEffortOption(adapterKind: string): RuntimeEffortOption {
+  const [key, label] = ({
+    'claude-code-cli': ['effort', '思考强度'],
+    'command-code-cli': ['effort', '思考强度'],
+    'kilo-cli': ['effort', '推理强度'],
+    'minimax-code-cli': ['thinkingEffort', '思考强度'],
+    pi: ['thinking_level', '思考强度'],
+    'codebuddy-cli': ['thought_level', '推理强度']
+  } as Record<string, [RuntimeEffortOption['key'], string]>)[adapterKind] ?? ['reasoning_effort', '推理强度']
+  return { key, label: uiAttribute(label) }
+}
+
 export function memberRuntimeConfigurationPresentation(
   configuration: NonNullable<AgentProfile['runtimeConfiguration']>,
   installation: AdapterInstallation | null
@@ -51,20 +69,15 @@ export function memberRuntimeConfigurationPresentation(
     (model) => model.id === modelSelection.modelId
   ) ?? null
   const model = modelDescriptor?.displayName.trim() || modelSelection.modelId
-  const effortKey = configuration.adapterKind === 'claude-code-cli'
-    ? 'effort'
-    : configuration.adapterKind === 'pi' ? 'thinking_level'
-      : configuration.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
+  const { key: effortKey, label: effortLabel } = runtimeEffortOption(configuration.adapterKind)
   const effortDescriptor = modelDescriptor?.options.find((option) => option.key === effortKey) ?? null
   const rawEffort = modelSelection.options[effortKey]
   const effort = effortDescriptor || typeof rawEffort === 'string'
     ? {
-        label: configuration.adapterKind === 'claude-code-cli' || configuration.adapterKind === 'pi'
-          ? uiAttribute('思考强度')
-          : uiAttribute('推理强度'),
+        label: effortLabel,
         value: typeof rawEffort === 'string' && rawEffort
-          ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [])
-          : configuration.adapterKind === 'pi' ? uiAttribute('跟随 Pi 原生设置') : uiAttribute("跟随模型默认值")
+          ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [], configuration.adapterKind)
+          : uiAttribute('跟随模型默认值')
       }
     : null
 
@@ -78,8 +91,10 @@ export function memberRuntimeConfigurationPresentation(
 
 function runtimeEffortValueLabel(
   value: string,
-  choices: Array<{ value: string; label: string }>
+  choices: Array<{ value: string; label: string }>,
+  adapterKind?: string
 ): string {
+  if (adapterKind === 'hermes-cli' && value === 'default') return uiAttribute('跟随模型默认值')
   return choices.find((choice) => choice.value === value)?.label ?? value
 }
 
@@ -92,15 +107,13 @@ export function messageRuntimeModelPresentation(
   const descriptor = installation?.adapterKind === model.adapterKind
     ? installation.snapshot?.models.find(candidate => candidate.id === model.modelId)
     : null
-  const effortKey = model.adapterKind === 'claude-code-cli' ? 'effort'
-    : model.adapterKind === 'pi' ? 'thinking_level'
-      : model.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
+  const { key: effortKey, label: effortLabel } = runtimeEffortOption(model.adapterKind)
   const choices = descriptor?.options.find(option => option.key === effortKey)?.values ?? []
   return {
     model: descriptor?.displayName.trim() || model.modelId || uiAttribute('智能体默认'),
     effort: model.reasoningEffort ? {
-      label: model.adapterKind === 'claude-code-cli' || model.adapterKind === 'pi' ? uiAttribute('思考强度') : uiAttribute('推理强度'),
-      value: runtimeEffortValueLabel(model.reasoningEffort, choices)
+      label: effortLabel,
+      value: runtimeEffortValueLabel(model.reasoningEffort, choices, model.adapterKind)
     } : null
   }
 }

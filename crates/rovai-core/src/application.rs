@@ -64,10 +64,10 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterCapabilitySnapshot, AdapterInstallationView, AdapterKind, AdapterProbeAttempt,
-        AgentProfileService, ClearMemberRuntimeConfigurationCommand,
-        CreateAdapterInstallationCommand, CreateAgentProfileCommand, DiscoveredManagedInstallation,
-        FrozenAgentRuntimeConfig, InstallationClass, InstallationSource, ManagedProbeFailure,
+        AdapterCapabilitySnapshot, AdapterInstallationView, AdapterKind, AgentProfileService,
+        ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
+        CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
+        InstallationClass, InstallationSource, ManagedProbeFailure,
         RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
         RuntimeEntrypointLocatorIdentity, RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus,
         SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
@@ -344,6 +344,7 @@ const MISSION_GIT_READ_CONCURRENCY_LIMIT: usize = 2;
 enum RuntimeCancellationIngressFence {
     Flushed,
     Reaped,
+    Reusable,
     Unproven,
 }
 
@@ -753,6 +754,17 @@ fn validate_lark_request_actor(method: &str, params: &Value) -> Result<()> {
     Ok(())
 }
 
+fn native_channel_provider(method: &str) -> Result<&'static str> {
+    channel_request_host_component(method)?;
+    Ok(if method.starts_with("channels.dingtalk.") {
+        "dingtalk"
+    } else if method.starts_with("channels.lark.") {
+        "lark"
+    } else {
+        "feishu"
+    })
+}
+
 fn channel_request_host_component(method: &str) -> Result<&'static str> {
     match method {
         "channels.feishu.account.upsert"
@@ -773,6 +785,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.executionConsole.recentOutput.authorize"
         | "channels.executionConsole.agentRun.cancel"
         | "channels.executionConsole.page.authorize"
+        | "channels.nativeInteractions.source"
+        | "channels.nativeInteractions.respond"
         | "channels.deliveries.settle" => Ok(crate::channel::FEISHU_SPEC.host_component),
         "channels.dingtalk.account.upsert"
         | "channels.dingtalk.account.commitConnection"
@@ -792,6 +806,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.dingtalk.executionConsole.recentOutput.authorize"
         | "channels.dingtalk.executionConsole.agentRun.cancel"
         | "channels.dingtalk.executionConsole.page.authorize"
+        | "channels.dingtalk.nativeInteractions.source"
+        | "channels.dingtalk.nativeInteractions.respond"
         | "channels.dingtalk.deliveries.settle" => Ok("dingtalk-channel-host"),
         "channels.lark.account.upsert"
         | "channels.lark.account.commitConnection"
@@ -811,6 +827,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.lark.executionConsole.recentOutput.authorize"
         | "channels.lark.executionConsole.agentRun.cancel"
         | "channels.lark.executionConsole.page.authorize"
+        | "channels.lark.nativeInteractions.source"
+        | "channels.lark.nativeInteractions.respond"
         | "channels.lark.deliveries.settle" => Ok(rovai_core::channel::LARK_SPEC.host_component),
         _ => anyhow::bail!("request does not identify a channel Host"),
     }
@@ -821,6 +839,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
         method,
         "health.check"
             | "projectFiles.request"
+            | "projectFileReferences.resolve"
             | "runtime.status.get"
             | "diagnostics.check"
             | "diagnostics.export"
@@ -862,6 +881,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
+            | "nativeInteractions.respond"
             | "runtime.pendingExecution.cancel"
             | "runtime.subsystems.retry"
     )
@@ -1775,6 +1795,7 @@ struct SendUserAutomationThreadMessageParams {
     #[serde(rename = "threadId", alias = "campId")]
     camp_id: ThreadId,
     agent_id: String,
+    sender_agent_id: Option<String>,
     body: String,
     execution: Option<ExecutionRequest>,
 }
@@ -2032,6 +2053,8 @@ struct CheckProductRuntimeParams {
     runtime_kind: rovai_core::agent_profile::AdapterKind,
     #[serde(default)]
     wait_for_refresh: bool,
+    #[serde(default)]
+    force_refresh: bool,
     model_id: Option<String>,
     #[serde(default)]
     cache_only: bool,
@@ -2064,6 +2087,7 @@ struct ProductRuntimeDiagnostic {
 struct RuntimeDeepProbeResult {
     snapshot: rovai_core::agent_profile::AdapterCapabilitySnapshot,
     failure: Option<RuntimeFailureView>,
+    version_probe_succeeded: bool,
 }
 
 const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
@@ -2215,21 +2239,39 @@ struct RuntimeCheckActivity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DshOptionsTarget {
+struct ModelOptionsTarget {
     model_id: String,
     source: Option<crate::agent_profile::DshModelSource>,
     context: String,
 }
 
 struct RuntimeCheckRequest {
+    force_refresh: bool,
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
-    model_target: Option<DshOptionsTarget>,
+    model_target: Option<ModelOptionsTarget>,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
     trigger: RuntimeCheckTrigger,
     acknowledged: oneshot::Sender<bool>,
     completion: Option<oneshot::Sender<std::result::Result<RuntimeCheckOutcome, String>>>,
+}
+
+enum RuntimeCheckManagerMessage {
+    Request(RuntimeCheckRequest),
+    TargetAdvanced {
+        attempt_id: String,
+        runtime_kind: AdapterKind,
+        previous: Option<RuntimeCheckInstallationTarget>,
+        target: RuntimeCheckInstallationTarget,
+        acknowledged: oneshot::Sender<bool>,
+    },
+}
+
+impl From<RuntimeCheckRequest> for RuntimeCheckManagerMessage {
+    fn from(request: RuntimeCheckRequest) -> Self {
+        Self::Request(request)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2244,11 +2286,94 @@ struct RuntimeCheckInstallationTarget {
     locator: Option<rovai_core::agent_profile::RuntimeEntrypointLocatorIdentity>,
 }
 
+impl RuntimeCheckInstallationTarget {
+    fn from_verified_commit(
+        revision: &(String, i64),
+        verified: &rovai_core::agent_profile::VerifiedDiscoveredRuntimeEntry,
+    ) -> Self {
+        let entry = verified.entry();
+        Self {
+            id: revision.0.clone(),
+            version: revision.1,
+            executable_path: entry.executable_path.clone(),
+            file_identity: Some((
+                entry.executable_fingerprint.clone(),
+                verified.executable_file_identity().clone(),
+            )),
+            locator: entry.entrypoint_locator_identity.clone(),
+        }
+    }
+}
+
+fn runtime_check_target_in_database(
+    database: &rovai_core::db::Database,
+    kind: AdapterKind,
+) -> Result<Option<RuntimeCheckInstallationTarget>> {
+    let service = AgentProfileService::default();
+    let Some(installation) = service.managed_installation(database, kind, "default")? else {
+        return Ok(None);
+    };
+    Ok(Some(RuntimeCheckInstallationTarget {
+        file_identity: service.recorded_executable_identity(
+            database,
+            &installation.id,
+            &installation.executable_path,
+        )?,
+        locator: service.runtime_entrypoint_locator_identity(database, &installation.id)?,
+        id: installation.id,
+        version: installation.version,
+        executable_path: installation.executable_path,
+    }))
+}
+
+struct RuntimeCheckWorkerContext<'a> {
+    force_refresh: bool,
+    attempt_id: &'a str,
+    installation_target: &'a mut Option<RuntimeCheckInstallationTarget>,
+}
+
+impl RuntimeCheckWorkerContext<'_> {
+    fn publish_target(
+        &mut self,
+        core: &Core,
+        kind: AdapterKind,
+        target: RuntimeCheckInstallationTarget,
+    ) -> Result<Option<oneshot::Receiver<bool>>> {
+        if self.installation_target.as_ref() == Some(&target) {
+            return Ok(None);
+        }
+        let previous = self.installation_target.replace(target.clone());
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        core.runtime_check_requests
+            .send(RuntimeCheckManagerMessage::TargetAdvanced {
+                attempt_id: self.attempt_id.to_string(),
+                runtime_kind: kind,
+                previous,
+                target,
+                acknowledged,
+            })
+            .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
+        Ok(Some(acknowledgement))
+    }
+
+    async fn await_target(acknowledgement: Option<oneshot::Receiver<bool>>) -> Result<()> {
+        // Never wait on the Manager while holding the installation commit guard.
+        if let Some(acknowledgement) = acknowledgement {
+            anyhow::ensure!(
+                acknowledgement.await.unwrap_or(false),
+                "runtime_check_target_advance_superseded"
+            );
+        }
+        Ok(())
+    }
+}
+
 struct RuntimeCheckAttempt {
+    force_refresh: bool,
     installation_target: Option<RuntimeCheckInstallationTarget>,
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
-    model_target: Option<DshOptionsTarget>,
+    model_target: Option<ModelOptionsTarget>,
     attempt_id: String,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
@@ -2262,7 +2387,7 @@ struct RuntimeCheckAttempt {
 struct RuntimeCheckWorkerResult {
     attempt_id: String,
     runtime_kind: AdapterKind,
-    catalog_only: bool,
+    installation_target: Option<RuntimeCheckInstallationTarget>,
     result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 }
@@ -2291,6 +2416,35 @@ fn runtime_installation_revision_matches(
 }
 
 impl RuntimeCheckAttempt {
+    fn advance_target(
+        &mut self,
+        previous: &Option<RuntimeCheckInstallationTarget>,
+        target: RuntimeCheckInstallationTarget,
+    ) -> bool {
+        if self.installation_target != *previous
+            && self.installation_target.as_ref() != Some(&target)
+        {
+            return false;
+        }
+        self.installation_target = Some(target);
+        true
+    }
+
+    fn can_join(&self, other: &Self) -> bool {
+        self.installation_target == other.installation_target
+            // The running worker already captured its refresh intent. Keep a
+            // queued force behind a worker that may return cached data.
+            && (self.force_refresh || !other.force_refresh)
+            && self.startup_preview.is_none()
+            && other.startup_preview.is_none()
+            && self.model_target == other.model_target
+            && self.runtime_kind == other.runtime_kind
+            && (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                == (other.trigger == RuntimeCheckTrigger::CatalogOpen)
+            && self.purpose == other.purpose
+            && self.search.generation() == other.search.generation()
+    }
+
     fn accepts(
         &self,
         request: &RuntimeCheckRequest,
@@ -2301,11 +2455,9 @@ impl RuntimeCheckAttempt {
             && self.startup_preview.is_none()
             && self.model_target == request.model_target
             && self.runtime_kind == request.runtime_kind
-            && (!matches!(
-                self.runtime_kind,
-                AdapterKind::Pi | AdapterKind::MinimaxCodeCli
-            ) || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
-                == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
+            && (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                == (request.trigger == RuntimeCheckTrigger::CatalogOpen)
+            && self.purpose == request.purpose
             && self.search.generation() == request.search.generation()
     }
 }
@@ -2464,7 +2616,7 @@ struct Core {
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, ProductRuntimeDiagnostic>>,
     runtime_check_activity:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
-    runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
+    runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckManagerMessage>,
     attachment_projection_requests: mpsc::UnboundedSender<String>,
     automation_scheduler_control: RwLock<Option<AutomationSchedulerControl>>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
@@ -2483,6 +2635,7 @@ struct Core {
     codex_cli: CodexCliRuntimeAdapter,
     pi: PiRpcRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
+    kilo_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
     kiro_cli: AcpCliRuntimeAdapter,
     qoder_cli: AcpCliRuntimeAdapter,
@@ -2841,6 +2994,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::CodexCli => "Codex CLI",
         AdapterKind::Pi => "Pi",
         AdapterKind::OpencodeCli => "OpenCode",
+        AdapterKind::KiloCli => "Kilo",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
         AdapterKind::KiroCli => "Kiro CLI",
@@ -2884,11 +3038,11 @@ impl AgentRunRuntime {
         }
     }
 
-    async fn cancel(&self) -> Result<()> {
+    async fn cancel_until(&self, deadline: tokio::time::Instant) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Pi(runtime) => runtime.cancel().await,
-            Self::Acp(runtime) => runtime.cancel().await,
+            Self::Acp(runtime) => runtime.cancel_until(deadline).await,
             Self::Claude {
                 adapter,
                 run_id,
@@ -2925,7 +3079,14 @@ impl Core {
         };
         let thread = params.camp_id.clone();
         let reference = params.raw_reference.clone().unwrap_or_default();
+        let expected = params.expected_path_at_send.clone();
         tokio::task::spawn_blocking(move || {
+            if let Some(expected) = expected {
+                let file = crate::project_file_reference::resolve(&binding, &reference).ok()?;
+                if file.path != expected {
+                    return None;
+                }
+            }
             crate::project_files::resolve_source(binding, thread, &reference).ok()
         })
         .await
@@ -3189,6 +3350,7 @@ impl Core {
                             &target.agent_run_id,
                             target.execution_epoch,
                             target.adapter_kind.as_str(),
+                            FleetReleaseDisposition::Stop,
                         )
                         .await;
                     (target, fence)
@@ -3484,15 +3646,36 @@ impl Core {
     }
 
     async fn discover_runtime_installations(&self, read_versions: bool) {
+        let search = self.runtime_search_environment.read().await.clone();
+        self.discover_runtime_installations_for(read_versions, None, search)
+            .await;
+    }
+
+    async fn discover_runtime_installations_for(
+        &self,
+        read_versions: bool,
+        selected_kind: Option<AdapterKind>,
+        search: Arc<RuntimeSearchEnvironment>,
+    ) -> Option<(RuntimeCheckOutcome, Option<RuntimeCheckInstallationTarget>)> {
         let started = Instant::now();
         let update = self.runtime_search_update.lock().await;
-        let search = self.runtime_search_environment.read().await.clone();
-        let kinds = current_platform_enabled_runtime_kinds();
+        if self.runtime_search_environment.read().await.generation() != search.generation() {
+            return None;
+        }
+        let kinds =
+            selected_kind.map_or_else(current_platform_enabled_runtime_kinds, |kind| vec![kind]);
         let managed = {
             let database = self.database.lock().await;
             let service = AgentProfileService::default();
             let mut managed = HashMap::new();
-            match service.list_installations(&database) {
+            let installations = if let Some(kind) = selected_kind {
+                service
+                    .managed_installation(&database, kind, "default")
+                    .map(|installation| installation.into_iter().collect())
+            } else {
+                service.list_installations(&database)
+            };
+            match installations {
                 Ok(installations) => {
                     for installation in installations.into_iter().filter(|installation| {
                         installation.installation_class == InstallationClass::ManagedDefault
@@ -3525,17 +3708,19 @@ impl Core {
                 }
                 Err(error) => {
                     eprintln!("failed to load Runtime discovery installations: {error:#}");
-                    return;
+                    return None;
                 }
             }
             managed
         };
         // Retain the last installation observations while their replacements are
         // prepared. Diagnostic activity already has its own per-Runtime flag.
-        self.runtime_discovery
-            .write()
-            .await
-            .retain(|kind, _| kinds.contains(kind));
+        if selected_kind.is_none() {
+            self.runtime_discovery
+                .write()
+                .await
+                .retain(|kind, _| kinds.contains(kind));
+        }
         drop(update);
         let mut tasks = tokio::task::JoinSet::new();
         let mut attempts = HashMap::new();
@@ -3556,26 +3741,30 @@ impl Core {
                                 .map(|identity| PathBuf::from(&identity.canonical_shim_path))
                                 .unwrap_or_else(|| PathBuf::from(&installation.executable_path))
                         });
+                        let reuse_selected = selected_kind.is_some()
+                            && search.startup_configuration(kind).program_path.is_none()
+                            && saved_path
+                                .as_ref()
+                                .is_some_and(|path| is_runtime_entrypoint_file(path));
                         let explicit = saved.as_ref().is_some_and(|(installation, _, _)| {
-                            !search.has_startup_configuration(kind)
-                                && matches!(
-                                    installation.source,
-                                    InstallationSource::Manual | InstallationSource::Custom
-                                )
+                            reuse_selected
+                                || (!search.has_startup_configuration(kind)
+                                    && matches!(
+                                        installation.source,
+                                        InstallationSource::Manual | InstallationSource::Custom
+                                    ))
                         });
                         let mut candidates = if explicit {
                             search
                                 .as_ref()
                                 .clone()
-                                .with_startup_configuration(
-                                    kind,
-                                    rovai_core::runtime_startup::RuntimeStartupConfiguration {
-                                        program_path: saved_path
-                                            .as_ref()
-                                            .map(|path| path.to_string_lossy().into_owned()),
-                                        ..Default::default()
-                                    },
-                                )
+                                .with_startup_configuration(kind, {
+                                    let mut configuration = search.startup_configuration(kind);
+                                    configuration.program_path = saved_path
+                                        .as_ref()
+                                        .map(|path| path.to_string_lossy().into_owned());
+                                    configuration
+                                })
                                 .candidates(kind, std::iter::empty())
                         } else {
                             search.candidates(kind, std::iter::empty())
@@ -3624,7 +3813,9 @@ impl Core {
                             kind, &search, candidates, previous,
                         );
                         }
-                        if let (Some((installation, _, _)), Some(entry)) = (&saved, &verified) {
+                        if !read_versions
+                            && let (Some((installation, _, _)), Some(entry)) = (&saved, &verified)
+                        {
                             observation.reported_version = installation
                                 .snapshot
                                 .as_ref()
@@ -3658,7 +3849,7 @@ impl Core {
                 if verified.is_some() {
                     // Version commands are part of this Runtime's worker, never the
                     // result collection loop. Bind the response to the same file.
-                    if read_versions && observation.reported_version.is_none() {
+                    if read_versions {
                         rovai_core::runtime_discovery::discover_runtime_version(
                             &mut observation,
                             &search,
@@ -3677,12 +3868,28 @@ impl Core {
             });
             attempts.insert(handle.id(), kind);
         }
+        let mut selected_result = None;
         while let Some(result) = tasks.join_next_with_id().await {
             match result {
                 Ok((id, Some((observation, verified, expected)))) => {
                     attempts.remove(&id);
-                    self.publish_runtime_discovery(observation, verified, expected)
-                        .await;
+                    let outcome = if observation.discovery_status == RuntimeDiscoveryStatus::Found
+                        && observation.version_probe_succeeded == Some(true)
+                    {
+                        RuntimeCheckOutcome::Ready
+                    } else {
+                        RuntimeCheckOutcome::StableFailure
+                    };
+                    match self
+                        .publish_runtime_discovery(observation, verified, expected)
+                        .await
+                    {
+                        Ok(target) if selected_kind.is_some() => {
+                            selected_result = Some((outcome, target))
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!("discarded Runtime discovery: {error:#}"),
+                    }
                 }
                 Ok((id, None)) => {
                     attempts.remove(&id);
@@ -3737,7 +3944,9 @@ impl Core {
                 }
             }
         }
-        if let Some(_update) = self.runtime_check_update_guard(&search).await {
+        if selected_kind.is_none()
+            && let Some(_update) = self.runtime_check_update_guard(&search).await
+        {
             emit(
                 &self.output,
                 "runtime.discovery.completed",
@@ -3748,6 +3957,7 @@ impl Core {
             "[runtime_discovery] duration_ms={}",
             started.elapsed().as_millis()
         );
+        selected_result
     }
 
     async fn publish_runtime_discovery(
@@ -3755,16 +3965,16 @@ impl Core {
         observation: RuntimeDiscoveryObservation,
         verified: Option<rovai_core::agent_profile::VerifiedDiscoveredRuntimeEntry>,
         expected: Option<(String, i64)>,
-    ) {
+    ) -> Result<Option<RuntimeCheckInstallationTarget>> {
         let _update = self.runtime_search_update.lock().await;
         if self.runtime_search_environment.read().await.generation()
             != observation.search_generation
         {
-            return;
+            anyhow::bail!("Runtime search environment changed during discovery");
         }
         let mut database = self.database.lock().await;
         let service = AgentProfileService::default();
-        let result = (|| -> Result<bool> {
+        let result = (|| -> Result<(bool, Option<RuntimeCheckInstallationTarget>)> {
             let current: Option<(String, i64, String)> = database.connection().query_row(
                 "SELECT id, version, executable_path FROM adapter_installation WHERE adapter_kind = ?1 AND auth_scope = 'default' AND installation_class = 'managed_default'",
                 [observation.runtime_kind.as_str()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -3820,24 +4030,21 @@ impl Core {
             } else {
                 anyhow::bail!("Runtime discovery is missing verified entry evidence");
             }
-            Ok(changed)
+            Ok((
+                changed,
+                runtime_check_target_in_database(&database, observation.runtime_kind)?,
+            ))
         })();
         drop(database);
-        match result {
-            Ok(true) => {
+        let (changed, target) = result?;
+        match changed {
+            true => {
                 self.runtime_product_diagnostics
                     .write()
                     .await
                     .remove(&observation.runtime_kind);
             }
-            Ok(false) => {}
-            Err(error) => {
-                eprintln!(
-                    "discarded Runtime discovery for {}: {error:#}",
-                    observation.runtime_kind.as_str()
-                );
-                return;
-            }
+            false => {}
         }
         self.runtime_discovery
             .write()
@@ -3849,6 +4056,7 @@ impl Core {
             serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
         );
         self.execution_wake.runs.notify_one();
+        Ok(target)
     }
 
     async fn publish_verified_runtime_discovery(&self, observation: RuntimeDiscoveryObservation) {
@@ -3902,6 +4110,7 @@ impl Core {
         candidate: &RuntimeExecutableCandidate,
         search_generation: u64,
         expected: &Option<(String, i64)>,
+        check_context: Option<&mut RuntimeCheckWorkerContext<'_>>,
     ) -> Result<Option<(String, i64)>> {
         if !verified.is_current() {
             return Ok(None);
@@ -3949,6 +4158,16 @@ impl Core {
             )?;
             (id, version)
         };
+        let target_ack = check_context
+            .map(|context| {
+                context.publish_target(
+                    self,
+                    kind,
+                    RuntimeCheckInstallationTarget::from_verified_commit(&target, verified),
+                )
+            })
+            .transpose()?
+            .flatten();
         self.runtime_product_diagnostics.write().await.remove(&kind);
         self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
             runtime_kind: kind,
@@ -3968,6 +4187,8 @@ impl Core {
             entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
         })
         .await;
+        drop(_update);
+        RuntimeCheckWorkerContext::await_target(target_ack).await?;
         Ok(Some(target))
     }
 
@@ -4010,6 +4231,7 @@ impl Core {
         &self,
         kind: AdapterKind,
         wait_for_refresh: bool,
+        force_refresh: bool,
     ) -> Result<Value> {
         let initial = {
             let database = self.database.lock().await;
@@ -4020,12 +4242,13 @@ impl Core {
             .map(|installation| installation.model_catalog.status)
             .unwrap_or(RuntimeModelCatalogCacheStatus::Unavailable);
         let refresh_status = match cache_status {
-            RuntimeModelCatalogCacheStatus::Fresh => "not_required",
+            RuntimeModelCatalogCacheStatus::Fresh if !force_refresh => "not_required",
             // Pi keeps cached entries visible in the picker while this request
             // awaits the shared observation. Its outcome needs no health event
             // or persisted health diagnostic to reach every waiting picker.
             _ if kind != AdapterKind::Pi
                 && !wait_for_refresh
+                && !force_refresh
                 && initial.as_ref().is_some_and(|installation| {
                     installation.model_catalog_can_display()
                         && installation
@@ -4047,15 +4270,18 @@ impl Core {
                     "joined"
                 }
             }
-            RuntimeModelCatalogCacheStatus::Stale
+            RuntimeModelCatalogCacheStatus::Fresh
+            | RuntimeModelCatalogCacheStatus::Stale
             | RuntimeModelCatalogCacheStatus::Expired
             | RuntimeModelCatalogCacheStatus::Unavailable
             | RuntimeModelCatalogCacheStatus::Invalidated => {
                 match self
-                    .await_runtime_check(
+                    .await_runtime_check_target(
                         kind,
                         RuntimeLaunchPurpose::AvailabilityCheck,
                         RuntimeCheckTrigger::CatalogOpen,
+                        None,
+                        force_refresh,
                     )
                     .await?
                 {
@@ -4078,12 +4304,6 @@ impl Core {
             let database = self.database.lock().await;
             AgentProfileService::default().managed_installation(&database, kind, "default")?
         };
-        let diagnostic = self
-            .runtime_product_diagnostics
-            .read()
-            .await
-            .get(&kind)
-            .cloned();
         let Some(installation) = installation else {
             return Ok(json!({
                 "runtimeKind": kind,
@@ -4095,9 +4315,7 @@ impl Core {
                 },
                 "models": [],
                 "refreshStatus": refresh_status,
-                "diagnosticCode": if kind == AdapterKind::Pi {
-                    (refresh_status == "failed").then(|| "runtime_model_catalog_refresh_failed".to_string())
-                } else { diagnostic.map(|value| value.diagnostic_code) },
+                "diagnosticCode": (refresh_status == "failed").then_some("runtime_model_catalog_refresh_failed"),
             }));
         };
         let models = if installation.model_catalog_can_display() {
@@ -4114,40 +4332,45 @@ impl Core {
             "cache": installation.model_catalog,
             "models": models,
             "refreshStatus": refresh_status,
-            "diagnosticCode": if kind == AdapterKind::Pi {
-                (refresh_status == "failed").then(|| "runtime_model_catalog_refresh_failed".to_string())
-            } else { installation
-                .last_probe_attempt
-                .as_ref()
-                .filter(|attempt| attempt.status == "failed")
-                .and_then(|attempt| attempt.diagnostic_code.clone())
-                .or_else(|| diagnostic.map(|value| value.diagnostic_code)) },
+            "diagnosticCode": (refresh_status == "failed").then_some("runtime_model_catalog_refresh_failed"),
         }))
     }
 
-    async fn dsh_model_options_payload(
+    async fn target_model_options_payload(
         &self,
+        kind: AdapterKind,
         model_id: &str,
         source: Option<crate::agent_profile::DshModelSource>,
     ) -> Result<(Value, String, bool)> {
-        let kind = AdapterKind::DeepseekHarness;
+        let keys = crate::runtime_model_options::metadata_keys(kind)
+            .context("Runtime does not support target options")?;
         let search = self.runtime_search_environment.read().await.clone();
         let path = {
             let database = self.database.lock().await;
             AgentProfileService::default()
                 .managed_installation(&database, kind, "default")?
-                .context("DSH installation is unavailable")?
-                .executable_path
+                .map(|installation| installation.executable_path)
+        };
+        let path = match path {
+            Some(path) => path,
+            None => {
+                self.discover_runtime_installations_for(false, Some(kind), search.clone())
+                    .await;
+                AgentProfileService::default()
+                    .managed_installation(&*self.database.lock().await, kind, "default")?
+                    .context("Runtime installation is unavailable")?
+                    .executable_path
+            }
         };
         // Configuration and executable identity are local observations, never a probe.
         let context = with_runtime_configuration(kind, &search, async {
-            crate::dsh::model_options_context(Path::new(&path))
+            crate::runtime_model_options::context(kind, Path::new(&path))
         })
         .await?;
         let _update = self
             .runtime_check_update_guard(&search)
             .await
-            .context("DSH configuration changed during cache validation")?;
+            .context("Runtime configuration changed during cache validation")?;
         let mut payload = self
             .runtime_model_catalog_payload(kind, "not_required")
             .await?;
@@ -4156,17 +4379,20 @@ impl Core {
         if let Some(models) = payload["models"].as_array_mut() {
             for model in models {
                 let identity_matches =
-                    catalog_valid && model["runtimeMetadata"]["dshOptionsContext"] == context;
+                    catalog_valid && model["runtimeMetadata"][keys.context] == context;
                 if !identity_matches {
                     // Retain history, but never describe a previous context as confirmed.
-                    model["runtimeMetadata"]["dshOptionsResolved"] = json!(false);
+                    model["runtimeMetadata"][keys.resolved] = json!(false);
                 }
                 if model["id"] == model_id
-                    && model["runtimeMetadata"]["dshSource"]
-                        == json!(source.unwrap_or(crate::agent_profile::DshModelSource::Native))
-                    && model["runtimeMetadata"]["dshOptionsResolved"] == true
+                    && (kind != AdapterKind::DeepseekHarness
+                        || model["runtimeMetadata"]["dshSource"]
+                            == json!(
+                                source.unwrap_or(crate::agent_profile::DshModelSource::Native)
+                            ))
+                    && model["runtimeMetadata"][keys.resolved] == true
                 {
-                    fresh = model["runtimeMetadata"]["dshOptionsObservedAt"]
+                    fresh = model["runtimeMetadata"][keys.observed_at]
                         .as_str()
                         .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
                         .is_some_and(|at| {
@@ -4181,22 +4407,25 @@ impl Core {
         Ok((payload, context, fresh))
     }
 
-    async fn open_dsh_model_options(
+    async fn open_target_model_options(
         &self,
+        kind: AdapterKind,
         model_id: &str,
         source: Option<crate::agent_profile::DshModelSource>,
         cache_only: bool,
+        force_refresh: bool,
     ) -> Result<Value> {
-        let kind = AdapterKind::DeepseekHarness;
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
         anyhow::ensure!(
             !model_id.trim().is_empty(),
-            "DSH target model must not be empty"
+            "Target model must not be empty"
         );
-        let (cached, context, fresh) = self.dsh_model_options_payload(model_id, source).await?;
-        if fresh || cache_only {
+        let (cached, context, fresh) = self
+            .target_model_options_payload(kind, model_id, source)
+            .await?;
+        if cache_only || (fresh && !force_refresh) {
             return Ok(cached);
         }
         let result = self
@@ -4204,60 +4433,45 @@ impl Core {
                 kind,
                 RuntimeLaunchPurpose::AvailabilityCheck,
                 RuntimeCheckTrigger::CatalogOpen,
-                Some(DshOptionsTarget {
+                Some(ModelOptionsTarget {
                     model_id: model_id.to_owned(),
                     source,
                     context,
                 }),
+                force_refresh,
             )
-            .await;
-        let (mut payload, _, _) = self.dsh_model_options_payload(model_id, source).await?;
+            .await?;
+        let (mut payload, _, _) = self
+            .target_model_options_payload(kind, model_id, source)
+            .await?;
         payload["refreshStatus"] = json!(match result {
-            Ok(RuntimeCheckOutcome::Ready) => "completed",
-            Ok(RuntimeCheckOutcome::Superseded) => "deferred",
+            RuntimeCheckOutcome::Ready => "completed",
+            RuntimeCheckOutcome::Superseded => "deferred",
             _ => "failed",
         });
         Ok(payload)
     }
 
-    async fn refresh_dsh_model_options(
+    async fn refresh_target_model_options(
         &self,
         search: Arc<RuntimeSearchEnvironment>,
-        target: DshOptionsTarget,
+        kind: AdapterKind,
+        target: ModelOptionsTarget,
+        force_refresh: bool,
     ) -> Result<RuntimeCheckOutcome> {
         let (_, context, fresh) = self
-            .dsh_model_options_payload(&target.model_id, target.source)
+            .target_model_options_payload(kind, &target.model_id, target.source)
             .await?;
         if context != target.context {
             return Ok(RuntimeCheckOutcome::Superseded);
         }
-        if fresh {
+        if fresh && !force_refresh {
             return Ok(RuntimeCheckOutcome::Ready);
         }
-        let kind = AdapterKind::DeepseekHarness;
         let selection = Some((target.model_id.as_str(), target.source));
-        if let Some(outcome) = self
-            .refresh_verified_runtime_catalog_for_selection(kind, search.clone(), selection)
-            .await?
-        {
-            return Ok(outcome);
-        }
-        // Reuse the existing readiness fallback only when no verified installation exists.
-        let outcome = self
-            .run_product_runtime_resolution_in_environment(
-                kind,
-                RuntimeLaunchPurpose::AvailabilityCheck,
-                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
-                search.clone(),
-                true,
-            )
-            .await?;
-        if outcome != RuntimeCheckOutcome::Ready {
-            return Ok(outcome);
-        }
-        self.refresh_verified_runtime_catalog_for_selection(kind, search, selection)
+        self.refresh_verified_runtime_catalog_for_selection(kind, search, selection, None)
             .await
-            .map(|outcome| outcome.unwrap_or(RuntimeCheckOutcome::Superseded))
+            .map(|outcome| outcome.unwrap_or(RuntimeCheckOutcome::StableFailure))
     }
 
     async fn runtime_check_installation_target(
@@ -4265,21 +4479,7 @@ impl Core {
         kind: AdapterKind,
     ) -> Result<Option<RuntimeCheckInstallationTarget>> {
         let database = self.database.lock().await;
-        let service = AgentProfileService::default();
-        let Some(installation) = service.managed_installation(&database, kind, "default")? else {
-            return Ok(None);
-        };
-        Ok(Some(RuntimeCheckInstallationTarget {
-            file_identity: service.recorded_executable_identity(
-                &database,
-                &installation.id,
-                &installation.executable_path,
-            )?,
-            locator: service.runtime_entrypoint_locator_identity(&database, &installation.id)?,
-            id: installation.id,
-            version: installation.version,
-            executable_path: installation.executable_path,
-        }))
+        runtime_check_target_in_database(&database, kind)
     }
 
     async fn record_runtime_check_manager_failure(
@@ -4403,16 +4603,20 @@ impl Core {
         }
         let (acknowledged, acknowledgement) = oneshot::channel();
         self.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: self.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: kind,
-                purpose,
-                trigger,
-                acknowledged,
-                completion: None,
-            })
+            .send(
+                RuntimeCheckRequest {
+                    force_refresh: false,
+                    search: self.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: kind,
+                    purpose,
+                    trigger,
+                    acknowledged,
+                    completion: None,
+                }
+                .into(),
+            )
             .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
         tokio::time::timeout(Duration::from_secs(2), acknowledgement)
             .await
@@ -4426,7 +4630,7 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
     ) -> Result<RuntimeCheckOutcome> {
-        self.await_runtime_check_target(kind, purpose, trigger, None)
+        self.await_runtime_check_target(kind, purpose, trigger, None, false)
             .await
     }
 
@@ -4435,7 +4639,8 @@ impl Core {
         kind: AdapterKind,
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
-        model_target: Option<DshOptionsTarget>,
+        model_target: Option<ModelOptionsTarget>,
+        force_refresh: bool,
     ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
@@ -4448,16 +4653,20 @@ impl Core {
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search,
-                startup_preview: None,
-                model_target,
-                runtime_kind: kind,
-                purpose,
-                trigger,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    force_refresh,
+                    search,
+                    startup_preview: None,
+                    model_target,
+                    runtime_kind: kind,
+                    purpose,
+                    trigger,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
         tokio::time::timeout(Duration::from_secs(2), acknowledgement)
             .await
@@ -4514,60 +4723,56 @@ impl Core {
             let database = self.database.lock().await;
             AgentProfileService::default().list_installations(&database)?
         };
-        let availability =
-            enabled_runtime_kinds
-                .into_iter()
-                .map(|kind| {
-                    let discovery = observations
-                        .get(&kind)
-                        .cloned()
-                        .unwrap_or_else(|| RuntimeDiscoveryObservation::detecting(kind, 0));
-                    let installation = installations.iter().find(|installation| {
-                        installation.adapter_kind == kind
-                            && installation.installation_class
-                                == rovai_core::agent_profile::InstallationClass::ManagedDefault
-                            && installation.auth_scope == "default"
-                    });
-                    let product_diagnostic = product_diagnostics.get(&kind);
-                    let relevant_probe_attempt = installation
-                        .and_then(relevant_failed_runtime_probe_attempt);
-                    let is_checking = checking.get(&kind).is_some_and(|activity| {
-                        activity.runtime_kind == kind && activity.deadline > chrono::Utc::now()
-                    });
-                    let status = product_runtime_availability_status(
-                        discovery.discovery_status,
-                        installation,
-                        product_diagnostic,
-                        is_checking,
-                    );
-                    let reported_version =
-                        product_runtime_reported_version(&discovery, installation);
-                    json!({
-                        "runtimeKind": kind,
-                        "status": status,
-                        "checking": is_checking,
-                        "discovery": discovery,
-                        "installationId": installation.map(|installation| &installation.id),
-                        "reportedVersion": reported_version,
-                        "diagnosticCode": relevant_probe_attempt
-                            .and_then(|attempt| attempt.diagnostic_code.as_deref())
-                            .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
-                            .or(discovery.diagnostic_code.as_deref()),
-                        "failure": relevant_probe_attempt
-                            .and_then(|attempt| attempt.failure.as_ref())
-                            .or_else(|| product_diagnostic.and_then(|diagnostic| diagnostic.failure.as_ref())),
-                        "lastAttemptedAt": installation
-                            .and_then(|installation| installation.snapshot.as_ref())
-                            .map(|snapshot| snapshot.last_attempted_at.as_str())
-                            .or_else(|| installation
-                                .and_then(|installation| installation.last_probe_attempt.as_ref())
-                                .map(|attempt| attempt.attempted_at.as_str())),
-                        "lastSuccessfulProbeAt": installation
-                            .and_then(|installation| installation.snapshot.as_ref())
-                            .and_then(|snapshot| snapshot.last_successful_probe_at.as_deref()),
-                    })
+        let availability = enabled_runtime_kinds
+            .into_iter()
+            .map(|kind| {
+                let discovery = observations
+                    .get(&kind)
+                    .cloned()
+                    .unwrap_or_else(|| RuntimeDiscoveryObservation::detecting(kind, 0));
+                let installation = installations.iter().find(|installation| {
+                    installation.adapter_kind == kind
+                        && installation.installation_class
+                            == rovai_core::agent_profile::InstallationClass::ManagedDefault
+                        && installation.auth_scope == "default"
+                });
+                let product_diagnostic = product_diagnostics.get(&kind).filter(|diagnostic| {
+                    discovery.diagnostic_code.as_deref()
+                        == Some(diagnostic.diagnostic_code.as_str())
+                });
+                let is_checking = checking.get(&kind).is_some_and(|activity| {
+                    activity.runtime_kind == kind && activity.deadline > chrono::Utc::now()
+                });
+                let status = product_runtime_availability_status(
+                    discovery.discovery_status,
+                    installation,
+                    product_diagnostic,
+                    is_checking,
+                );
+                let reported_version = product_runtime_reported_version(&discovery, installation);
+                let version_failure =
+                    rovai_core::runtime_discovery::version_probe_failure(&discovery);
+                json!({
+                    "runtimeKind": kind,
+                    "status": status,
+                    "checking": is_checking,
+                    "discovery": discovery,
+                    "installationId": installation.map(|installation| &installation.id),
+                    "reportedVersion": reported_version,
+                    "diagnosticCode": discovery.diagnostic_code,
+                    "failure": version_failure,
+                    "lastAttemptedAt": installation
+                        .and_then(|installation| installation.snapshot.as_ref())
+                        .map(|snapshot| snapshot.last_attempted_at.as_str())
+                        .or_else(|| installation
+                            .and_then(|installation| installation.last_probe_attempt.as_ref())
+                            .map(|attempt| attempt.attempted_at.as_str())),
+                    "lastSuccessfulProbeAt": installation
+                        .and_then(|installation| installation.snapshot.as_ref())
+                        .and_then(|snapshot| snapshot.last_successful_probe_at.as_deref()),
                 })
-                .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
         Ok(json!({
             "hostPlatform": host_platform,
             "runtimeCatalog": catalog_entries(),
@@ -4831,147 +5036,14 @@ impl Core {
         Ok(())
     }
 
+    #[cfg(all(test, feature = "slow-tests"))]
     async fn refresh_verified_runtime_catalog(
         &self,
         kind: AdapterKind,
         search: Arc<RuntimeSearchEnvironment>,
     ) -> Result<Option<RuntimeCheckOutcome>> {
-        if kind == AdapterKind::Pi {
-            return self.refresh_pi_model_catalog(search).await.map(Some);
-        }
-        self.refresh_verified_runtime_catalog_for_selection(kind, search, None)
+        self.refresh_verified_runtime_catalog_for_selection(kind, search, None, None)
             .await
-    }
-
-    async fn refresh_pi_model_catalog(
-        &self,
-        search: Arc<RuntimeSearchEnvironment>,
-    ) -> Result<RuntimeCheckOutcome> {
-        let kind = AdapterKind::Pi;
-        search
-            .startup_configuration(kind)
-            .ensure_environment_available()?;
-        let service = AgentProfileService::default();
-        let (initial, locator) = {
-            let database = self.database.lock().await;
-            let installation = service.managed_installation(&database, kind, "default")?;
-            let locator = installation
-                .as_ref()
-                .map(|installation| {
-                    service.runtime_entrypoint_locator_identity(&database, &installation.id)
-                })
-                .transpose()?
-                .flatten();
-            (installation, locator)
-        };
-        if initial
-            .as_ref()
-            .is_some_and(|installation| !installation.enabled)
-        {
-            return Ok(RuntimeCheckOutcome::StableFailure);
-        }
-        let mut entry_search = search.as_ref().clone();
-        if !search.has_startup_configuration(kind)
-            && let Some(installation) = initial.as_ref().filter(|installation| {
-                matches!(
-                    installation.source,
-                    InstallationSource::Manual | InstallationSource::Custom
-                )
-            })
-        {
-            let mut configuration = entry_search.startup_configuration(kind);
-            configuration.program_path = Some(
-                locator
-                    .as_ref()
-                    .map(|locator| locator.canonical_shim_path.clone())
-                    .unwrap_or_else(|| installation.executable_path.clone()),
-            );
-            entry_search = entry_search.with_startup_configuration(kind, configuration);
-        }
-        let saved_path = initial
-            .as_ref()
-            .map(|installation| PathBuf::from(&installation.executable_path));
-        let observation = tokio::task::spawn_blocking(move || {
-            rovai_core::runtime_discovery::discover_runtime_path_with_manual_candidates(
-                kind,
-                &entry_search,
-                saved_path,
-            )
-        })
-        .await
-        .context("Pi catalog entry resolution worker failed")?;
-        if observation.discovery_status != RuntimeDiscoveryStatus::Found {
-            return Ok(RuntimeCheckOutcome::StableFailure);
-        }
-        let verified = self.verify_runtime_entry(&observation, None).await?;
-        let path = PathBuf::from(
-            observation
-                .executable_path
-                .as_ref()
-                .context("missing Pi path")?,
-        );
-        let fingerprint = observation
-            .executable_fingerprint
-            .as_deref()
-            .context("missing Pi fingerprint")?;
-        let identity = verified.executable_file_identity().clone();
-        let installation = {
-            let Some(_update) = self.runtime_check_update_guard(&search).await else {
-                return Ok(RuntimeCheckOutcome::Superseded);
-            };
-            let mut database = self.database.lock().await;
-            let current = service.managed_installation(&database, kind, "default")?;
-            if current.as_ref().map(|value| (&value.id, value.generation))
-                != initial.as_ref().map(|value| (&value.id, value.generation))
-            {
-                return Ok(RuntimeCheckOutcome::Superseded);
-            }
-            service.commit_discovered_runtime_entry(
-                &mut database,
-                verified,
-                initial.as_ref().map(|value| value.id.as_str()),
-            )?;
-            service
-                .managed_installation(&database, kind, "default")?
-                .context("Pi installation disappeared")?
-        };
-        // This temporary Host observes the whole catalog and never creates a
-        // conversation or borrows the task Host. Failure is local to this read.
-        let catalog = with_runtime_configuration(kind, &search, async {
-            health::refresh_model_catalog(&path, kind).await
-        })
-        .await;
-        let identity_current = executable_identity_is_current(&path, &identity, fingerprint)
-            && rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
-                observation.entrypoint_locator_identity.as_ref(),
-            );
-        let Some(_update) = self.runtime_check_update_guard(&search).await else {
-            return Ok(RuntimeCheckOutcome::Superseded);
-        };
-        if !identity_current {
-            return Ok(RuntimeCheckOutcome::Superseded);
-        }
-        match catalog {
-            Ok(catalog) => {
-                let committed = service.commit_pi_model_catalog(
-                    &mut *self.database.lock().await,
-                    &installation,
-                    fingerprint,
-                    search.generation(),
-                    &catalog.models,
-                    &chrono::Utc::now().to_rfc3339(),
-                )?;
-                Ok(if committed {
-                    RuntimeCheckOutcome::Ready
-                } else {
-                    RuntimeCheckOutcome::Superseded
-                })
-            }
-            Err(error) => {
-                eprintln!("[model-catalog] Pi observation failed: {error:#}");
-                Ok(RuntimeCheckOutcome::StableFailure)
-            }
-        }
     }
 
     async fn refresh_verified_runtime_catalog_for_selection(
@@ -4979,200 +5051,264 @@ impl Core {
         kind: AdapterKind,
         search: Arc<RuntimeSearchEnvironment>,
         target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
+        mut check_context: Option<RuntimeCheckWorkerContext<'_>>,
     ) -> Result<Option<RuntimeCheckOutcome>> {
         search
             .startup_configuration(kind)
             .ensure_environment_available()?;
         let service = AgentProfileService::default();
-        let (installation, verified_identity) = {
-            let Some(_update) = self.runtime_check_update_guard(&search).await else {
-                return Ok(Some(RuntimeCheckOutcome::Superseded));
-            };
+        let (initial, locator, recorded) = {
             let database = self.database.lock().await;
-            let Some(installation) = service.managed_installation(&database, kind, "default")?
-            else {
-                return Ok(None);
-            };
-            let Some(snapshot) = installation.snapshot.as_ref().filter(|snapshot| {
-                installation.enabled
-                    && installation.path_state == "valid"
-                    && health::catalog_refresh_evidence_current(kind, snapshot)
-            }) else {
-                return Ok(None);
-            };
-            let Some(fingerprint) = snapshot.executable_fingerprint.as_deref() else {
-                return Ok(None);
-            };
-            let verified = service.verified_executable_identity(
-                &database,
-                &installation.id,
-                &installation.executable_path,
-                fingerprint,
-            )?;
-            (installation, verified)
+            let initial = service.managed_installation(&database, kind, "default")?;
+            let locator = initial
+                .as_ref()
+                .map(|installation| {
+                    service.runtime_entrypoint_locator_identity(&database, &installation.id)
+                })
+                .transpose()?
+                .flatten();
+            let recorded = initial
+                .as_ref()
+                .map(|installation| {
+                    service.recorded_executable_identity(
+                        &database,
+                        &installation.id,
+                        &installation.executable_path,
+                    )
+                })
+                .transpose()?
+                .flatten();
+            (initial, locator, recorded)
         };
-        let search_generation = search.generation();
-        let fingerprint = installation
-            .snapshot
+        if initial
             .as_ref()
-            .unwrap()
-            .executable_fingerprint
-            .as_ref()
-            .unwrap();
-        let path = Path::new(&installation.executable_path);
-        let check_path = path.to_path_buf();
-        let check_fingerprint = fingerprint.clone();
-        let identity = tokio::task::spawn_blocking(move || {
-            match verify_executable_integrity(
-                &check_path,
-                verified_identity.as_ref(),
-                &check_fingerprint,
-            )? {
-                ExecutableIntegrityStatus::Unchanged => Ok::<_, anyhow::Error>(verified_identity),
-                ExecutableIntegrityStatus::Reverified(identity) => Ok(Some(identity)),
-                ExecutableIntegrityStatus::Changed => Ok(None),
+            .is_some_and(|installation| !installation.enabled)
+        {
+            anyhow::bail!("Runtime installation is disabled");
+        }
+        // Resolve only this target. A missing installation needs static discovery,
+        // never a full health check or a scan of the other Runtime adapters.
+        let mut entry_search = search.as_ref().clone();
+        let saved_path = initial.as_ref().map(|installation| {
+            locator
+                .as_ref()
+                .map(|locator| PathBuf::from(&locator.canonical_shim_path))
+                .unwrap_or_else(|| PathBuf::from(&installation.executable_path))
+        });
+        let pinned = search.startup_configuration(kind).program_path.is_none()
+            && (saved_path
+                .as_ref()
+                .is_some_and(|path| is_runtime_entrypoint_file(path))
+                || initial.as_ref().is_some_and(|installation| {
+                    matches!(
+                        installation.source,
+                        InstallationSource::Manual | InstallationSource::Custom
+                    )
+                }));
+        if pinned {
+            let mut configuration = entry_search.startup_configuration(kind);
+            configuration.program_path = saved_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned());
+            entry_search = entry_search.with_startup_configuration(kind, configuration);
+        }
+        let saved = initial.clone();
+        let (observation, verified) = tokio::task::spawn_blocking(move || {
+            let mut candidates = entry_search.candidates(kind, std::iter::empty());
+            if pinned && let Some(installation) = &saved {
+                for candidate in &mut candidates {
+                    candidate.source = installation.source;
+                }
             }
+            let previous = saved.as_ref().zip(recorded.as_ref()).map(
+                |(installation, (fingerprint, identity))| {
+                    (
+                        installation.executable_path.as_str(),
+                        fingerprint.as_str(),
+                        identity,
+                    )
+                },
+            );
+            rovai_core::runtime_discovery::discover_runtime_entry_from_candidates(
+                kind,
+                &entry_search,
+                candidates,
+                previous,
+            )
         })
         .await
-        .context("Catalog identity worker failed")?;
-        let Ok(Some(identity)) = identity else {
+        .context("Catalog entry resolution worker failed")?;
+        let Some(verified) = verified else {
+            anyhow::bail!("Runtime executable is unavailable for the model catalog");
+        };
+        let path = PathBuf::from(&verified.entry().executable_path);
+        let fingerprint = verified.entry().executable_fingerprint.clone();
+        let identity = verified.executable_file_identity().clone();
+        let verified = tokio::task::spawn_blocking(move || {
+            anyhow::ensure!(
+                verified.is_current(),
+                "Runtime entry changed during catalog discovery"
+            );
+            Ok::<_, anyhow::Error>(verified)
+        })
+        .await
+        .context("Catalog identity worker failed")??;
+        let (installation, target_ack) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
                 return Ok(Some(RuntimeCheckOutcome::Superseded));
             };
             let mut database = self.database.lock().await;
-            service.mark_runtime_integrity_changed(
+            let current = service.managed_installation(&database, kind, "default")?;
+            if current.as_ref().map(|value| (&value.id, value.generation))
+                != initial.as_ref().map(|value| (&value.id, value.generation))
+            {
+                return Ok(Some(RuntimeCheckOutcome::Superseded));
+            }
+            service.commit_discovered_runtime_entry(
                 &mut database,
-                &installation.id,
-                &installation.executable_path,
-                fingerprint,
+                verified,
+                initial.as_ref().map(|value| value.id.as_str()),
             )?;
-            return Ok(None);
+            let committed = service
+                .managed_installation(&database, kind, "default")?
+                .context("Catalog installation disappeared")?;
+            let target_ack = if let Some(context) = check_context.as_mut() {
+                context.publish_target(
+                    self,
+                    kind,
+                    runtime_check_target_in_database(&database, kind)?
+                        .context("Catalog target disappeared")?,
+                )?
+            } else {
+                None
+            };
+            (committed, target_ack)
         };
+        RuntimeCheckWorkerContext::await_target(target_ack).await?;
+        if initial.as_ref().is_none_or(|previous| {
+            previous.generation != installation.generation
+                || previous.executable_path != installation.executable_path
+        }) {
+            self.publish_verified_runtime_discovery(observation.clone())
+                .await;
+        }
         if !self
-            .runtime_probe_identity_is_current(kind, search_generation, path, fingerprint)
+            .runtime_probe_identity_is_current(kind, search.generation(), &path, &fingerprint)
             .await
         {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
+        }
+        // A preceding full diagnostic may have completed this queued request's
+        // directory. Reuse it after resolving and verifying the current identity.
+        if check_context
+            .as_ref()
+            .is_some_and(|context| !context.force_refresh)
+            && target.is_none()
+            && installation.model_catalog.status == RuntimeModelCatalogCacheStatus::Fresh
+        {
+            return Ok(Some(RuntimeCheckOutcome::Ready));
         }
         eprintln!(
             "[model-catalog] probe runtime={} mode=catalog full_probe_count=0",
             kind.as_str()
         );
         let catalog = with_runtime_configuration(kind, &search, async {
-            if target.is_some() {
-                health::refresh_model_catalog_for_selection(path, kind, target).await
-            } else {
-                health::refresh_model_catalog(path, kind).await
-            }
+            health::refresh_model_catalog_for_selection(&path, kind, target)
+                .await
+                .map_err(|error| {
+                    let failure = health::model_catalog_failure(kind, &error, &path);
+                    anyhow::Error::new(RuntimeFailureError::new(failure.clone()))
+                        .context(failure.detail.unwrap_or_default())
+                        .context(failure.summary)
+                })
         })
         .await;
-        let dsh_context = if kind == AdapterKind::DeepseekHarness {
-            Some(
-                with_runtime_configuration(kind, &search, async {
-                    crate::dsh::model_options_context(path)
-                })
-                .await?,
-            )
-        } else {
-            None
-        };
         let Some(_update) = self.runtime_check_update_guard(&search).await else {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
-        if !executable_identity_is_current(path, &identity, fingerprint) {
-            let mut database = self.database.lock().await;
-            service.mark_runtime_integrity_changed(
-                &mut database,
-                &installation.id,
-                &installation.executable_path,
-                fingerprint,
-            )?;
+        if !executable_identity_is_current(&path, &identity, &fingerprint)
+            || !rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
+                observation.entrypoint_locator_identity.as_ref(),
+            )
+        {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         }
         if !self
-            .runtime_probe_identity_is_current(kind, search_generation, path, fingerprint)
+            .runtime_probe_identity_is_current(kind, search.generation(), &path, &fingerprint)
             .await
         {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
+        }
+        let catalog = match catalog {
+            Ok(catalog) => catalog,
+            Err(error) => return Err(error),
+        };
+        if catalog
+            .dsh_preparation
+            .as_ref()
+            .is_some_and(|prepared| !crate::dsh::model_inputs_unchanged(prepared))
+        {
+            return Ok(Some(RuntimeCheckOutcome::Superseded));
+        }
+        if let Some(keys) = crate::runtime_model_options::metadata_keys(kind) {
+            let context = with_runtime_configuration(kind, &search, async {
+                crate::runtime_model_options::context(kind, &path)
+            })
+            .await?;
+            if catalog.models.iter().any(|model| {
+                model
+                    .runtime_metadata
+                    .as_ref()
+                    .is_none_or(|meta| meta[keys.context] != context)
+            }) {
+                return Ok(Some(RuntimeCheckOutcome::Superseded));
+            }
         }
         let mut database = self.database.lock().await;
         let current = service.managed_installation(&database, kind, "default")?;
         if !current.as_ref().is_some_and(|current| {
             current.id == installation.id
                 && current.generation == installation.generation
-                && if kind == AdapterKind::DeepseekHarness {
-                    current
-                        .snapshot
-                        .as_ref()
-                        .zip(installation.snapshot.as_ref())
-                        .is_some_and(|(current, expected)| {
-                            // Another model's capability write is not an identity change.
-                            // The transaction merges against the latest persisted catalog.
-                            let mut current = current.clone();
-                            current.models.clone_from(&expected.models);
-                            current == *expected
-                        })
-                } else {
-                    current.snapshot == installation.snapshot
-                }
-        }) || self.runtime_search_environment.read().await.generation() != search_generation
-        {
+                && current.executable_path == installation.executable_path
+                && current.enabled
+                && current.path_state == "valid"
+        }) {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         }
-        match catalog {
-            Ok(catalog) => {
-                if let Some(context) = dsh_context
-                    && catalog.models.iter().any(|model| {
-                        model
-                            .runtime_metadata
-                            .as_ref()
-                            .is_none_or(|meta| meta["dshOptionsContext"] != context)
-                    })
-                {
-                    return Ok(Some(RuntimeCheckOutcome::Superseded));
-                }
-                if catalog
-                    .dsh_preparation
-                    .as_ref()
-                    .is_some_and(|prepared| !crate::dsh::model_inputs_unchanged(prepared))
-                {
-                    return Ok(Some(RuntimeCheckOutcome::Superseded));
-                }
-                let committed = service.commit_runtime_model_catalog(
-                    &mut database,
-                    &installation,
-                    &catalog.models,
-                    &chrono::Utc::now().to_rfc3339(),
-                )?;
-                Ok(Some(if committed {
-                    RuntimeCheckOutcome::Ready
-                } else {
-                    RuntimeCheckOutcome::Superseded
-                }))
+        let observed_at = chrono::Utc::now().to_rfc3339();
+        let committed = if kind == AdapterKind::Pi {
+            service.commit_pi_model_catalog(
+                &mut database,
+                &installation,
+                &fingerprint,
+                search.generation(),
+                &catalog.models,
+                &observed_at,
+            )?
+        } else {
+            service.commit_runtime_model_catalog(
+                &mut database,
+                &installation,
+                &fingerprint,
+                &catalog.models,
+                &observed_at,
+            )?
+        };
+        eprintln!(
+            "[model-catalog] write runtime={} models={} committed={committed} reason={}",
+            kind.as_str(),
+            catalog.models.len(),
+            if committed {
+                "accepted"
+            } else {
+                "installation_or_program_changed"
             }
-            Err(error) => {
-                // A failed optional model read is not a failed Runtime check.
-                // Keep the usable catalog and all saved member selections.
-                if target.is_some() {
-                    return Ok(Some(RuntimeCheckOutcome::StableFailure));
-                }
-                let failure = health::model_catalog_failure(kind, &error, path);
-                service.record_managed_probe_failure(
-                    &mut database,
-                    ManagedProbeFailure {
-                        adapter_kind: kind,
-                        auth_scope: "default",
-                        candidate_path: &installation.executable_path,
-                        fingerprint: Some(fingerprint),
-                        source: Some(installation.source),
-                        failure_class: "transient",
-                        diagnostic_code: "runtime_model_catalog_refresh_failed",
-                        failure: Some(&failure),
-                    },
-                )?;
-                Ok(Some(RuntimeCheckOutcome::StableFailure))
-            }
-        }
+        );
+        Ok(Some(if committed {
+            RuntimeCheckOutcome::Ready
+        } else {
+            RuntimeCheckOutcome::Superseded
+        }))
     }
 
     #[cfg(all(test, feature = "slow-tests"))]
@@ -5183,8 +5319,10 @@ impl Core {
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
         let search = self.runtime_search_environment.read().await.clone();
-        self.run_product_runtime_resolution_in_environment(kind, purpose, deadline, search, false)
-            .await
+        self.run_product_runtime_resolution_in_environment(
+            kind, purpose, deadline, search, false, None,
+        )
+        .await
     }
 
     async fn run_product_runtime_resolution_in_environment(
@@ -5194,6 +5332,7 @@ impl Core {
         deadline: tokio::time::Instant,
         search: Arc<RuntimeSearchEnvironment>,
         catalog_requested: bool,
+        mut check_context: Option<RuntimeCheckWorkerContext<'_>>,
     ) -> Result<RuntimeCheckOutcome> {
         let (existing, existing_entrypoint_locator, existing_identity) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
@@ -5259,6 +5398,8 @@ impl Core {
         let mut latest_observation =
             RuntimeDiscoveryObservation::detecting(kind, search.generation());
         latest_observation.discovery_status = RuntimeDiscoveryStatus::Missing;
+        let mut selected_entry_pending = true;
+        let mut selected_entry_published = false;
         let candidates = if let Some(installation) = existing.as_ref().filter(|installation| {
             matches!(
                 installation.source,
@@ -5435,6 +5576,10 @@ impl Core {
                         continue;
                     }
                 };
+            // Only the first usable discovery entry is this round's selection.
+            // Other installations remain candidates until the existing full
+            // probe admits them; reading their versions cannot select them.
+            let selected_candidate = std::mem::take(&mut selected_entry_pending);
             let mut candidate_fingerprint =
                 verified_candidate.entry().executable_fingerprint.clone();
             latest_observation = runtime_check_environment::candidate_observation(
@@ -5464,7 +5609,7 @@ impl Core {
                     .map(|identity| identity.compatibility_fingerprint.as_str());
             let mut identity_changed = targets_current_installation
                 && (executable_identity_changed || locator_identity_changed);
-            if identity_changed {
+            if identity_changed && selected_candidate {
                 let Some(target) = self
                     .commit_rebound_runtime_candidate(
                         kind,
@@ -5472,6 +5617,7 @@ impl Core {
                         &candidate,
                         search.generation(),
                         &commit_target,
+                        check_context.as_mut(),
                     )
                     .await?
                 else {
@@ -5486,28 +5632,116 @@ impl Core {
                 probe_execution_count += 1;
                 let checked = run_identity_checked_probe(
                     &canonical,
-                    with_runtime_configuration(
-                        kind,
-                        &search,
-                        self.deep_probe_candidate(
+                    with_runtime_configuration(kind, &search, async {
+                        rovai_core::runtime_discovery::ensure_runtime_environment_available(kind)?;
+                        if let Some(blocker) = current_runtime_platform_blocker(kind) {
+                            anyhow::bail!("{}: {}", blocker.code, blocker.payload);
+                        }
+                        anyhow::ensure!(
+                            runtime_launch_allowed(kind, purpose),
+                            "runtime_launch_disallowed_for_{purpose:?}"
+                        );
+                        let version_read =
+                            health::read_runtime_version_for_probe(&canonical, kind).await;
+                        let mut observation = runtime_check_environment::candidate_observation(
                             kind,
+                            &search,
+                            &candidate,
                             &canonical,
-                            purpose,
-                            Some(&candidate_fingerprint),
-                            existing
-                                .as_ref()
-                                .filter(|installation| {
-                                    Path::new(&installation.executable_path) == canonical
-                                })
-                                .and_then(|installation| installation.snapshot.as_ref())
-                                .filter(|snapshot| {
-                                    snapshot.executable_fingerprint.as_deref()
-                                        == Some(&candidate_fingerprint)
-                                })
-                                .filter(|_| !locator_identity_changed),
-                            catalog_requested,
-                        ),
-                    ),
+                            &candidate_fingerprint,
+                        );
+                        observation.reported_version = version_read.as_ref().ok().cloned();
+                        observation.version_probe_succeeded = Some(version_read.is_ok());
+                        observation.diagnostic_code = version_read
+                            .as_ref()
+                            .err()
+                            .map(|failure| failure.code.clone());
+                        let entry = self
+                            .verify_runtime_entry(
+                                &observation,
+                                Some(verified_candidate.executable_file_identity()),
+                            )
+                            .await?;
+                        anyhow::ensure!(
+                            candidate.entrypoint_locator_identity_is_current(),
+                            "runtime_entry_changed_during_version_read"
+                        );
+                        let mut target_ack = None;
+                        {
+                            let _update = self
+                                .runtime_check_update_guard(&search)
+                                .await
+                                .context("runtime_configuration_changed_during_version_read")?;
+                            let mut database = self.database.lock().await;
+                            anyhow::ensure!(
+                                runtime_installation_revision_matches(
+                                    &database,
+                                    kind,
+                                    &commit_target
+                                )?,
+                                "runtime_installation_changed_during_version_read"
+                            );
+                            if selected_candidate && let Ok(version) = &version_read {
+                                let service = AgentProfileService::default();
+                                let id = service.commit_discovered_runtime_entry(
+                                    &mut database,
+                                    entry,
+                                    commit_target.as_ref().map(|(id, _)| id.as_str()),
+                                )?;
+                                commit_target = runtime_installation_revision(&database, kind)?;
+                                if let Some(context) = check_context.as_mut() {
+                                    target_ack = context.publish_target(
+                                        self,
+                                        kind,
+                                        RuntimeCheckInstallationTarget::from_verified_commit(
+                                            commit_target.as_ref().unwrap(),
+                                            &verified_candidate,
+                                        ),
+                                    )?;
+                                }
+                                anyhow::ensure!(
+                                    service.record_runtime_version(
+                                        &mut database,
+                                        &id,
+                                        &canonical.to_string_lossy(),
+                                        &candidate_fingerprint,
+                                        version,
+                                    )?,
+                                    "runtime_version_target_changed"
+                                );
+                            }
+                            drop(database);
+                            if selected_candidate {
+                                self.publish_verified_runtime_discovery(observation.clone())
+                                    .await;
+                                selected_entry_published = true;
+                            }
+                        }
+                        latest_observation = observation;
+                        RuntimeCheckWorkerContext::await_target(target_ack).await?;
+                        Box::pin(
+                            self.deep_probe_candidate(
+                                kind,
+                                &canonical,
+                                purpose,
+                                Some(&candidate_fingerprint),
+                                existing
+                                    .as_ref()
+                                    .filter(|installation| {
+                                        Path::new(&installation.executable_path) == canonical
+                                    })
+                                    .and_then(|installation| installation.snapshot.as_ref())
+                                    .filter(|snapshot| {
+                                        snapshot.executable_fingerprint.as_deref()
+                                            == Some(&candidate_fingerprint)
+                                    })
+                                    .filter(|_| !locator_identity_changed),
+                                catalog_requested,
+                                Some(version_read),
+                            ),
+                        )
+                        .await
+                    }),
                 )
                 .await;
                 let checked = match checked {
@@ -5530,18 +5764,6 @@ impl Core {
                             kind.as_str(),
                             canonical.display()
                         );
-                        let failure_class = if identity_changed {
-                            "identity_changed"
-                        } else {
-                            "transient"
-                        };
-                        let diagnostic_code = if !targets_current_installation {
-                            "runtime_alternate_candidate_probe_failed"
-                        } else if identity_changed {
-                            "runtime_identity_changed"
-                        } else {
-                            "runtime_probe_transient_failure"
-                        };
                         if !candidate.entrypoint_locator_identity_is_current()
                             || fingerprint_executable(&canonical).ok().as_deref()
                                 != Some(candidate_fingerprint.as_str())
@@ -5556,6 +5778,23 @@ impl Core {
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
+                        let targets_current_installation = runtime_probe_targets_current_entry(
+                            &database,
+                            &commit_target,
+                            &canonical,
+                        )?;
+                        let failure_class = if targets_current_installation && identity_changed {
+                            "identity_changed"
+                        } else {
+                            "transient"
+                        };
+                        let diagnostic_code = if !targets_current_installation {
+                            "runtime_alternate_candidate_probe_failed"
+                        } else if identity_changed {
+                            "runtime_identity_changed"
+                        } else {
+                            "runtime_probe_transient_failure"
+                        };
                         AgentProfileService::default().record_managed_probe_failure(
                             &mut database,
                             ManagedProbeFailure {
@@ -5705,7 +5944,7 @@ impl Core {
                                 .and_then(|installation| installation.snapshot.as_ref())
                                 .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
                                 != Some(candidate_fingerprint.as_str());
-                        if targets_current_installation {
+                        if targets_current_installation && selected_candidate {
                             let Some(target) = self
                                 .commit_rebound_runtime_candidate(
                                     kind,
@@ -5713,6 +5952,7 @@ impl Core {
                                     &candidate,
                                     search.generation(),
                                     &commit_target,
+                                    check_context.as_mut(),
                                 )
                                 .await?
                             else {
@@ -5727,6 +5967,7 @@ impl Core {
             let RuntimeDeepProbeResult {
                 mut snapshot,
                 failure,
+                version_probe_succeeded,
             } = deep_probe;
             let probe_ms = probe_started.elapsed().as_secs_f64() * 1000.0;
             let verification_started = std::time::Instant::now();
@@ -5766,11 +6007,15 @@ impl Core {
                 &candidate_fingerprint,
             );
             latest_observation.reported_version = snapshot.reported_version.clone();
-            latest_observation.version_probe_succeeded = Some(snapshot.reported_version.is_some());
+            latest_observation.version_probe_succeeded = Some(version_probe_succeeded);
+            if !version_probe_succeeded {
+                latest_observation.diagnostic_code =
+                    failure.as_ref().map(|failure| failure.code.clone());
+            }
             if snapshot.probe_status == "ready" {
                 if kind == AdapterKind::DeepseekHarness {
                     let context = with_runtime_configuration(kind, &search, async {
-                        crate::dsh::model_options_context(&canonical)
+                        crate::runtime_model_options::context(kind, &canonical)
                     })
                     .await?;
                     if snapshot.models.iter().any(|model| {
@@ -5787,6 +6032,16 @@ impl Core {
                 if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
                     return Ok(RuntimeCheckOutcome::Superseded);
                 }
+                if selected_candidate {
+                    // This entry saved its version before connecting. A
+                    // concurrent rescan may now own a newer observation.
+                    snapshot.reported_version = saved_runtime_probe_version(
+                        &database,
+                        &commit_target,
+                        &executable_path,
+                        &candidate_fingerprint,
+                    )?;
+                }
                 let catalog_unverified = catalog_requested
                     && !rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
                         &snapshot.models,
@@ -5794,7 +6049,8 @@ impl Core {
                 AgentProfileService::default().commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
-                        model_catalog_complete: catalog_requested,
+                        model_catalog_complete: kind.acp_selected_model_effort_key().is_none()
+                            || catalog_requested,
                         executable_file_identity: Some(
                             final_entry.executable_file_identity().clone(),
                         ),
@@ -5807,6 +6063,22 @@ impl Core {
                         entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                     },
                 )?;
+                if !selected_candidate {
+                    commit_target = runtime_installation_revision(&database, kind)?;
+                    if let Some(context) = check_context.as_mut() {
+                        // The alternate becomes bound only after admission.
+                        // Carry that committed proof into completion/timeout;
+                        // there is no further probe work requiring an ack.
+                        drop(context.publish_target(
+                            self,
+                            kind,
+                            RuntimeCheckInstallationTarget::from_verified_commit(
+                                commit_target.as_ref().unwrap(),
+                                &final_entry,
+                            ),
+                        )?);
+                    }
+                }
                 if catalog_unverified {
                     AgentProfileService::default().record_managed_probe_failure(
                         &mut database,
@@ -5823,25 +6095,22 @@ impl Core {
                     )?;
                 }
                 drop(database);
-                self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
-                    runtime_kind: kind,
-                    discovery_status: RuntimeDiscoveryStatus::Found,
-                    executable_path: Some(executable_path),
-                    source: Some(source),
-                    reported_version: snapshot.reported_version,
-                    executable_fingerprint: snapshot.executable_fingerprint,
-                    search_path_source: candidate.search_path_source,
-                    entrypoint_kind: Some(candidate.entrypoint_kind),
-                    candidate_extension: Some(candidate.candidate_extension),
-                    resolved_native_target: candidate.resolved_native_target,
-                    version_probe_succeeded: Some(true),
-                    search_generation: search.generation(),
-                    observed_at: chrono::Utc::now().to_rfc3339(),
-                    diagnostic_code: None,
-                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
-                })
-                .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
+                if selected_candidate {
+                    // Preserve this entry's early observation or a later rescan.
+                    emit(
+                        &self.output,
+                        "runtime.availability.updated",
+                        json!({
+                            "runtimeKind": kind, "status": self.current_runtime_availability_status(kind).await,
+                        }),
+                    );
+                } else {
+                    // A successful alternate is admitted only now. Its own
+                    // version was reused within the probe, never pre-published.
+                    self.publish_verified_runtime_discovery(latest_observation)
+                        .await;
+                }
                 eprintln!(
                     "[runtime-check-timing] runtime={} commit_publish_ms={:.3}",
                     kind.as_str(),
@@ -5853,6 +6122,12 @@ impl Core {
                     RuntimeCheckOutcome::Ready
                 });
             }
+            let mut database = self.database.lock().await;
+            if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            let targets_current_installation =
+                runtime_probe_targets_current_entry(&database, &commit_target, &canonical)?;
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
                 _ if !targets_current_installation => {
                     ("transient", "runtime_alternate_candidate_probe_failed")
@@ -5865,21 +6140,14 @@ impl Core {
                 _ if identity_changed => ("identity_changed", "runtime_identity_changed"),
                 _ => ("transient", "runtime_probe_transient_failure"),
             };
-            let mut database = self.database.lock().await;
-            if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
-                return Ok(RuntimeCheckOutcome::Superseded);
-            }
-            if let (Some(installation), Some(version)) =
-                (existing.as_ref(), snapshot.reported_version.as_deref())
-            {
-                AgentProfileService::default().record_runtime_version(
-                    &mut database,
-                    &installation.id,
-                    &canonical.to_string_lossy(),
-                    &candidate_fingerprint,
-                    version,
-                )?;
-            }
+            let diagnostic_code = if !version_probe_succeeded && targets_current_installation {
+                failure
+                    .as_ref()
+                    .map_or("runtime_version_failed", |failure| failure.code.as_str())
+                    .to_string()
+            } else {
+                diagnostic_code.to_string()
+            };
             AgentProfileService::default().record_managed_probe_failure(
                 &mut database,
                 ManagedProbeFailure {
@@ -5892,15 +6160,35 @@ impl Core {
                         .or(Some(candidate_fingerprint.as_str())),
                     source: Some(source),
                     failure_class,
-                    diagnostic_code,
+                    diagnostic_code: &diagnostic_code,
                     failure: failure.as_ref(),
                 },
             )?;
+            // A native directory obtained before a later diagnostic failure is
+            // still current evidence. Partial model-specific ACP observations are excluded.
+            if targets_current_installation
+                && kind != AdapterKind::Pi
+                && (kind.acp_selected_model_effort_key().is_none() || catalog_requested)
+                && rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
+                    &snapshot.models,
+                )
+            {
+                let service = AgentProfileService::default();
+                if let Some(current) = service.managed_installation(&database, kind, "default")? {
+                    service.commit_runtime_model_catalog(
+                        &mut database,
+                        &current,
+                        &candidate_fingerprint,
+                        &snapshot.models,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )?;
+                }
+            }
             commit_target = runtime_installation_revision(&database, kind)?;
             note_product_runtime_diagnostic(
                 &mut unresolved_diagnostic,
                 failure_class,
-                diagnostic_code,
+                &diagnostic_code,
                 failure,
             );
         }
@@ -5915,14 +6203,26 @@ impl Core {
             return Ok(RuntimeCheckOutcome::Superseded);
         }
         if let Some(diagnostic) = unresolved_diagnostic {
-            latest_observation.diagnostic_code = Some(diagnostic.diagnostic_code.clone());
+            if latest_observation.version_probe_succeeded != Some(false) {
+                latest_observation.diagnostic_code = Some(diagnostic.diagnostic_code.clone());
+            }
             self.runtime_product_diagnostics
                 .write()
                 .await
                 .insert(kind, diagnostic);
         }
-        self.publish_verified_runtime_discovery(latest_observation)
-            .await;
+        if !selected_entry_published {
+            self.publish_verified_runtime_discovery(latest_observation)
+                .await;
+        } else {
+            emit(
+                &self.output,
+                "runtime.availability.updated",
+                json!({
+                    "runtimeKind": kind, "status": self.current_runtime_availability_status(kind).await,
+                }),
+            );
+        }
         Ok(RuntimeCheckOutcome::StableFailure)
     }
 
@@ -6024,6 +6324,13 @@ impl Core {
         }
         if let Some(runtime) = self.pi.get_agent_run(agent_run_id, execution_epoch).await {
             return Some(AgentRunRuntime::Pi(runtime));
+        }
+        if let Some(runtime) = self
+            .kilo_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
         }
         if let Some(runtime) = self
             .opencode_cli
@@ -6177,18 +6484,14 @@ impl Core {
                 {
                     return false;
                 }
-                match run_with_cancellation_deadline(
-                    RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-                    runtime.cancel(),
-                )
-                .await
-                {
-                    Some(Ok(())) => {}
-                    Some(Err(error)) => eprintln!(
+                let deadline = tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT;
+                match tokio::time::timeout_at(deadline, runtime.cancel_until(deadline)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => eprintln!(
                         "planned stop failed for AgentRun {}: {error:#}",
                         execution.key.agent_run_id
                     ),
-                    None => eprintln!(
+                    Err(_) => eprintln!(
                         "planned stop timed out for AgentRun {}",
                         execution.key.agent_run_id
                     ),
@@ -6238,6 +6541,7 @@ impl Core {
             self.pi.shutdown_all(),
             self.cline_cli.shutdown_all(),
             self.opencode_cli.shutdown_all(),
+            self.kilo_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
             self.qoder_cli.shutdown_all(),
@@ -6265,6 +6569,7 @@ impl Core {
                 self.pi.shutdown_all(),
                 self.cline_cli.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
+                self.kilo_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
                 self.qoder_cli.shutdown_all(),
@@ -6295,6 +6600,7 @@ impl Core {
     ) -> Option<&AcpCliRuntimeAdapter> {
         match kind {
             rovai_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
+            AdapterKind::KiloCli => Some(&self.kilo_cli),
             rovai_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
             rovai_core::agent_profile::AdapterKind::KiroCli => Some(&self.kiro_cli),
             rovai_core::agent_profile::AdapterKind::QoderCli => Some(&self.qoder_cli),
@@ -7993,7 +8299,15 @@ impl Core {
         let Some(outcome) = outcome else {
             return Ok(None);
         };
-        let projection = outcome.projection;
+        let mut projection = outcome.projection;
+        projection.native_interactions = self.pi.pending_interactions(&projection.camp.id).await;
+        projection.native_interactions.retain(|request| {
+            projection.agent_runs.iter().any(|run| {
+                run.id == request.agent_run_id
+                    && matches!(run.status.as_str(), "running" | "waiting")
+                    && run.cancel_requested_at.is_none()
+            })
+        });
         let projection_ms = outcome.projection_duration.as_millis();
         let serialization_started_at = Instant::now();
         let value = serde_json::to_value(&projection)?;
@@ -8043,6 +8357,32 @@ impl Core {
                 Ok(json!({ "released": true }))
             }
             "commands.reconcile" => {
+                if request.params.get("operation").and_then(Value::as_str)
+                    == Some("nativeInteractions.respond")
+                {
+                    let params: crate::native_interaction::RespondNativeInteraction =
+                        serde_json::from_value(request.params["params"].clone())?;
+                    let status = if let Some(runtime) = self
+                        .pi
+                        .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                        .await
+                    {
+                        anyhow::ensure!(
+                            runtime.camp_id() == params.thread_id,
+                            "Native interaction belongs to another Thread"
+                        );
+                        runtime.interaction_status(&params.interaction_id).await
+                    } else {
+                        crate::native_interaction::NativeInteractionStatus::Unavailable
+                    };
+                    return Ok(
+                        if status == crate::native_interaction::NativeInteractionStatus::Pending {
+                            json!({"state":"unknown"})
+                        } else {
+                            json!({"state":"recorded", "result":{"status":status}})
+                        },
+                    );
+                }
                 let database = self.database.lock().await;
                 web_commands::reconcile(
                     &database,
@@ -9120,6 +9460,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.host.tick" => {
+                self.sync_channel_native_interactions("dingtalk").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9265,6 +9606,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.host.tick" => {
+                self.sync_channel_native_interactions("feishu").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9279,6 +9621,7 @@ impl Core {
                 Ok(serde_json::to_value(tick)?)
             }
             "channels.lark.host.tick" => {
+                self.sync_channel_native_interactions("lark").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9291,6 +9634,44 @@ impl Core {
                 )?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(tick)?)
+            }
+            "channels.nativeInteractions.source"
+            | "channels.lark.nativeInteractions.source"
+            | "channels.dingtalk.nativeInteractions.source" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::SourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.channel_native_interaction_source(provider, &params)
+                    .await
+            }
+            "channels.nativeInteractions.respond"
+            | "channels.lark.nativeInteractions.respond"
+            | "channels.dingtalk.nativeInteractions.respond" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::AnswerParams =
+                    serde_json::from_value(request.params.clone())?;
+                let (command, known_status) = {
+                    let mut database = self.database.lock().await;
+                    rovai_core::channel::native_interactions::authorize_answer(
+                        &mut database,
+                        &ActorRef::System {
+                            component_id: channel_request_host_component(&request.method)?
+                                .to_string(),
+                        },
+                        provider,
+                        &params,
+                    )?
+                };
+                use crate::native_interaction::{
+                    NativeInteractionResult, NativeInteractionStatus as Status,
+                };
+                if known_status != Status::Pending {
+                    return Ok(serde_json::to_value(NativeInteractionResult {
+                        status: known_status,
+                        already_handled: matches!(known_status, Status::Sent | Status::Skipped),
+                    })?);
+                }
+                self.answer_native_interaction(&command).await
             }
             "channels.executionConsole.source" => {
                 let params: ChannelExecutionConsoleSourceParams =
@@ -9621,6 +10002,7 @@ impl Core {
                 "name": "Rovai-ai",
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
+                "composerProjectFileReferenceVersion": 2,
             })),
             "memberAvatars.read" => {
                 #[derive(Deserialize)]
@@ -11048,10 +11430,24 @@ impl Core {
                 let params: SingleChatSnapshotParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    SingleChatService::for_client(request.client.clone())
-                        .snapshot(&database, &params.conversation_id)?,
-                )?)
+                let mut snapshot = SingleChatService::for_client(request.client.clone())
+                    .snapshot(&database, &params.conversation_id)?;
+                drop(database);
+                if let Some(snapshot) = snapshot.as_mut() {
+                    let mut interactions = self
+                        .pi
+                        .pending_interactions(&snapshot.conversation.camp_id)
+                        .await;
+                    interactions.retain(|request| {
+                        snapshot.agent_runs.iter().any(|run| {
+                            run.id == request.agent_run_id
+                                && matches!(run.status.as_str(), "running" | "waiting")
+                                && run.cancel_requested_at.is_none()
+                        })
+                    });
+                    snapshot.native_interactions = Some(interactions);
+                }
+                Ok(serde_json::to_value(snapshot)?)
             }
             "singleChat.sourceAttachments.addFromPath" => {
                 let params: AddSingleChatSourceAttachmentFromPathParams =
@@ -11203,7 +11599,7 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
-                let projection = outcome.projection;
+                let mut projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
                 if outcome.navigation_changed {
@@ -11217,6 +11613,15 @@ impl Core {
                     .reconcile_duration
                     .map(|duration| duration.as_millis())
                     .unwrap_or(0);
+                projection.native_interactions =
+                    self.pi.pending_interactions(&projection.camp.id).await;
+                projection.native_interactions.retain(|request| {
+                    projection.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
                 let value = serde_json::to_value(&projection)?;
@@ -11245,9 +11650,18 @@ impl Core {
                 let db_lock_ms = lock_started_at.elapsed().as_millis();
                 let database_started_at = std::time::Instant::now();
                 let outcome = ThreadOpenService.open(&mut database, params.camp_id.as_str())?;
-                let projection = outcome.projection;
+                let mut projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
+                projection.native_interactions =
+                    self.pi.pending_interactions(&projection.camp.id).await;
+                projection.native_interactions.retain(|request| {
+                    projection.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
                 let value = serde_json::to_value(&projection)?;
@@ -11488,9 +11902,19 @@ impl Core {
             "camps.snapshot" => {
                 let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
-                )?)
+                let mut snapshot =
+                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?;
+                drop(database);
+                snapshot.native_interactions =
+                    self.pi.pending_interactions(params.camp_id.as_str()).await;
+                snapshot.native_interactions.retain(|request| {
+                    snapshot.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
+                Ok(serde_json::to_value(snapshot)?)
             }
             "agentRunImages.read" => {
                 let params: AgentRunImageParams = serde_json::from_value(request.params.clone())?;
@@ -12087,6 +12511,21 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "projectFileReferences.resolve" => {
+                let params: crate::project_file_reference::ResolveRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let bindings = {
+                    let database = self.database.lock().await;
+                    crate::project_file_reference::bindings(database.connection(), &params)
+                };
+                match bindings {
+                    Ok(bindings) => Ok(tokio::task::spawn_blocking(move || {
+                        crate::project_file_reference::resolve_references(params, bindings)
+                    })
+                    .await?),
+                    Err(_) => Ok(json!({"ok":false,"error":{"code":"root_unavailable"}})),
+                }
+            }
             "projectFiles.request" => {
                 let params: crate::project_files::Request =
                     serde_json::from_value(request.params.clone())?;
@@ -12228,6 +12667,32 @@ impl Core {
                     );
                 }
                 Ok(serde_json::to_value(view)?)
+            }
+            "nativeInteractions.notifications" => {
+                let questions = self.pi.channel_interactions().await;
+                let database = self.database.lock().await;
+                let mut sources = Vec::new();
+                for (thread_id, question) in questions {
+                    if let Some(source) = crate::native_interaction::notification_source(
+                        database.connection(),
+                        &thread_id,
+                        &question,
+                    )? {
+                        sources.push(source);
+                    }
+                }
+                sources.sort_by_key(|source| {
+                    (
+                        source["createdAt"].as_i64().unwrap_or(0),
+                        source["id"].as_str().unwrap_or_default().to_owned(),
+                    )
+                });
+                Ok(json!(sources))
+            }
+            "nativeInteractions.respond" => {
+                let params: crate::native_interaction::RespondNativeInteraction =
+                    serde_json::from_value(request.params.clone())?;
+                self.answer_native_interaction(&params).await
             }
             "action.approvals.resolve" => {
                 let params: ResolveActionApprovalParams =
@@ -12521,7 +12986,7 @@ impl Core {
                 let outcome = self
                     .await_runtime_check(
                         params.runtime_kind,
-                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        RuntimeLaunchPurpose::DiscoveryVersion,
                         RuntimeCheckTrigger::UserCheck,
                     )
                     .await?;
@@ -12539,14 +13004,32 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 if let Some(model_id) = params.model_id {
                     anyhow::ensure!(
-                        params.runtime_kind == AdapterKind::DeepseekHarness,
-                        "Target-model option discovery is only supported for DSH"
+                        matches!(
+                            params.runtime_kind,
+                            AdapterKind::DeepseekHarness | AdapterKind::MinimaxCodeCli
+                        ),
+                        "Runtime does not support target-model option discovery"
                     );
-                    self.open_dsh_model_options(&model_id, params.dsh_source, params.cache_only)
-                        .await
+                    anyhow::ensure!(
+                        params.runtime_kind == AdapterKind::DeepseekHarness
+                            || params.dsh_source.is_none(),
+                        "MiniMax does not have a DSH source"
+                    );
+                    self.open_target_model_options(
+                        params.runtime_kind,
+                        &model_id,
+                        params.dsh_source,
+                        params.cache_only,
+                        params.force_refresh,
+                    )
+                    .await
                 } else {
-                    self.open_runtime_model_catalog(params.runtime_kind, params.wait_for_refresh)
-                        .await
+                    self.open_runtime_model_catalog(
+                        params.runtime_kind,
+                        params.wait_for_refresh,
+                        params.force_refresh,
+                    )
+                    .await
                 }
             }
             "health.check" => {
@@ -12607,6 +13090,16 @@ impl Core {
                 "pendingExecution": null,
             }));
         }
+        let binding = {
+            let database = self.database.lock().await;
+            crate::project_files::binding(&database, &envelope.payload.camp_id).ok()
+        };
+        let thread = envelope.payload.camp_id.clone();
+        let document = envelope.payload.content.clone();
+        let files = tokio::task::spawn_blocking(move || {
+            crate::project_file_reference::Preflight::prepare(thread, &document, binding)
+        })
+        .await?;
         let execution = {
             let _attachments = if envelope.payload.source_attachments.is_empty() {
                 None
@@ -12614,7 +13107,11 @@ impl Core {
                 Some(self.pasted_text_operations.lock().await)
             };
             let mut database = self.database.lock().await;
-            CollaborationService::default().send_user_camp_message(&mut database, &envelope)?
+            CollaborationService::default().send_user_camp_message_with_files(
+                &mut database,
+                &envelope,
+                Some(&files),
+            )?
         };
         if execution.result.status != CommandResultStatus::Rejected {
             emit_navigation_invalidated(
@@ -12651,6 +13148,7 @@ impl Core {
             payload: SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: params.agent_id,
+                sender_agent_id: params.sender_agent_id,
                 body: params.body,
                 execution: params.execution,
             },
@@ -12804,6 +13302,7 @@ impl Core {
         fingerprint: Option<&str>,
         known_snapshot: Option<&AdapterCapabilitySnapshot>,
         catalog_requested: bool,
+        version_read: Option<std::result::Result<String, RuntimeFailureView>>,
     ) -> Result<RuntimeDeepProbeResult> {
         rovai_core::runtime_discovery::ensure_runtime_environment_available(adapter_kind)?;
         eprintln!(
@@ -12819,10 +13318,6 @@ impl Core {
         let known_snapshot = known_snapshot.filter(|snapshot| {
             fingerprint.is_some() && snapshot.executable_fingerprint.as_deref() == fingerprint
         });
-        let known_version = known_snapshot
-            .and_then(|snapshot| snapshot.reported_version.as_deref())
-            .map(str::trim)
-            .filter(|version| !version.is_empty());
         let static_capabilities = known_snapshot
             .filter(|snapshot| {
                 snapshot.probe_status == "ready"
@@ -12833,12 +13328,44 @@ impl Core {
             .unwrap_or_default();
         let attempted_at = chrono::Utc::now().to_rfc3339();
         let registry = AgentRuntimeAdapterRegistry::default();
+        let version_read = match version_read {
+            Some(version_read) => version_read,
+            None => health::read_runtime_version_for_probe(executable_path, adapter_kind).await,
+        };
+        let version = match version_read {
+            Ok(version) => version,
+            Err(failure) => {
+                let failed_fingerprint = fingerprint
+                    .map(str::to_owned)
+                    .or_else(|| fingerprint_executable(executable_path).ok());
+                let mut snapshot = registry.light_ready_snapshot(
+                    adapter_kind,
+                    None,
+                    failed_fingerprint.clone().unwrap_or_default(),
+                    attempted_at,
+                )?;
+                snapshot.executable_fingerprint = failed_fingerprint;
+                snapshot.probe_status = if executable_path.is_file() {
+                    "probe_failed"
+                } else {
+                    "not_installed"
+                }
+                .into();
+                snapshot.last_error = Some(failure.summary.clone());
+                return Ok(RuntimeDeepProbeResult {
+                    snapshot,
+                    failure: Some(failure),
+                    version_probe_succeeded: false,
+                });
+            }
+        };
+        let current_version = Some(version.as_str());
         let (snapshot, failure) = match adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
                 let checked = health::codex_capability_probe_at(
                     executable_path,
                     fingerprint,
-                    known_version,
+                    current_version,
                     static_capabilities,
                 )
                 .await;
@@ -12863,7 +13390,7 @@ impl Core {
             }
             rovai_core::agent_profile::AdapterKind::Pi => {
                 let probe =
-                    health::pi_capability_probe_at(executable_path, fingerprint, known_version)
+                    health::pi_capability_probe_at(executable_path, fingerprint, current_version)
                         .await;
                 let last_error = (probe.result.status != health::AgentRuntimeProbeStatus::Ready)
                     .then(|| probe.result.detail.clone())
@@ -12884,6 +13411,7 @@ impl Core {
                 )
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -12904,7 +13432,7 @@ impl Core {
                     kind,
                     purpose,
                     fingerprint,
-                    known_version,
+                    current_version,
                     catalog_requested,
                 )
                 .await;
@@ -12913,7 +13441,11 @@ impl Core {
                         adapter_kind: kind,
                         reported_version: probe.result.reported_version,
                         executable_fingerprint: probe.result.executable_fingerprint,
-                        authentication_status: if kind == AdapterKind::ClineCli {
+                        authentication_status: if kind == AdapterKind::ClineCli
+                            || (kind == AdapterKind::KiloCli
+                                && probe.result.status
+                                    != health::AgentRuntimeProbeStatus::AuthenticationRequired)
+                        {
                             "unknown".to_string()
                         } else {
                             probe_authentication_status(probe.result.status).to_string()
@@ -12943,7 +13475,7 @@ impl Core {
                 let probe = health::claude_code_capability_probe_at(
                     executable_path,
                     fingerprint,
-                    known_version,
+                    current_version,
                     static_capabilities,
                 )
                 .await;
@@ -12966,7 +13498,7 @@ impl Core {
                 let probe = health::antigravity_capability_probe_at(
                     executable_path,
                     fingerprint,
-                    known_version,
+                    current_version,
                     static_capabilities,
                 )
                 .await;
@@ -12988,7 +13520,11 @@ impl Core {
                 (snapshot, failure)
             }
         };
-        Ok(RuntimeDeepProbeResult { snapshot, failure })
+        Ok(RuntimeDeepProbeResult {
+            snapshot,
+            failure,
+            version_probe_succeeded: true,
+        })
     }
 
     async fn refresh_adapter_installation(
@@ -13032,14 +13568,15 @@ impl Core {
         let deep_probe = with_runtime_configuration(
             installation.adapter_kind,
             &search,
-            self.deep_probe_candidate(
+            Box::pin(self.deep_probe_candidate(
                 installation.adapter_kind,
                 Path::new(&installation.executable_path),
                 RuntimeLaunchPurpose::InstallationRefresh,
                 None,
                 None,
                 false,
-            ),
+                None,
+            )),
         )
         .await?;
         let mut database = self.database.lock().await;
@@ -13506,6 +14043,198 @@ impl Core {
         keys.extend(self.claude_code_cli.active_execution_keys());
         keys.extend(self.antigravity_app.active_execution_keys().await);
         keys.into_iter().collect()
+    }
+
+    async fn answer_native_interaction(
+        &self,
+        params: &crate::native_interaction::RespondNativeInteraction,
+    ) -> Result<Value> {
+        use crate::native_interaction::{
+            NativeInteractionResult, NativeInteractionStatus as Status,
+        };
+        let valid = {
+            let database = self.database.lock().await;
+            database.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
+                rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
+        };
+        let mut answer_preview = None;
+        let result = if valid {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                .await
+            {
+                anyhow::ensure!(
+                    runtime.camp_id() == params.thread_id,
+                    "Native interaction belongs to another Thread"
+                );
+                let result = runtime
+                    .answer_interaction(&params.interaction_id, &params.answer)
+                    .await?;
+                answer_preview = runtime.interaction_result(&params.interaction_id).await.1;
+                result
+            } else {
+                NativeInteractionResult {
+                    status: Status::Unavailable,
+                    already_handled: false,
+                }
+            }
+        } else {
+            NativeInteractionResult {
+                status: Status::Unavailable,
+                already_handled: false,
+            }
+        };
+        // Channel result cards keep only the bounded preview of the first native answer.
+        {
+            let mut database = self.database.lock().await;
+            if let Err(error) = rovai_core::channel::native_interactions::record_status(
+                &mut database,
+                &params.interaction_id,
+                result.status,
+                answer_preview.as_deref(),
+            ) {
+                eprintln!("Native channel card marker update failed: {error:#}");
+            }
+        }
+        emit(
+            &self.output,
+            "agent_run.interaction_changed",
+            json!({"threadId":params.thread_id,"agentRunId":params.agent_run_id}),
+        );
+        Ok(serde_json::to_value(result)?)
+    }
+
+    async fn native_card_result(
+        &self,
+        card: &rovai_core::channel::native_interactions::CardReference,
+    ) -> Result<(
+        crate::native_interaction::NativeInteractionStatus,
+        Option<String>,
+    )> {
+        use crate::native_interaction::NativeInteractionStatus as Status;
+        if card.status != Status::Pending {
+            return Ok((card.status, card.answer_preview.clone()));
+        }
+        if let Some(runtime) = self
+            .pi
+            .get_agent_run(&card.agent_run_id, card.execution_epoch)
+            .await
+        {
+            let (status, answer_preview) = runtime.interaction_result(&card.interaction_id).await;
+            if status != Status::Pending {
+                return Ok((status, answer_preview));
+            }
+            // The pending list also fences stop, dead Host and changed Session.
+            if runtime
+                .pending_interactions()
+                .await
+                .iter()
+                .any(|question| question.id == card.interaction_id)
+            {
+                let database = self.database.lock().await;
+                let valid=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND execution_epoch=?2 AND status IN ('running','waiting') AND cancel_requested_at IS NULL)",rusqlite::params![card.agent_run_id,card.execution_epoch],|r|r.get::<_,bool>(0))?;
+                if valid {
+                    return Ok((Status::Pending, None));
+                }
+            }
+        }
+        Ok((Status::Unavailable, None))
+    }
+
+    async fn sync_channel_native_interactions(&self, provider: &str) -> Result<()> {
+        let questions = self.pi.channel_interactions().await;
+        let cards = {
+            let mut database = self.database.lock().await;
+            rovai_core::channel::native_interactions::project_pending(
+                &mut database,
+                provider,
+                &questions,
+            )?;
+            rovai_core::channel::native_interactions::references(&database, provider)?
+        };
+        for card in cards {
+            let (status, answer_preview) = self.native_card_result(&card).await?;
+            if status != crate::native_interaction::NativeInteractionStatus::Pending {
+                rovai_core::channel::native_interactions::record_status(
+                    &mut *self.database.lock().await,
+                    &card.interaction_id,
+                    status,
+                    answer_preview.as_deref(),
+                )?;
+            }
+        }
+        rovai_core::channel::native_interactions::reconcile_delivered(
+            &mut *self.database.lock().await,
+            provider,
+        )
+    }
+
+    async fn channel_native_interaction_source(
+        &self,
+        provider: &str,
+        params: &rovai_core::channel::native_interactions::SourceParams,
+    ) -> Result<Value> {
+        use crate::native_interaction::{NativeInteractionStatus as Status, NativeInteractionView};
+        let record = rovai_core::channel::native_interactions::source_reference(
+            &*self.database.lock().await,
+            provider,
+            &params.delivery_id,
+            &params.app_id,
+        )?;
+        let Some((delivery_id, agent_display_name, card)) = record else {
+            return Ok(Value::Null);
+        };
+        let (status, answer_preview) = self.native_card_result(&card).await?;
+        let mut interaction = NativeInteractionView {
+            id: card.interaction_id.clone(),
+            agent_run_id: card.agent_run_id.clone(),
+            execution_epoch: card.execution_epoch,
+            created_at: card.created_at,
+            expires_at: card.expires_at,
+            status,
+            questions: vec![],
+            can_skip: false,
+        };
+        if status == Status::Pending {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&card.agent_run_id, card.execution_epoch)
+                .await
+            {
+                if let Some(question) = runtime
+                    .pending_interactions()
+                    .await
+                    .into_iter()
+                    .find(|q| q.id == card.interaction_id)
+                {
+                    interaction = question;
+                } else {
+                    interaction.status = Status::Unavailable;
+                }
+            } else {
+                interaction.status = Status::Unavailable;
+            }
+        }
+        Ok(serde_json::to_value(
+            rovai_core::channel::native_interactions::CardSource {
+                delivery_id,
+                agent_display_name,
+                owner_user_id: rovai_core::channel::native_interactions::owner_user_id(
+                    &*self.database.lock().await,
+                    provider,
+                    &params.app_id,
+                )?,
+                interaction,
+                answer_preview: if card.question_preview.is_some() {
+                    answer_preview
+                } else {
+                    None
+                },
+                question_preview: card.question_preview,
+            },
+        )?)
     }
 
     async fn collect_delivery_batch_dispatch_candidates(
@@ -14543,6 +15272,17 @@ impl Core {
                 &candidate.agent_run_id,
                 candidate.execution_epoch,
                 &candidate.adapter_kind,
+                if candidate.status == "cancelled"
+                    && !self.planned_shutdown.shutdown_started()
+                    && matches!(
+                        candidate.cancel_reason_code.as_deref(),
+                        Some("user_requested_agent_run_stop" | "camp_turn_cancelled")
+                    )
+                {
+                    FleetReleaseDisposition::Reusable
+                } else {
+                    FleetReleaseDisposition::Stop
+                },
             )
             .await;
         if fence == RuntimeCancellationIngressFence::Unproven {
@@ -14586,6 +15326,7 @@ impl Core {
             json!({
                 "threadId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
                 "executionEpoch": candidate.execution_epoch,
+                "hostDisposition": if fence == RuntimeCancellationIngressFence::Reusable { "reusable" } else { "reaped" },
             }),
         );
         // Git and projection work do not extend the Runtime cleanup budget.
@@ -14593,7 +15334,11 @@ impl Core {
         self.agent_run_tasks.lock().await.spawn(async move {
             core.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
                 .await;
-            if fence == RuntimeCancellationIngressFence::Flushed {
+            if matches!(
+                fence,
+                RuntimeCancellationIngressFence::Flushed
+                    | RuntimeCancellationIngressFence::Reusable
+            ) {
                 core.project_agent_run_file_changes_after_terminal(
                     &candidate.agent_run_id,
                     candidate.execution_epoch,
@@ -14608,7 +15353,7 @@ impl Core {
         true
     }
 
-    async fn finish_codex_terminal_host(
+    async fn finish_fleet_terminal_host(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
@@ -14624,7 +15369,7 @@ impl Core {
                 agent_run_id,
                 execution_epoch,
             ) {
-                eprintln!("failed to acknowledge Codex release: {error:#}");
+                eprintln!("failed to acknowledge Runtime release: {error:#}");
                 return;
             }
             self.runtime_fleet
@@ -14686,15 +15431,17 @@ impl Core {
         agent_run_id: &str,
         execution_epoch: i64,
         adapter_kind: &str,
+        disposition: FleetReleaseDisposition,
     ) -> RuntimeCancellationIngressFence {
         let started = tokio::time::Instant::now();
         let deadline = started + RUNTIME_CANCELLATION_TOTAL_TIMEOUT;
         tokio::time::timeout_at(deadline, async {
-            let interrupt_deadline = started + Duration::from_secs(1);
-            let flush_deadline = started + Duration::from_millis(1500);
+            let interrupt_deadline = started + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT;
+            let flush_deadline = interrupt_deadline + Duration::from_millis(500);
             let key = ActiveExecutionKey::new(agent_run_id, execution_epoch);
             self.planned_shutdown.cancel_active(&key).await;
             let mut flushed = false;
+            let mut interrupted = false;
             let one_shot = matches!(adapter_kind, "antigravity-app" | "claude-code-cli");
             loop {
                 if one_shot {
@@ -14710,11 +15457,54 @@ impl Core {
                 } else if let Some(runtime) =
                     self.agent_run_runtime(agent_run_id, execution_epoch).await
                 {
-                    let _ = tokio::time::timeout_at(interrupt_deadline, runtime.cancel()).await;
+                    if let AgentRunRuntime::Acp(runtime) = &runtime
+                        && disposition == FleetReleaseDisposition::Stop
+                        && runtime.adapter_kind() != AdapterKind::ZcodeApp
+                    {
+                        self.runtime_fleet
+                            .retire_agent_run_on_host(
+                                agent_run_id,
+                                execution_epoch,
+                                runtime.host_instance_id(),
+                            )
+                            .await;
+                    }
+                    interrupted = matches!(
+                        tokio::time::timeout_at(
+                            interrupt_deadline,
+                            runtime.cancel_until(interrupt_deadline),
+                        )
+                        .await,
+                        Ok(Ok(()))
+                    );
+                    if !interrupted
+                        && let AgentRunRuntime::Acp(runtime) = &runtime
+                        && runtime.adapter_kind() != AdapterKind::ZcodeApp
+                    {
+                        self.runtime_fleet
+                            .retire_agent_run_on_host(
+                                agent_run_id,
+                                execution_epoch,
+                                runtime.host_instance_id(),
+                            )
+                            .await;
+                    }
                     flushed =
                         tokio::time::timeout_at(flush_deadline, runtime.detach_and_flush_ingress())
                             .await
                             == Ok(true);
+                    if !flushed
+                        && let AgentRunRuntime::Acp(runtime) = &runtime
+                        && runtime.adapter_kind() != AdapterKind::ZcodeApp
+                    {
+                        self.runtime_fleet
+                            .retire_agent_run_on_host(
+                                agent_run_id,
+                                execution_epoch,
+                                runtime.host_instance_id(),
+                            )
+                            .await;
+                    }
                     break;
                 }
                 if !self.planned_shutdown.launch_in_progress(&key).await
@@ -14735,10 +15525,34 @@ impl Core {
                 }
                 // The cancelled Run's lease is revoked normally. Older native
                 // tasks remain on their original Session's managed Host.
-                adapter
+                return match adapter
                     .complete_agent_run(agent_run_id, execution_epoch)
-                    .await;
-                return RuntimeCancellationIngressFence::Flushed;
+                    .await
+                {
+                    FleetReleaseOutcome::Reusable => RuntimeCancellationIngressFence::Reusable,
+                    FleetReleaseOutcome::Reaped => RuntimeCancellationIngressFence::Flushed,
+                    _ => RuntimeCancellationIngressFence::Unproven,
+                };
+            }
+            if disposition == FleetReleaseDisposition::Reusable
+                && interrupted
+                && flushed
+                && !self.planned_shutdown.shutdown_started()
+                && !self.planned_shutdown.launch_in_progress(&key).await
+                && let Ok(kind) = adapter_kind.parse::<AdapterKind>()
+                && !matches!(kind, AdapterKind::ZcodeApp | AdapterKind::HermesCli)
+                && let Some(adapter) = self.acp_adapter(kind)
+            {
+                // The existing Fleet release revokes this CLI lease and checks
+                // health/quiescence/retirement. Return before any generic stop.
+                return match adapter
+                    .complete_agent_run(agent_run_id, execution_epoch)
+                    .await
+                {
+                    FleetReleaseOutcome::Reusable => RuntimeCancellationIngressFence::Reusable,
+                    FleetReleaseOutcome::Reaped => RuntimeCancellationIngressFence::Flushed,
+                    _ => RuntimeCancellationIngressFence::Unproven,
+                };
             }
             loop {
                 let launching_before_stop = self.planned_shutdown.launch_in_progress(&key).await;
@@ -14753,13 +15567,16 @@ impl Core {
                             .wait_for_agent_run_quiescence(agent_run_id, execution_epoch, remaining)
                             .await
                     }
-                } else if adapter_kind == "codex-cli" {
+                } else if adapter_kind != "pi" {
                     match self
                         .runtime_fleet
                         .stop_agent_run_until_with_outcome(agent_run_id, execution_epoch, deadline)
                         .await
                     {
                         FleetReleaseOutcome::Reaped => true,
+                        FleetReleaseOutcome::Reusable => {
+                            return RuntimeCancellationIngressFence::Reusable;
+                        }
                         FleetReleaseOutcome::NoMatchingLease => {
                             // A launch that never bound a route plus Fleet's
                             // retained ownership/stop evidence permits cleanup.
@@ -19156,7 +19973,10 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         if matches!(
             execution.runtime.adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness
+                | AdapterKind::CommandCodeCli
+                | AdapterKind::ClineCli
+                | AdapterKind::KiloCli
         ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
@@ -19423,6 +20243,17 @@ impl Core {
             )
             .await;
         if failure_persisted {
+            if let Some(adapter) = self.acp_adapter(execution.runtime.adapter_kind) {
+                let released = adapter
+                    .complete_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                self.finish_fleet_terminal_host(
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    Some(released),
+                )
+                .await;
+            }
             emit_agent_run_terminal(
                 output,
                 Some(&execution.camp_id),
@@ -19570,6 +20401,7 @@ impl Core {
                     .await;
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -19866,6 +20698,51 @@ fn note_product_runtime_diagnostic(
     });
 }
 
+fn runtime_probe_targets_current_entry(
+    database: &Database,
+    target: &Option<(String, i64)>,
+    candidate: &Path,
+) -> Result<bool> {
+    let Some((id, _)) = target else {
+        return Ok(false);
+    };
+    let path = database
+        .connection()
+        .query_row(
+            "SELECT executable_path FROM adapter_installation WHERE id = ?1",
+            [id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(path.is_some_and(|path| canonical_runtime_path(Path::new(&path)) == candidate))
+}
+
+fn saved_runtime_probe_version(
+    database: &Database,
+    target: &Option<(String, i64)>,
+    path: &str,
+    fingerprint: &str,
+) -> Result<Option<String>> {
+    let Some((id, _)) = target else {
+        return Ok(None);
+    };
+    Ok(database
+        .connection()
+        .query_row(
+            "SELECT snapshot.reported_version FROM adapter_installation installation
+         JOIN runtime_executable_identity identity ON identity.installation_id = installation.id
+         JOIN adapter_capability_snapshot snapshot ON snapshot.installation_id = installation.id
+         WHERE installation.id = ?1 AND installation.executable_path = ?2
+           AND installation.enabled = 1 AND installation.path_state = 'valid'
+           AND identity.executable_path = ?2 AND identity.executable_fingerprint = ?3
+           AND snapshot.executable_fingerprint = ?3",
+            rusqlite::params![id, path, fingerprint],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
 fn product_runtime_reported_version<'a>(
     discovery: &'a RuntimeDiscoveryObservation,
     installation: Option<&'a AdapterInstallationView>,
@@ -19937,37 +20814,6 @@ fn product_runtime_availability_status(
         RuntimeDiscoveryStatus::Found => "found_uninspected",
         RuntimeDiscoveryStatus::Missing => "missing",
     }
-}
-
-fn relevant_failed_runtime_probe_attempt(
-    installation: &AdapterInstallationView,
-) -> Option<&AdapterProbeAttempt> {
-    // list_installations selects the attempt for the current recorded identity,
-    // which may differ from an old health snapshot retained after an upgrade.
-    let attempt = installation
-        .last_probe_attempt
-        .as_ref()
-        .filter(|attempt| attempt.status == "failed")?;
-    if let Some(snapshot) = installation.snapshot.as_ref()
-        && attempt.executable_fingerprint == snapshot.executable_fingerprint
-        && snapshot
-            .last_successful_probe_at
-            .as_deref()
-            .is_some_and(|last_success| runtime_attempt_precedes(attempt, last_success))
-    {
-        return None;
-    }
-    Some(attempt)
-}
-
-fn runtime_attempt_precedes(attempt: &AdapterProbeAttempt, timestamp: &str) -> bool {
-    let Ok(attempted_at) = chrono::DateTime::parse_from_rfc3339(&attempt.attempted_at) else {
-        return false;
-    };
-    let Ok(last_successful_at) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
-        return false;
-    };
-    attempted_at < last_successful_at
 }
 
 fn native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeFailure {
@@ -20484,6 +21330,13 @@ async fn run_core(
         mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
         pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
+        kilo_cli: AcpCliRuntimeAdapter::deferred(
+            AdapterKind::KiloCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/kilo"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        ),
         opencode_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
@@ -21859,6 +22712,7 @@ async fn process_pi_events(
                 native_prompt_id,
                 delivery_id,
                 sequence,
+                received_at,
                 message,
             } => {
                 if let Err(error) = process_agent_run_pi_message(
@@ -21871,6 +22725,7 @@ async fn process_pi_events(
                     &native_prompt_id,
                     &delivery_id,
                     sequence,
+                    received_at,
                     message,
                     &mut runtime_route_permit,
                 )
@@ -21940,6 +22795,7 @@ async fn process_agent_run_pi_message(
     native_prompt_id: &str,
     delivery_id: &str,
     sequence: u64,
+    received_at: i64,
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) -> Result<()> {
@@ -22001,6 +22857,15 @@ async fn process_agent_run_pi_message(
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
+            Some("confirm" | "select" | "input" | "editor") => {
+                runtime.register_interaction(&message, received_at).await?;
+                emit(
+                    output,
+                    "agent_run.interaction_changed",
+                    json!({"threadId": runtime.camp_id(), "agentRunId": agent_run_id}),
+                );
+                return Ok(());
+            }
             _ => {
                 let response = match pi::unsupported_extension_ui_cancellation(&message) {
                     Ok(response) => response,
@@ -23045,7 +23910,9 @@ async fn process_acp_input_accepted(
                 "failed to mark mismatched ACP input evidence unknown for AgentRun {agent_run_id}: {mark_error:#}"
             );
         }
-        let _ = runtime.cancel().await;
+        let _ = runtime
+            .cancel_until(tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT)
+            .await;
         return;
     }
     match core
@@ -23060,7 +23927,9 @@ async fn process_acp_input_accepted(
             eprintln!(
                 "failed to persist ACP input acceptance for AgentRun {agent_run_id}: {error:#}"
             );
-            let _ = runtime.cancel().await;
+            let _ = runtime
+                .cancel_until(tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT)
+                .await;
         }
     }
 }
@@ -23870,6 +24739,22 @@ fn normalize_acp_event_with_completion(
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
                     "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"minimax_file_patch",
                     "entries":[{"path":path,"changeKind":"update","diff":patch}]});
+            }
+            if adapter_kind == AdapterKind::KiloCli
+                && public_status == "completed"
+                && completion.is_some_and(|value| value.native_kind == "edit")
+                && let Some(entries) = crate::kilo::file_diff_entries(&update)
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"kilo_file_patch","entries":entries});
+                if payload.get("runtimeFileOperation").is_none()
+                    && entries.as_array().is_some_and(|entries| entries.len() == 1)
+                    && matches!(entries[0]["changeKind"].as_str(), Some("add" | "update"))
+                {
+                    payload["runtimeFileOperation"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                        "sourceEventKind":"session/update.tool_call_update.completed","operationKind":"write",
+                        "path":entries[0]["path"],"changeKind":entries[0]["changeKind"]});
+                }
             }
             if adapter_kind == AdapterKind::CommandCodeCli
                 && public_status == "completed"
@@ -24925,6 +25810,17 @@ async fn persist_acp_prompt_completion(
     params: &Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) -> Result<()> {
+    if !core.planned_shutdown.shutdown_started() {
+        let database = core.database.lock().await;
+        if ExecutionRuntimeService::default()
+            .load_agent_run_execution(&database, agent_run_id, execution_epoch)?
+            .is_none()
+        {
+            // Business cancellation already handed this Run to cleanup. Do not
+            // detach its terminal route before cancel_until confirms the result.
+            return Ok(());
+        }
+    }
     let prompt_id = params
         .get("promptId")
         .and_then(Value::as_str)
@@ -25189,8 +26085,10 @@ async fn persist_acp_prompt_completion(
                 .await;
         }
         if let Some(adapter) = core.acp_adapter(adapter_kind) {
-            adapter
+            let released = adapter
                 .complete_agent_run(agent_run_id, execution_epoch)
+                .await;
+            core.finish_fleet_terminal_host(agent_run_id, execution_epoch, Some(released))
                 .await;
         }
         core.delivery_batch_scheduler_notify.notify_one();
@@ -25295,8 +26193,10 @@ async fn persist_acp_prompt_completion(
                 )
                 .await;
                 if let Some(adapter) = core.acp_adapter(adapter_kind) {
-                    adapter
+                    let released = adapter
                         .complete_agent_run(agent_run_id, execution_epoch)
+                        .await;
+                    core.finish_fleet_terminal_host(agent_run_id, execution_epoch, Some(released))
                         .await;
                 }
                 core.delivery_batch_scheduler_notify.notify_one();
@@ -25463,6 +26363,7 @@ async fn flush_runtime_usage(
         AdapterKind::KimiCodeCli,
         AdapterKind::MinimaxCodeCli,
         AdapterKind::OpencodeCli,
+        AdapterKind::KiloCli,
         AdapterKind::QoderCli,
         AdapterKind::TraeCnCli,
     ] {
@@ -26304,7 +27205,7 @@ async fn process_agent_run_codex_message(
                         .await;
                 }
                 runtime.clear_turn(Some(&completed.turn_id)).await;
-                core.finish_codex_terminal_host(agent_run_id, execution_epoch, released)
+                core.finish_fleet_terminal_host(agent_run_id, execution_epoch, released)
                     .await;
                 core.delivery_batch_scheduler_notify.notify_one();
                 core.execution_wake.runs.notify_one();
@@ -26463,7 +27364,7 @@ async fn process_agent_run_codex_message(
             .await;
     }
     runtime.clear_turn(Some(&completed.turn_id)).await;
-    core.finish_codex_terminal_host(agent_run_id, execution_epoch, released)
+    core.finish_fleet_terminal_host(agent_run_id, execution_epoch, released)
         .await;
     core.delivery_batch_scheduler_notify.notify_one();
     core.execution_wake.runs.notify_one();
@@ -27067,7 +27968,7 @@ async fn process_network_recovery(
 
 async fn process_runtime_check_manager(
     core: Arc<Core>,
-    mut requests: mpsc::UnboundedReceiver<RuntimeCheckRequest>,
+    mut requests: mpsc::UnboundedReceiver<RuntimeCheckManagerMessage>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
     let mut checks: tokio::task::JoinSet<RuntimeCheckWorkerResult> = tokio::task::JoinSet::new();
@@ -27077,7 +27978,20 @@ async fn process_runtime_check_manager(
     loop {
         tokio::select! {
             request = requests.recv() => {
-                let Some(request) = request else { break };
+                let Some(message) = request else { break };
+                let request = match message {
+                    RuntimeCheckManagerMessage::Request(request) => request,
+                    RuntimeCheckManagerMessage::TargetAdvanced { attempt_id, runtime_kind, previous, target, acknowledged } => {
+                        let accepted = if let Some(attempt) = active.values_mut().find(|attempt| attempt.attempt_id == attempt_id && attempt.runtime_kind == runtime_kind) {
+                            if attempt.advance_target(&previous, target) {
+                                merge_runtime_check_pending(&core, attempt, &mut pending).await;
+                                true
+                            } else { false }
+                        } else { false };
+                        let _ = acknowledged.send(accepted);
+                        continue;
+                    }
+                };
                 if request.model_target.is_none() && execution_deferrals.should_defer(request.runtime_kind, request.trigger) {
                     if let Some(completion) = request.completion {
                         let _ = completion.send(Ok(RuntimeCheckOutcome::Superseded));
@@ -27099,9 +28013,7 @@ async fn process_runtime_check_manager(
                     .iter_mut()
                     .find(|attempt| attempt.accepts(&request, &installation_target))
                 {
-                    if request.trigger != RuntimeCheckTrigger::CatalogOpen {
-                        existing.catalog_only = false;
-                    }
+                    existing.force_refresh |= request.force_refresh;
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
                         existing.purpose = request.purpose;
@@ -27115,7 +28027,7 @@ async fn process_runtime_check_manager(
                 if let Some(existing) = active
                     .values_mut()
                     .find(|attempt| attempt.accepts(&request, &installation_target)
-                        && runtime_check_can_satisfy(attempt.catalog_only, request.trigger))
+                        && (attempt.force_refresh || !request.force_refresh))
                 {
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
@@ -27139,6 +28051,7 @@ async fn process_runtime_check_manager(
                 }
                 let is_private_check = request.startup_preview.is_some() || request.model_target.is_some();
                 let attempt = RuntimeCheckAttempt {
+                    force_refresh: request.force_refresh,
                     installation_target,
                     search: request.search,
                     startup_preview: request.startup_preview,
@@ -27152,7 +28065,7 @@ async fn process_runtime_check_manager(
                     deadline,
                     waiters,
                 };
-                if !is_private_check && !(attempt.runtime_kind == AdapterKind::Pi && attempt.catalog_only) {
+                if !is_private_check && !attempt.catalog_only && attempt.purpose != RuntimeLaunchPurpose::DiscoveryVersion {
                 core.runtime_check_activity.write().await.insert(
                     request.runtime_kind,
                     RuntimeCheckActivity {
@@ -27186,10 +28099,14 @@ async fn process_runtime_check_manager(
                                 )
                                 .await;
                             } else {
-                                // A catalog request can fall back to a real full check.
-                                // Preserve its Ready-delivery behavior without letting a
-                                // catalog-only success manufacture verification evidence.
-                                attempt.catalog_only = worker.catalog_only;
+                                // A deadline may expire while its progress message
+                                // is waiting. This target comes only from the same
+                                // worker's guarded commits, never a late DB lookup.
+                                let target_advanced = attempt.installation_target != worker.installation_target;
+                                attempt.installation_target = worker.installation_target;
+                                if target_advanced {
+                                    merge_runtime_check_pending(&core, &mut attempt, &mut pending).await;
+                                }
                                 execution_deferrals.record(attempt.runtime_kind, attempt.trigger, &worker.result);
                                 finalize_runtime_check(
                                     &core,
@@ -27246,7 +28163,8 @@ async fn process_runtime_check_manager(
             let attempt = pending.swap_remove(next);
             if attempt.startup_preview.is_none()
                 && attempt.model_target.is_none()
-                && !(attempt.runtime_kind == AdapterKind::Pi && attempt.catalog_only)
+                && !attempt.catalog_only
+                && attempt.purpose != RuntimeLaunchPurpose::DiscoveryVersion
             {
                 core.runtime_check_activity.write().await.insert(
                     attempt.runtime_kind,
@@ -27272,14 +28190,19 @@ async fn process_runtime_check_manager(
             let worker_startup_preview = attempt.startup_preview.clone();
             let worker_search = attempt.search.clone();
             let worker_catalog_only = attempt.catalog_only;
+            let worker_force_refresh = attempt.force_refresh;
             let worker_model_target = attempt.model_target.clone();
-            let worker_installation_target = attempt.installation_target.clone();
+            let mut worker_installation_target = attempt.installation_target.clone();
             let abort_handle = checks.spawn(async move {
-                let mut catalog_only = worker_catalog_only;
                 let (result, finalization) = match tokio::time::timeout_at(worker_deadline, async {
                     if let Some(target) = worker_model_target {
                         check_core
-                            .refresh_dsh_model_options(worker_search, target)
+                            .refresh_target_model_options(
+                                worker_search,
+                                worker_kind,
+                                target,
+                                worker_force_refresh,
+                            )
                             .await
                     } else if let Some(preview) = worker_startup_preview {
                         let result = check_core
@@ -27299,17 +28222,37 @@ async fn process_runtime_check_manager(
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
-                        if worker_catalog_only
-                            && let Some(outcome) = check_core
-                                .refresh_verified_runtime_catalog(
-                                    worker_kind,
+                        if worker_purpose == RuntimeLaunchPurpose::DiscoveryVersion {
+                            let Some((outcome, target)) = check_core
+                                .discover_runtime_installations_for(
+                                    true,
+                                    Some(worker_kind),
                                     worker_search.clone(),
                                 )
-                                .await?
-                        {
+                                .await
+                            else {
+                                return Ok(RuntimeCheckOutcome::Superseded);
+                            };
+                            worker_installation_target = target;
                             return Ok(outcome);
                         }
-                        catalog_only = false;
+                        if worker_catalog_only {
+                            return check_core
+                                .refresh_verified_runtime_catalog_for_selection(
+                                    worker_kind,
+                                    worker_search.clone(),
+                                    None,
+                                    Some(RuntimeCheckWorkerContext {
+                                        force_refresh: worker_force_refresh,
+                                        attempt_id: &worker_attempt_id,
+                                        installation_target: &mut worker_installation_target,
+                                    }),
+                                )
+                                .await
+                                .map(|outcome| {
+                                    outcome.unwrap_or(RuntimeCheckOutcome::StableFailure)
+                                });
+                        }
                         check_core
                             .run_product_runtime_resolution_in_environment(
                                 worker_kind,
@@ -27317,6 +28260,11 @@ async fn process_runtime_check_manager(
                                 worker_deadline,
                                 worker_search,
                                 worker_catalog_only,
+                                Some(RuntimeCheckWorkerContext {
+                                    force_refresh: worker_force_refresh,
+                                    attempt_id: &worker_attempt_id,
+                                    installation_target: &mut worker_installation_target,
+                                }),
                             )
                             .await
                     }
@@ -27336,7 +28284,7 @@ async fn process_runtime_check_manager(
                 RuntimeCheckWorkerResult {
                     attempt_id: worker_attempt_id,
                     runtime_kind: worker_kind,
-                    catalog_only,
+                    installation_target: worker_installation_target,
                     result,
                     finalization,
                 }
@@ -27378,7 +28326,7 @@ async fn finalize_runtime_check(
     mut result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 ) {
-    if attempt.startup_preview.is_some() || attempt.model_target.is_some() {
+    if attempt.startup_preview.is_some() {
         for waiter in attempt.waiters {
             let _ = waiter.send(result.clone());
         }
@@ -27391,11 +28339,29 @@ async fn finalize_runtime_check(
         result = Ok(RuntimeCheckOutcome::Superseded);
     }
     eprintln!(
-        "[model-catalog] refresh runtime={} total_ms={} outcome={:?}",
+        "[model-catalog] refresh runtime={} trigger={:?} purpose={:?} total_ms={} outcome={:?}",
         attempt.runtime_kind.as_str(),
+        attempt.trigger,
+        attempt.purpose,
         attempt.started_at.elapsed().as_millis(),
         result
     );
+    if attempt.catalog_only
+        || attempt.model_target.is_some()
+        || attempt.purpose == RuntimeLaunchPurpose::DiscoveryVersion
+    {
+        emit(
+            &core.output,
+            "runtime.availability.updated",
+            json!({"runtimeKind": attempt.runtime_kind,
+                "status": core.current_runtime_availability_status(attempt.runtime_kind).await}),
+        );
+        drop(update);
+        for waiter in attempt.waiters {
+            let _ = waiter.send(result.clone());
+        }
+        return;
+    }
     let owns_terminal = {
         let mut activity = core.runtime_check_activity.write().await;
         take_runtime_check_activity(&mut activity, attempt.runtime_kind, &attempt.attempt_id)
@@ -27488,6 +28454,41 @@ async fn finalize_runtime_check(
     }
 }
 
+async fn merge_runtime_check_pending(
+    core: &Core,
+    active: &mut RuntimeCheckAttempt,
+    pending: &mut Vec<RuntimeCheckAttempt>,
+) {
+    let mut activity = core.runtime_check_activity.write().await;
+    for index in (0..pending.len()).rev() {
+        if !active.can_join(&pending[index]) {
+            continue;
+        }
+        let mut duplicate = pending.swap_remove(index);
+        active.trigger = active.trigger.max(duplicate.trigger);
+        active.waiters.append(&mut duplicate.waiters);
+        // A request can be admitted between the DB commit and its progress
+        // message. Fold it into this same round with the existing merge rules.
+        if take_runtime_check_activity(&mut activity, active.runtime_kind, &duplicate.attempt_id) {
+            activity.insert(
+                active.runtime_kind,
+                RuntimeCheckActivity {
+                    attempt_id: active.attempt_id.clone(),
+                    runtime_kind: active.runtime_kind,
+                    deadline: chrono::Utc::now()
+                        + chrono::Duration::from_std(
+                            active
+                                .deadline
+                                .saturating_duration_since(tokio::time::Instant::now()),
+                        )
+                        .unwrap_or_default(),
+                    running: true,
+                },
+            );
+        }
+    }
+}
+
 fn take_runtime_check_activity(
     activity: &mut BTreeMap<AdapterKind, RuntimeCheckActivity>,
     runtime_kind: AdapterKind,
@@ -27506,10 +28507,6 @@ fn take_runtime_check_activity(
 
 fn runtime_check_has_capacity(active_count: usize) -> bool {
     active_count < RUNTIME_CHECK_MAX_CONCURRENCY
-}
-
-fn runtime_check_can_satisfy(catalog_only: bool, trigger: RuntimeCheckTrigger) -> bool {
-    !catalog_only || trigger == RuntimeCheckTrigger::CatalogOpen
 }
 
 fn agent_run_public_failure(
@@ -28693,7 +29690,8 @@ mod tests {
                         file_identity: None,
                         locator: None,
                     });
-                    let attempt = RuntimeCheckAttempt {
+                    let attempt_for = |force_refresh| RuntimeCheckAttempt {
+                        force_refresh,
                         installation_target: target.clone(),
                         search: search.clone(),
                         startup_preview: None,
@@ -28711,9 +29709,11 @@ mod tests {
                         deadline: tokio::time::Instant::now(),
                         waiters: vec![],
                     };
+                    let attempt = attempt_for(false);
                     let (acknowledged, _) = oneshot::channel();
-                    let request = RuntimeCheckRequest {
-                        search,
+                    let mut request = RuntimeCheckRequest {
+                        force_refresh: false,
+                        search: search.clone(),
                         startup_preview: None,
                         model_target: None,
                         runtime_kind: kind,
@@ -28724,36 +29724,40 @@ mod tests {
                     };
                     assert_eq!(
                         attempt.accepts(&request, &target),
-                        !matches!(kind, AdapterKind::Pi | AdapterKind::MinimaxCodeCli)
-                            || catalog_only == (trigger == RuntimeCheckTrigger::CatalogOpen)
+                        catalog_only == (trigger == RuntimeCheckTrigger::CatalogOpen)
                     );
+                    if catalog_only && trigger == RuntimeCheckTrigger::CatalogOpen {
+                        let forced = attempt_for(true);
+                        assert!(
+                            !attempt.can_join(&forced),
+                            "target advancement cannot fold queued force into cache-only-capable work"
+                        );
+                        assert!(
+                            forced.can_join(&attempt),
+                            "native forced work can satisfy an ordinary reader"
+                        );
+                        assert!(
+                            forced.can_join(&attempt_for(true)),
+                            "forced requests still coalesce"
+                        );
+                        request.force_refresh = true;
+                        assert!(
+                            attempt.accepts(&request, &target),
+                            "an unstarted pending task may still adopt force intent"
+                        );
+                    }
                     let mut changed = target.clone();
                     changed.as_mut().unwrap().version += 1;
                     assert!(!attempt.accepts(&request, &changed));
                     assert!(!attempt.accepts(&request, &None));
+                    request.purpose = RuntimeLaunchPurpose::DiscoveryVersion;
+                    assert!(
+                        !attempt.accepts(&request, &target),
+                        "a full check and a version check cannot satisfy each other"
+                    );
                 }
             }
         }
-        assert!(runtime_check_can_satisfy(
-            false,
-            RuntimeCheckTrigger::CatalogOpen
-        ));
-        assert!(runtime_check_can_satisfy(
-            false,
-            RuntimeCheckTrigger::Execution
-        ));
-        assert!(runtime_check_can_satisfy(
-            true,
-            RuntimeCheckTrigger::CatalogOpen
-        ));
-        assert!(!runtime_check_can_satisfy(
-            true,
-            RuntimeCheckTrigger::Execution
-        ));
-        assert!(!runtime_check_can_satisfy(
-            true,
-            RuntimeCheckTrigger::UserCheck
-        ));
         assert!(runtime_check_has_capacity(0));
         assert!(runtime_check_has_capacity(1));
         assert!(!runtime_check_has_capacity(2));
@@ -28925,6 +29929,13 @@ mod tests {
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
             pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
+            kilo_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::KiloCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/kilo"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
             opencode_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::OpencodeCli,
                 acp_tx.clone(),
@@ -30172,6 +31183,8 @@ mod tests {
             (AdapterKind::CommandCodeCli, other_agent_id.as_str()),
             (AdapterKind::CommandCodeCli, "unrelated-member"),
             (AdapterKind::CodexCli, agent_id.as_str()),
+            (AdapterKind::KiloCli, agent_id.as_str()),
+            (AdapterKind::KiloCli, other_agent_id.as_str()),
         ];
         let mut previous_processes = vec![None; owners.len()];
         for (index, (method, mut params, expected_status, retired)) in cases.into_iter().enumerate()
@@ -30356,6 +31369,10 @@ while IFS= read -r line; do
     *'"type":"get_available_models"'*)
       /usr/bin/touch "$root/started"
       while [ ! -f "$root/release" ]; do /bin/sleep 0.01; done
+      if [ -f "$root/catalog-error" ]; then
+        printf '{"type":"response","id":"%s","command":"get_available_models","success":false,"error":"fixture catalog unavailable"}\n' "$id"
+        continue
+      fi
       if [ -f "$root/provider-error" ]; then
         printf '%s\n' '{"type":"extension_error","extensionPath":"fixture.ts","event":"register_provider","error":"invalid provider configuration"}'
       fi
@@ -30436,25 +31453,29 @@ done
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completion, waiter) = oneshot::channel();
         core.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: AdapterKind::Pi,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::CatalogOpen,
-                acknowledged,
-                completion: Some(completion),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    force_refresh: false,
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::Pi,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completion),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(
-            acknowledgement.await.unwrap(),
-            "an installation created after admission is a new target"
+            !acknowledgement.await.unwrap(),
+            "the published installation target must merge this same-purpose request"
         );
         std::fs::write(root.join("release"), "").unwrap();
         assert_eq!(waiter.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
         let payload = core
-            .open_runtime_model_catalog(AdapterKind::Pi, true)
+            .open_runtime_model_catalog(AdapterKind::Pi, true, false)
             .await
             .unwrap();
         assert_eq!(payload["refreshStatus"], "not_required");
@@ -30465,7 +31486,7 @@ done
                 .unwrap()
                 .lines()
                 .count(),
-            2
+            1
         );
         {
             let database = core.database.lock().await;
@@ -30492,13 +31513,13 @@ done
         )
         .unwrap();
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+            core.open_runtime_model_catalog(AdapterKind::Pi, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "completed"
         );
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+            core.open_runtime_model_catalog(AdapterKind::Pi, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "not_required"
@@ -30538,11 +31559,15 @@ done
             "invalidated"
         );
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+            core.open_runtime_model_catalog(AdapterKind::Pi, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "completed"
         );
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='pi')",
+            [(chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339()],
+        ).unwrap();
         let before_failure = core
             .runtime_model_catalog_payload(AdapterKind::Pi, "not_required")
             .await
@@ -30553,15 +31578,17 @@ done
         )
         .unwrap();
         std::fs::write(root.join("provider-error"), "").unwrap();
-        assert_eq!(
+        std::fs::write(root.join("catalog-error"), "").unwrap();
+        assert!(
             core.await_runtime_check(
                 AdapterKind::Pi,
                 RuntimeLaunchPurpose::AvailabilityCheck,
                 RuntimeCheckTrigger::CatalogOpen
             )
             .await
-            .unwrap(),
-            RuntimeCheckOutcome::StableFailure
+            .unwrap_err()
+            .to_string()
+            .contains("fixture catalog unavailable")
         );
         let after_failure = core
             .runtime_model_catalog_payload(AdapterKind::Pi, "failed")
@@ -30569,7 +31596,7 @@ done
             .unwrap();
         assert_eq!(after_failure["models"], before_failure["models"]);
         assert_eq!(after_failure["cache"], before_failure["cache"]);
-        std::fs::remove_file(root.join("provider-error")).unwrap();
+        std::fs::remove_file(root.join("catalog-error")).unwrap();
         // Same successful RPC without an exposed error is only an observation:
         // no invented completeness property, no permanent merge of absent models.
         assert_eq!(
@@ -30591,7 +31618,12 @@ done
             partial["models"][1]["id"],
             "pi://model?provider=fixture&id=partial"
         );
+        std::fs::remove_file(root.join("provider-error")).unwrap();
         for changed_identity in ["installation", "environment", "executable"] {
+            core.database.lock().await.connection().execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='pi')",
+                [(chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339()],
+            ).unwrap();
             std::fs::remove_file(root.join("started")).unwrap();
             std::fs::remove_file(root.join("release")).unwrap();
             std::fs::write(
@@ -30699,19 +31731,26 @@ if [ "$1" = 'login' ]; then exit 0; fi
 if [ "$2" = 'generate-json-schema' ]; then
   /usr/bin/touch "$root/full-started"
   while [ ! -f "$root/full-release" ]; do /bin/sleep 0.01; done
+  if [ -f "$root/schema-error" ] && [ "$(cat "$root/schema-error")" = exit ]; then exit 1; fi
   while [ "$1" != '--out' ]; do shift; done
   shift; out="$1"; /bin/mkdir -p "$out/v2"
   for name in ClientRequest ServerNotification ServerRequest; do
     printf '%s\n' '["model/list","thread/start","thread/resume","runtimeWorkspaceRoots","turn/start","turn/interrupt","item/agentMessage/delta","turn/completed","item/commandExecution/requestApproval","item/fileChange/requestApproval"]' > "$out/$name.json"
   done
+  if [ -f "$root/schema-error" ]; then
+    for name in ClientRequest ServerNotification ServerRequest; do echo '[]' > "$out/$name.json"; done
+  fi
   for name in ThreadStartResponse TurnStartResponse ItemStartedNotification; do echo '{}' > "$out/v2/$name.json"; done
   echo '{"properties":{"serviceTierForTurn":{}}}' > "$out/v2/TurnStartParams.json"
   exit 0
 fi
 while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$root/requests"
   case "$line" in
     *'"method":"initialize"'*) echo '{"id":1,"result":{"userAgent":"catalog-fixture"}}' ;;
-    *'"method":"account/read"'*) echo '{"id":2,"result":{"account":{"type":"chatgpt"}}}' ;;
+    *'"method":"account/read"'*)
+      if [ -f "$root/no-account" ]; then echo '{"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}'
+      else echo '{"id":2,"result":{"account":{"type":"chatgpt"}}}'; fi ;;
     *'"method":"model/list"'*)
       /usr/bin/touch "$root/catalog-started"
       while [ ! -f "$root/catalog-release" ]; do /bin/sleep 0.01; done
@@ -30779,6 +31818,8 @@ done
                 )
                 .unwrap();
         }
+        let (output, mut catalog_events) = mpsc::unbounded_channel();
+        core.output = output;
         let core = Arc::new(core);
         let (_shutdown, shutdown) = oneshot::channel();
         let manager = tokio::spawn(process_runtime_check_manager(
@@ -30797,7 +31838,7 @@ done
         }
         let display_started = Instant::now();
         let displayed = core
-            .open_runtime_model_catalog(AdapterKind::CodexCli, false)
+            .open_runtime_model_catalog(AdapterKind::CodexCli, false, false)
             .await
             .unwrap();
         eprintln!(
@@ -30810,16 +31851,20 @@ done
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, waiter) = oneshot::channel();
         core.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: AdapterKind::CodexCli,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::CatalogOpen,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    force_refresh: false,
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(
             !acknowledgement.await.unwrap(),
@@ -30840,16 +31885,20 @@ done
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, full) = oneshot::channel();
         core.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: AdapterKind::CodexCli,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::UserCheck,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    force_refresh: false,
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::UserCheck,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(!acknowledgement.await.unwrap());
         assert!(!root.join("full-started").exists());
@@ -30898,13 +31947,13 @@ done
         std::fs::write(root.join("full-release"), "").unwrap();
         assert_eq!(full.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::CodexCli, true)
+            core.open_runtime_model_catalog(AdapterKind::CodexCli, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "not_required"
         );
         let calls = std::fs::read_to_string(root.join("calls")).unwrap();
-        assert_eq!(calls.lines().filter(|line| *line == "--version").count(), 0);
+        assert_eq!(calls.lines().filter(|line| *line == "--version").count(), 1);
         assert_eq!(
             calls
                 .lines()
@@ -30961,6 +32010,113 @@ done
                 .all(|line| line == "catalog-snapshot")
         );
 
+        // The reverse order also stays isolated. A catalog queued behind a full
+        // check reuses that check's committed directory without a second process.
+        std::fs::remove_file(root.join("full-started")).unwrap();
+        std::fs::remove_file(root.join("full-release")).unwrap();
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET capabilities_json='[]', model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [&old_time],
+        ).unwrap();
+        let full_first = tokio::spawn({
+            let core = core.clone();
+            async move {
+                core.await_runtime_check(
+                    AdapterKind::CodexCli,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap()
+            }
+        });
+        file_ready(root.join("full-started")).await;
+        let processes_before_queued = std::fs::read_to_string(root.join("calls"))
+            .unwrap()
+            .lines()
+            .filter(|line| *line == "app-server --listen stdio://")
+            .count();
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let (completed, queued_catalog) = oneshot::channel();
+        core.runtime_check_requests
+            .send(
+                RuntimeCheckRequest {
+                    force_refresh: false,
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
+            .unwrap();
+        assert!(
+            acknowledgement.await.unwrap(),
+            "catalog must queue instead of joining the full diagnostic"
+        );
+        std::fs::write(root.join("full-release"), "").unwrap();
+        assert_eq!(full_first.await.unwrap(), RuntimeCheckOutcome::Ready);
+        assert_eq!(
+            queued_catalog.await.unwrap().unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("calls"))
+                .unwrap()
+                .lines()
+                .filter(|line| *line == "app-server --listen stdio://")
+                .count(),
+            processes_before_queued
+        );
+
+        // Force the existing schema owner to inspect again instead of reusing
+        // known capabilities. Both transport failure and missing schema features
+        // retain the catalog without satisfying the failed diagnostic.
+        for schema_failure in ["exit", "missing"] {
+            core.database.lock().await.connection().execute(
+                "UPDATE adapter_capability_snapshot SET capabilities_json='[]' WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [],
+            ).unwrap();
+            std::fs::write(root.join("schema-error"), schema_failure).unwrap();
+            std::fs::write(
+                root.join("catalog-result"),
+                r#"{"id":3,"result":{"data":[{"id":"schema-retained"}],"nextCursor":null}}"#,
+            )
+            .unwrap();
+            assert_eq!(
+                core.await_runtime_check(
+                    AdapterKind::CodexCli,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck
+                )
+                .await
+                .unwrap(),
+                RuntimeCheckOutcome::StableFailure
+            );
+            let retained = core
+                .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+                .await
+                .unwrap();
+            assert_eq!(retained["models"][0]["id"], "schema-retained");
+            assert_eq!(retained["cache"]["status"], "fresh");
+            let health = AgentProfileService::default()
+                .managed_installation(
+                    &*core.database.lock().await,
+                    AdapterKind::CodexCli,
+                    "default",
+                )
+                .unwrap()
+                .unwrap();
+            assert!(health.last_probe_attempt.unwrap().status == "failed");
+            assert_eq!(
+                health.snapshot.unwrap().stale_at.is_some(),
+                schema_failure == "missing"
+            );
+            std::fs::remove_file(root.join("schema-error")).unwrap();
+        }
+
         // Installation identity and search/startup identity are independent
         // fences; late responses cannot overwrite either newer environment.
         for change_search in [false, true] {
@@ -31002,9 +32158,288 @@ done
                     .managed_installation(&database, AdapterKind::CodexCli, "default")
                     .unwrap()
                     .unwrap();
-                assert_eq!(installation.snapshot.unwrap().models[0].id, "new-model");
+                assert_eq!(
+                    installation.snapshot.unwrap().models[0].id,
+                    "schema-retained"
+                );
             }
         }
+        // No health snapshot and an account-state rejection must not block the
+        // directory RPC. Keep the existing process/SQL owner for this new contract.
+        let id = {
+            let database = core.database.lock().await;
+            let installation = AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::CodexCli, "default")
+                .unwrap()
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "DELETE FROM adapter_capability_snapshot WHERE installation_id=?1",
+                    [&installation.id],
+                )
+                .unwrap();
+            installation.id
+        };
+        std::fs::write(root.join("requests"), "").unwrap();
+        std::fs::write(root.join("no-account"), "").unwrap();
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"result":{"data":[{"id":"without-health"}],"nextCursor":null}}"#,
+        )
+        .unwrap();
+        let catalog = core
+            .open_runtime_model_catalog(AdapterKind::CodexCli, true, false)
+            .await
+            .unwrap();
+        assert_eq!(catalog["models"][0]["id"], "without-health");
+        assert_eq!(catalog["cache"]["status"], "fresh");
+        // A normal visit reuses Fresh. An explicit refresh must reach model/list,
+        // including the manager's internal cache gate, without clearing history.
+        std::fs::write(root.join("requests"), "").unwrap();
+        assert_eq!(
+            core.open_runtime_model_catalog(AdapterKind::CodexCli, true, false)
+                .await
+                .unwrap()["refreshStatus"],
+            "not_required"
+        );
+        assert!(
+            std::fs::read_to_string(root.join("requests"))
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"result":{"data":[{"id":"manual-refresh"}],"nextCursor":null}}"#,
+        )
+        .unwrap();
+        let refreshed = core
+            .open_runtime_model_catalog(AdapterKind::CodexCli, true, true)
+            .await
+            .unwrap();
+        assert_eq!(refreshed["refreshStatus"], "completed");
+        assert_eq!(refreshed["models"][0]["id"], "manual-refresh");
+        // The ack is sent before the manager spawns a worker, and its next
+        // request is handled only after that spawn. Holding the existing commit
+        // guard keeps this ordinary worker before its Fresh-cache decision.
+        // A later force request must not inherit that worker's copied `false`.
+        std::fs::write(root.join("requests"), "").unwrap();
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"result":{"data":[{"id":"late-manual-refresh"}],"nextCursor":null}}"#,
+        )
+        .unwrap();
+        let update = core.runtime_search_update.lock().await;
+        let search = core.runtime_search_environment.read().await.clone();
+        let send = |force_refresh| {
+            let (acknowledged, acknowledgement) = oneshot::channel();
+            let (completed, completion) = oneshot::channel();
+            core.runtime_check_requests
+                .send(
+                    RuntimeCheckRequest {
+                        force_refresh,
+                        search: search.clone(),
+                        startup_preview: None,
+                        model_target: None,
+                        runtime_kind: AdapterKind::CodexCli,
+                        purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                        trigger: RuntimeCheckTrigger::CatalogOpen,
+                        acknowledged,
+                        completion: Some(completed),
+                    }
+                    .into(),
+                )
+                .unwrap();
+            (acknowledgement, completion)
+        };
+        let (ordinary_ack, ordinary_done) = send(false);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), ordinary_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        let (forced_ack, forced_done) = send(true);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), forced_ack)
+                .await
+                .unwrap()
+                .unwrap(),
+            "late force must queue behind a worker that may serve Fresh cache"
+        );
+        let (duplicate_ack, duplicate_done) = send(true);
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(5), duplicate_ack)
+                .await
+                .unwrap()
+                .unwrap(),
+            "same-target queued force requests still coalesce"
+        );
+        drop(update);
+        for done in [ordinary_done, forced_done, duplicate_done] {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(10), done)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap(),
+                RuntimeCheckOutcome::Ready
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("requests"))
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("model/list"))
+                .count(),
+            1,
+            "late force completes through one native catalog read despite Fresh cache"
+        );
+        assert_eq!(
+            core.runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+                .await
+                .unwrap()["models"][0]["id"],
+            "late-manual-refresh"
+        );
+        let requests = std::fs::read_to_string(root.join("requests")).unwrap();
+        assert!(requests.contains("model/list"));
+        assert!(
+            !requests.contains("account/read"),
+            "the directory must attempt model/list directly"
+        );
+        {
+            let database = core.database.lock().await;
+            let installation = AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::CodexCli, "default")
+                .unwrap()
+                .unwrap();
+            let snapshot = installation.snapshot.unwrap();
+            assert_eq!(snapshot.authentication_status, "unknown");
+            assert_eq!(snapshot.probe_status, "installed_unverified");
+            assert!(snapshot.last_successful_probe_at.is_none());
+        }
+        // Full diagnostics still check authentication; their failure cannot
+        // invalidate a same-target directory or become its current error.
+        std::fs::remove_file(root.join("no-account")).unwrap();
+        assert_eq!(
+            core.run_product_runtime_resolution(
+                AdapterKind::CodexCli,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE
+            )
+            .await
+            .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        std::fs::write(root.join("no-account"), "").unwrap();
+        assert_eq!(
+            core.run_product_runtime_resolution(
+                AdapterKind::CodexCli,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE
+            )
+            .await
+            .unwrap(),
+            RuntimeCheckOutcome::StableFailure
+        );
+        let before_error = core
+            .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+            .await
+            .unwrap();
+        assert_eq!(before_error["cache"]["status"], "fresh");
+        assert!(before_error["diagnosticCode"].is_null());
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id=?2",
+            rusqlite::params![old_time, id],
+        ).unwrap();
+        let before_error = core
+            .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+            .await
+            .unwrap();
+        let previous_attempt = AgentProfileService::default()
+            .managed_installation(
+                &*core.database.lock().await,
+                AdapterKind::CodexCli,
+                "default",
+            )
+            .unwrap()
+            .unwrap()
+            .last_probe_attempt;
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"error":{"code":-32001,"message":"fixture proxy refused the catalog"}}"#,
+        )
+        .unwrap();
+        let error = core
+            .await_runtime_check(
+                AdapterKind::CodexCli,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                RuntimeCheckTrigger::CatalogOpen,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("fixture proxy refused the catalog")
+        );
+        let after_error = core
+            .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+            .await
+            .unwrap();
+        assert_eq!(after_error["models"], before_error["models"]);
+        assert_eq!(after_error["cache"], before_error["cache"]);
+        let database = core.database.lock().await;
+        let installation = AgentProfileService::default()
+            .managed_installation(&database, AdapterKind::CodexCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(installation.id, id);
+        assert_eq!(installation.last_probe_attempt, previous_attempt);
+        drop(database);
+        // Target option completion uses the same installation projection event;
+        // it does not become a machine health check or create health evidence.
+        while catalog_events.try_recv().is_ok() {}
+        let search = core.runtime_search_environment.read().await.clone();
+        finalize_runtime_check(
+            &core,
+            RuntimeCheckAttempt {
+                force_refresh: false,
+                installation_target: None,
+                search,
+                startup_preview: None,
+                model_target: Some(ModelOptionsTarget {
+                    model_id: "fixture-model".into(),
+                    source: None,
+                    context: "fixture-context".into(),
+                }),
+                attempt_id: "target-projection".into(),
+                runtime_kind: AdapterKind::DeepseekHarness,
+                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                trigger: RuntimeCheckTrigger::CatalogOpen,
+                catalog_only: false,
+                started_at: tokio::time::Instant::now(),
+                deadline: tokio::time::Instant::now(),
+                waiters: vec![],
+            },
+            Ok(RuntimeCheckOutcome::Ready),
+            RuntimeCheckFinalization::Product,
+        )
+        .await;
+        let published: Value = serde_json::from_str(&catalog_events.try_recv().unwrap()).unwrap();
+        assert_eq!(published["method"], "runtime.availability.updated");
+        assert_eq!(published["params"]["runtimeKind"], "deepseek-harness");
+        assert!(core.runtime_check_activity.read().await.is_empty());
+        assert!(
+            AgentProfileService::default()
+                .managed_installation(
+                    &*core.database.lock().await,
+                    AdapterKind::DeepseekHarness,
+                    "default"
+                )
+                .unwrap()
+                .is_none()
+        );
         manager.abort();
         let _ = manager.await;
         drop(core);
@@ -31023,7 +32458,8 @@ done
             .map(|installation| (installation.id, installation.version));
         let verified = core.verify_runtime_entry(&observation, None).await.unwrap();
         core.publish_runtime_discovery(observation, Some(verified), current)
-            .await;
+            .await
+            .unwrap();
     }
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
@@ -31187,9 +32623,9 @@ done
                     );
                 let expected = Some((previous.id, previous.version));
                 core.publish_runtime_discovery(upgraded.clone(), verified, expected.clone())
-                    .await;
-                core.publish_runtime_discovery(observation, Some(stale), expected)
-                    .await;
+                    .await.unwrap();
+                assert!(core.publish_runtime_discovery(observation, Some(stale), expected)
+                    .await.is_err());
                 let current = service
                     .managed_installation(
                         &*core.database.lock().await,
@@ -31266,7 +32702,7 @@ done
                         assert_eq!(missing_target.1, found_target.as_ref().unwrap().1 + 1,
                             "repeated missing={repeated} must not keep invalidating checks");
                     }
-                    core.publish_runtime_discovery(upgraded.clone(), Some(found_entry), found_target).await;
+                    core.publish_runtime_discovery(upgraded.clone(), Some(found_entry), found_target).await.unwrap();
                     assert_eq!(service.managed_installation(&*core.database.lock().await, kind, "default").unwrap().unwrap().path_state, "path_missing");
                     let missing_target = core.runtime_check_installation_target(kind).await.unwrap().map(|target| (target.id, target.version));
                     std::fs::rename(root.join("temporarily-absent"), &executable).unwrap();
@@ -31276,7 +32712,7 @@ done
                             missing_target.as_ref().unwrap().1 + 1,
                             "restoration verified={verified}, repeated={repeated} must only advance on a state change");
                     }
-                    core.publish_runtime_discovery(missing, None, missing_target).await;
+                    core.publish_runtime_discovery(missing, None, missing_target).await.unwrap();
                     assert_eq!(service.managed_installation(&*core.database.lock().await, kind, "default").unwrap().unwrap().path_state, "valid");
                 }
                 drop(core);
@@ -33097,7 +34533,6 @@ done
             retry_after: None,
             failure: None,
         });
-        assert!(relevant_failed_runtime_probe_attempt(&installation).is_some());
         assert_eq!(
             product_runtime_availability_status(
                 RuntimeDiscoveryStatus::Found,
@@ -33128,46 +34563,6 @@ done
         );
     }
 
-    #[test]
-    fn later_success_supersedes_an_older_failed_attempt_for_every_runtime() {
-        let now = chrono::Utc::now();
-        let mut installation = managed_runtime_fixture(&now.to_rfc3339(), None);
-        installation.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
-            id: "attempt-before-success".to_string(),
-            installation_id: installation.id.clone(),
-            status: "failed".to_string(),
-            failure_class: "transient".to_string(),
-            diagnostic_code: Some("runtime_probe_timed_out".to_string()),
-            candidate_path: installation.executable_path.clone(),
-            executable_fingerprint: Some("sha256:test".to_string()),
-            attempted_at: (now - chrono::Duration::seconds(1)).to_rfc3339(),
-            retry_after: None,
-            failure: None,
-        });
-
-        assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
-        installation
-            .last_probe_attempt
-            .as_mut()
-            .unwrap()
-            .executable_fingerprint = Some("sha256:F2".into());
-        assert!(
-            relevant_failed_runtime_probe_attempt(&installation).is_some(),
-            "a newer F1 success cannot suppress F2's failure"
-        );
-        assert_eq!(
-            product_runtime_availability_status(
-                RuntimeDiscoveryStatus::Found,
-                Some(&installation),
-                None,
-                false,
-            ),
-            "found_uninspected"
-        );
-    }
-
-    // Owns version projection independently from machine readiness. The former
-    // generation-based projection erased these persisted versions on every scan.
     #[test]
     fn runtime_versions_follow_program_identity_instead_of_search_generation() {
         let installation = managed_runtime_fixture("2026-10-15T00:00:00Z", None);
@@ -36932,7 +38327,7 @@ for line in sys.stdin:
         }
         // No lease, no launch barrier, no cleanup receipt: never claim a reap.
         assert_eq!(
-            core.cleanup_agent_run_runtime("absent", 1, "codex-cli")
+            core.cleanup_agent_run_runtime("absent", 1, "codex-cli", FleetReleaseDisposition::Stop)
                 .await,
             RuntimeCancellationIngressFence::Unproven
         );
@@ -37119,7 +38514,7 @@ for line in sys.stdin:
         assert_eq!(RUNTIME_CANCELLATION_TOTAL_TIMEOUT, Duration::from_secs(3));
         let root =
             std::env::temp_dir().join(format!("rovai-cleanup-launch-{}", uuid::Uuid::new_v4()));
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let mut core = runtime_resolution_test_core(&root).unwrap();
         let permit = core.planned_shutdown.enter_launch().await.unwrap();
         let key = ActiveExecutionKey::new("launching", 1);
         assert!(
@@ -37129,7 +38524,12 @@ for line in sys.stdin:
         );
         let fence = tokio::time::timeout(
             Duration::from_secs(5),
-            core.cleanup_agent_run_runtime("launching", 1, "codex-cli"),
+            core.cleanup_agent_run_runtime(
+                "launching",
+                1,
+                "codex-cli",
+                FleetReleaseDisposition::Stop,
+            ),
         )
         .await
         .unwrap();
@@ -37138,8 +38538,13 @@ for line in sys.stdin:
         assert_eq!(core.planned_shutdown.active_snapshots().await.len(), 1);
         drop(permit);
         assert_ne!(
-            core.cleanup_agent_run_runtime("launching", 1, "codex-cli")
-                .await,
+            core.cleanup_agent_run_runtime(
+                "launching",
+                1,
+                "codex-cli",
+                FleetReleaseDisposition::Stop
+            )
+            .await,
             RuntimeCancellationIngressFence::Unproven
         );
         core.planned_shutdown.cleanup_completed(&key).await;
@@ -37220,20 +38625,309 @@ for line in sys.stdin:
             runtime
         };
         let (fence, runtime) = tokio::join!(
-            core.cleanup_agent_run_runtime("late-host", 1, "codex-cli"),
+            core.cleanup_agent_run_runtime(
+                "late-host",
+                1,
+                "codex-cli",
+                FleetReleaseDisposition::Stop
+            ),
             late_launch,
         );
         let falsely_confirmed = fence != RuntimeCancellationIngressFence::Unproven
             && runtime.process_id().await.is_some();
         // Reap even when the assertion fails, leaving no fixture process behind.
         let retry = core
-            .cleanup_agent_run_runtime("late-host", 1, "codex-cli")
+            .cleanup_agent_run_runtime("late-host", 1, "codex-cli", FleetReleaseDisposition::Stop)
             .await;
         assert!(!falsely_confirmed, "cleanup missed the late-created Host");
         assert_ne!(retry, RuntimeCancellationIngressFence::Unproven);
         assert!(runtime.process_id().await.is_none());
         core.planned_shutdown.cleanup_completed(&late_key).await;
         drop(runtime);
+
+        let (incoming, mut events) = mpsc::unbounded_channel();
+        core.kilo_cli = AcpCliRuntimeAdapter::new(
+            AdapterKind::KiloCli,
+            incoming.clone(),
+            root.join("kilo-hosts"),
+            core.runtime_fleet.clone(),
+            core.compaction_detector_policies
+                .policy_for(AdapterKind::KiloCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        )
+        .unwrap();
+        core.opencode_cli = AcpCliRuntimeAdapter::new(
+            AdapterKind::OpencodeCli,
+            incoming,
+            root.join("opencode-hosts"),
+            core.runtime_fleet.clone(),
+            core.compaction_detector_policies
+                .policy_for(AdapterKind::OpencodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        )
+        .unwrap();
+        let core = Arc::new(core);
+        let ingress_core = core.clone();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ingress_callbacks = callbacks.clone();
+        let ingress = tokio::spawn(async move {
+            let (output, _output) = mpsc::unbounded_channel();
+            while let Some(event) = events.recv().await {
+                match event {
+                    AcpIncoming::IngressBarrier { completion } => {
+                        let _ = completion.send(());
+                    }
+                    AcpIncoming::Message {
+                        adapter_kind,
+                        agent_run_id,
+                        execution_epoch,
+                        message,
+                        ..
+                    } if message["method"] == "rovai/acp_prompt_completed" => {
+                        if let Some(runtime) = ingress_core
+                            .acp_adapter(adapter_kind)
+                            .unwrap()
+                            .get_agent_run(&agent_run_id, execution_epoch)
+                            .await
+                        {
+                            let mut permit = ingress_core
+                                .planned_shutdown
+                                .enter_runtime_route()
+                                .await
+                                .unwrap();
+                            // These synthetic Runs are absent from the eligible
+                            // execution read, just as a committed cancellation is.
+                            // Its native callback must leave release to cleanup.
+                            persist_acp_prompt_completion(
+                                &ingress_core,
+                                &output,
+                                adapter_kind,
+                                &runtime,
+                                &agent_run_id,
+                                execution_epoch,
+                                &message["params"],
+                                &mut permit,
+                            )
+                            .await
+                            .unwrap();
+                            ingress_callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+        for kind in [AdapterKind::KiloCli, AdapterKind::OpencodeCli] {
+            for (case, delay, warm) in [
+                ("fast", "0", true),
+                ("delayed", "1.75", true),
+                ("late", "2.2", false),
+                ("missing", "None", false),
+                ("disconnect", "'disconnect'", false),
+                ("error", "'error'", false),
+                ("unknown", "'unknown'", false),
+                ("explicit-stop", "0", false),
+            ] {
+                let executable = root.join(format!("{}-{case}", kind.as_str()));
+                write_runtime_resolution_executable(&executable, &r#"#!/usr/bin/python3
+import json, os, pathlib, sys, time
+path = pathlib.Path(__file__)
+path.with_suffix('.pid').write_text(str(os.getpid()))
+prompts = []
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'session/prompt':
+        prompts.append(request['id'])
+        continue
+    if method == 'session/cancel':
+        delay = __DELAY__
+        if delay == 'disconnect': sys.exit(0)
+        if delay is None: continue
+        if delay == 'error':
+            print(json.dumps({'jsonrpc':'2.0','id':prompts[0],'error':{'code':-32000,'message':'native cancellation error'}}),flush=True)
+            continue
+        if delay == 'unknown':
+            print(json.dumps({'jsonrpc':'2.0','id':prompts[0],'result':{'stopReason':'unknown'}}),flush=True)
+            continue
+        time.sleep(delay)
+        path.with_suffix('.settled').write_text('settled')
+        for prompt in prompts:
+            print(json.dumps({'jsonrpc':'2.0','id':prompt,'result':{'stopReason':'cancelled'}}), flush=True)
+        prompts = []
+        continue
+    if method == 'initialize':
+        result = {'protocolVersion':1,'agentCapabilities':{}}
+    elif method == 'session/new':
+        result = {'sessionId':'delayed-cancel-session','configOptions':[]}
+    else:
+        result = {}
+    if 'id' in request:
+        print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}), flush=True)
+"#.replace("__DELAY__", delay));
+                let mut config = runtime_config.clone();
+                config.adapter_kind = kind;
+                config.executable_path = executable.to_string_lossy().into_owned();
+                config.executable_fingerprint = fingerprint_executable(&executable).unwrap();
+                config.reported_version = Some(
+                    if kind == AdapterKind::KiloCli {
+                        "7.8.27"
+                    } else {
+                        "1.2.0"
+                    }
+                    .into(),
+                );
+                config.protocol_version = "acp-v1".into();
+                config.permissions = rovai_core::agent_profile::AdapterPermissionConfig {
+                    adapter_kind: kind,
+                    schema_version: 1,
+                    values: AgentRuntimeAdapterRegistry::default().member_permission_defaults(kind),
+                };
+                let workspace =
+                    AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+                let adapter = core.acp_adapter(kind).unwrap();
+                let run = format!("{}-{case}", kind.as_str());
+                let runtime = adapter
+                    .ensure_agent_run_runtime(
+                        &run,
+                        1,
+                        "cleanup-camp",
+                        "cleanup-agent",
+                        &run,
+                        &workspace,
+                        PermissionSemantics::RuntimeManagedV2,
+                        &config,
+                        &builtin_tools,
+                        &BTreeMap::new(),
+                        "mcp",
+                        &root,
+                        &Some(run.clone()),
+                        Some("TEST_BOOTSTRAP"),
+                        |runtime| async move { Ok(runtime) },
+                    )
+                    .await
+                    .unwrap();
+                runtime
+                    .start_or_resume_session_with_native_rules(
+                        None,
+                        acp::AcpSessionCapabilities::default(),
+                        "runtime_default",
+                        "runtime_default",
+                        &json!({}),
+                        &BTreeMap::new(),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                runtime.start_prompt("cancel-input", "run").await.unwrap();
+                let host = runtime.host_instance_id().to_owned();
+                let pid = fs::read_to_string(executable.with_extension("pid")).unwrap();
+                let started = tokio::time::Instant::now();
+                let fence = core
+                    .cleanup_agent_run_runtime(
+                        &run,
+                        1,
+                        kind.as_str(),
+                        if case == "explicit-stop" {
+                            FleetReleaseDisposition::Stop
+                        } else {
+                            FleetReleaseDisposition::Reusable
+                        },
+                    )
+                    .await;
+                assert_ne!(
+                    fence,
+                    RuntimeCancellationIngressFence::Unproven,
+                    "{kind:?}/{case}"
+                );
+                assert_eq!(
+                    fence == RuntimeCancellationIngressFence::Reusable,
+                    warm,
+                    "{kind:?}/{case}"
+                );
+                assert!(started.elapsed() < RUNTIME_CANCELLATION_TOTAL_TIMEOUT);
+                if case == "delayed" {
+                    assert!(
+                        executable.with_extension("settled").exists(),
+                        "cleanup truncated the native cancellation finalizer"
+                    );
+                    assert!(started.elapsed() >= Duration::from_millis(1750));
+                } else if case == "fast" {
+                    assert!(
+                        started.elapsed() < Duration::from_secs(1),
+                        "fast cancellation must not wait out the budget"
+                    );
+                }
+                assert!(adapter.get_agent_run(&run, 1).await.is_none());
+                if warm {
+                    let successor = adapter
+                        .ensure_agent_run_runtime(
+                            &run,
+                            2,
+                            "cleanup-camp",
+                            "cleanup-agent",
+                            &run,
+                            &workspace,
+                            PermissionSemantics::RuntimeManagedV2,
+                            &config,
+                            &builtin_tools,
+                            &BTreeMap::new(),
+                            "mcp",
+                            &root,
+                            &Some(run.clone()),
+                            Some("TEST_BOOTSTRAP"),
+                            |runtime| async move { Ok(runtime) },
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(successor.host_instance_id(), host);
+                    assert_eq!(successor.execution_epoch(), 2);
+                    assert_eq!(
+                        fs::read_to_string(executable.with_extension("pid")).unwrap(),
+                        pid
+                    );
+                    // A repeated old cleanup consumes its retained release proof,
+                    // without stopping the successor that already owns this Host.
+                    assert_eq!(
+                        core.cleanup_agent_run_runtime(
+                            &run,
+                            1,
+                            kind.as_str(),
+                            FleetReleaseDisposition::Reusable
+                        )
+                        .await,
+                        RuntimeCancellationIngressFence::Reusable
+                    );
+                    assert_eq!(
+                        adapter
+                            .get_agent_run(&run, 2)
+                            .await
+                            .unwrap()
+                            .host_instance_id(),
+                        host
+                    );
+                    core.runtime_fleet.acknowledge_cleanup(&run, 1).await;
+                    adapter.forget_agent_run(&run, 2).await;
+                } else {
+                    assert_eq!(
+                        core.runtime_fleet
+                            .stop_agent_run_until_with_outcome(
+                                &run,
+                                1,
+                                tokio::time::Instant::now() + Duration::from_secs(1)
+                            )
+                            .await,
+                        FleetReleaseOutcome::Reaped
+                    );
+                }
+                core.runtime_fleet.acknowledge_cleanup(&run, 1).await;
+                core.runtime_fleet.acknowledge_cleanup(&run, 2).await;
+            }
+        }
+        assert!(callbacks.load(std::sync::atomic::Ordering::SeqCst) >= 4);
+        core.runtime_fleet.shutdown_all().await;
+        ingress.abort();
+        let _ = ingress.await;
         drop(builtin_tools);
         drop(core);
         std::fs::remove_dir_all(root).unwrap();
@@ -37247,6 +38941,7 @@ for line in sys.stdin:
             (AdapterKind::KimiCodeCli, "TaskOutput"),
             (AdapterKind::HermesCli, "delegate_task"),
             (AdapterKind::KiroCli, "subagent"),
+            (AdapterKind::KiloCli, "task"),
         ] {
             let input =
                 json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
@@ -37302,6 +38997,30 @@ for line in sys.stdin:
             serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
             report
         );
+        // Kilo changes its task title and drops input/kind at completion. The
+        // shared display cache supplies task parameters; native content owns
+        // the report, without exposing private result metadata.
+        let input = json!({"description":"Read fixture","subagent_type":"general","prompt":"Read the fixture"});
+        let started = display.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-call",
+                "title":"Read fixture","kind":"think","status":"in_progress","rawInput":input}
+        })).unwrap();
+        let completed = display.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-call",
+                "status":"completed","content":[{"type":"content","content":{"type":"text","text":"KILO_CHILD_REPORT"}}],
+                "rawOutput":{"output":"KILO_CHILD_REPORT","metadata":{"sessionId":"child-session","private":"KILO_PRIVATE"}}}
+        })).unwrap();
+        let (_, payload) = normalize_acp_event(AdapterKind::KiloCli, "session/update", &completed);
+        assert_eq!(payload["operationId"], started["update"]["operationId"]);
+        assert_eq!(payload["toolName"], "task");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(payload["output"], "KILO_CHILD_REPORT");
+        assert_eq!(payload["runtimeRootOutput"], true);
+        assert!(!payload.to_string().contains("KILO_PRIVATE"));
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),
@@ -37328,6 +39047,96 @@ for line in sys.stdin:
                 assert_eq!(payload["runtimeDiff"]["semanticKind"], "minimax_file_patch");
             }
             assert!(!payload.to_string().contains("MINI_PRIVATE_DETAILS"));
+        }
+        for (shape, status, truncated, operation_path, change_kind, has_diff) in [
+            ("write", "completed", false, "/repo/src/a.txt", "add", true),
+            ("write", "completed", false, "src/a.txt", "add", true),
+            ("write", "completed", false, "src/../src/a.txt", "add", true),
+            ("patch", "completed", false, "", "add", true),
+            ("patch", "completed", false, "", "delete", true),
+            ("write", "failed", false, "/repo/src/a.txt", "add", false),
+            ("patch", "in_progress", false, "", "add", false),
+            ("write", "completed", true, "/repo/src/a.txt", "add", false),
+        ] {
+            let patch = if change_kind == "delete" {
+                "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -1 +0,0 @@\n-old\n"
+            } else {
+                "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -0,0 +1 @@\n+new\n"
+            };
+            let mut metadata = if shape == "write" {
+                json!({"filepath":"/repo/src/a.txt","exists":false,"filediff":{"file":"/repo/src/a.txt","patch":patch}})
+            } else {
+                json!({"files":[{"filePath":"/repo/src/a.txt","type":change_kind,"patch":patch}]})
+            };
+            metadata["truncated"] = json!(truncated);
+            metadata["private"] = json!("KILO_PRIVATE_METADATA");
+            let locations = if operation_path.is_empty() {
+                json!([])
+            } else {
+                json!([{"path":operation_path}])
+            };
+            let params = json!({"update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-file","kind":"edit","status":status,
+                "locations":locations,"rawOutput":{"metadata":metadata}}});
+            let completion = acp::completed_action(AdapterKind::KiloCli, &params).unwrap();
+            let (_, payload) = normalize_acp_event_with_completion(
+                AdapterKind::KiloCli,
+                "session/update",
+                &params,
+                completion.as_ref(),
+            );
+            assert_eq!(
+                !payload["runtimeDiff"].is_null(),
+                has_diff,
+                "{shape} {status} {operation_path}"
+            );
+            if has_diff {
+                let admitted =
+                    rovai_core::runtime_diff::admit_runtime_diff_with_file_operation_path(
+                        &payload,
+                        Path::new("/repo"),
+                        Some("kilo-cli"),
+                        payload
+                            .pointer("/runtimeFileOperation/path")
+                            .and_then(Value::as_str),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    (admitted.entries[0].additions, admitted.entries[0].deletions),
+                    if change_kind == "delete" {
+                        (0, 1)
+                    } else {
+                        (1, 0)
+                    }
+                );
+                assert_eq!(admitted.entries[0].change_kind, change_kind);
+                if change_kind == "delete" {
+                    assert!(
+                        payload.get("runtimeFileOperation").is_none(),
+                        "deletion belongs to Diff, never a write operation"
+                    );
+                } else {
+                    let expected_path = if shape == "write" {
+                        operation_path
+                    } else {
+                        "/repo/src/a.txt"
+                    };
+                    assert_eq!(
+                        payload["runtimeFileOperation"]["path"], expected_path,
+                        "preserve the common operation instead of rebuilding it"
+                    );
+                    assert!(
+                        rovai_core::runtime_file_operation::admit_runtime_file_operation(
+                            &payload,
+                            Path::new("/repo"),
+                            Some("kilo-cli")
+                        )
+                        .unwrap()
+                        .is_ok()
+                    );
+                }
+            }
+            assert!(!payload.to_string().contains("KILO_PRIVATE_METADATA"));
         }
         let (_, payload) = normalize_acp_event(
             AdapterKind::OpencodeCli,
