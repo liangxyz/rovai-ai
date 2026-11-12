@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-11-02
+last_updated: 2026-11-09
 ---
 
 # File Preview Architecture
@@ -221,8 +221,10 @@ HTTP(S) 网络依赖和必要子页面，保留 CORS/证书/混合内容与第�
 
 诊断按受校验的 source/origin/实例/generation/challenge/document 消息通道送回宿主，同源子页面仅经直属 frame
 窗口校验后转发。脚本错误、资源错误、文档加载和诊断连接分别管理；可见正文及用户路由保留，失败不伪造恢复。
+桥接器在原始事件处严格识别已确认的 ResizeObserver 布局通知，跳过向预览诊断列表上报；不改变浏览器事件、原生控制台或页面生命周期。
+其他诊断沿用现有采集、消息校验、去重与数量上限；精确识别条件见[文件预览合同](../contracts/file-preview-v28.md#html-诊断分类)。
 受管 HTTP 站点不设置空闲关闭计时器，由现有预览资源层关闭或淘汰。HTTP 资源诊断流与页面消息通信分离，
-断流不影响文档状态、查找、滚动或候选提交；仅在当前文档内有限重连，恢复清除对应暂态提示。握手和请求超时仍独立有效。
+断流不影响文档状态、查找、滚动或候选提交；仅在当前文档内有限重连。辅助诊断不可用不单独触发预览入口，状态随实际诊断详情展示。握手和请求超时仍独立有效。
 桥接器只将浏览器实际拦截、精确匹配当前文档诊断 URL 与注入脚本来源的 CSP 事件归因为内部辅助失败。
 该事件不进入作品问题列表，按 policy 原因中性降级，并独立取消诊断请求和退避；页面通道与真实错误监听保持。
 无法确认归因的事件仍按原规则记录，不改写作者 CSP，也不放宽站点或文件能力。
@@ -304,7 +306,7 @@ Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core �
 由现有预览 session 持有不占文件句柄的 `file_picker` 空标签；第一次目录文件打开后替换为普通文件标签。
 文件标签的 `openedFromDirectory` 标记随 session 保留、去重时合并；最后一个目录来源标签关闭后收起目录，
 不连带关闭仅从会话链接打开的标签。目录可单独折叠，sidecar 隐藏时暂停目录显示和监听，保留浏览状态。
-`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v26.md) 请求。
+`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v28.md) 请求。
 Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
 
 每个正在浏览的作用域共享一组非递归目录监听；变更通知只使可见目录缓存失效，与现有文件预览监听各负其责。
@@ -313,3 +315,9 @@ Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；�
 普通条目直接使用目录遍历返回的类型，链接及实际访问时再解析目标。监听忽略打开、读取等非变更事件。
 目录条目不读取正文；树、搜索、标签共用现有 `ProjectFileIcon`，导航使用界面字体，代码正文沿用 CodeMirror 等宽字体。
 没有文件管理、工作副本选择器、后台索引、搜索续传或新的编辑框架。目录中的不支持格式只显示信息与现有主动打开/下载操作。
+
+## 项目目录引用
+
+项目条目的选择来源允许文件与目录，二者保留明确类型。目录激活复用当前 Thread 的文件树，并在 Host
+校验原根、目录类型和历史冻结位置后揭示祖先链；不创建文件读取 handle 或递归加载整个目录。
+界面与草稿合同见[项目引用 v2](../contracts/project-file-reference-v2.md)，元数据 API 见[预览 v28](../contracts/file-preview-v28.md)。

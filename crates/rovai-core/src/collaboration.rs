@@ -406,6 +406,8 @@ pub struct SendUserAutomationThreadMessageCommand {
     #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_agent_id: Option<String>,
     pub body: String,
     pub execution: Option<ExecutionRequest>,
 }
@@ -618,6 +620,15 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendUserThreadMessageCommand>,
     ) -> Result<CommandExecution> {
+        self.send_user_camp_message_with_files(database, envelope, None)
+    }
+
+    pub fn send_user_camp_message_with_files(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SendUserThreadMessageCommand>,
+        files: Option<&crate::project_file_reference::Preflight>,
+    ) -> Result<CommandExecution> {
         crate::web_upload::protect_for_send(database, &envelope.payload.source_attachments)?;
         let command = SendUserThreadDraftCommand {
             draft_client: DraftClient::default(),
@@ -639,8 +650,16 @@ impl CollaborationService {
                 ),
             },
             |transaction| {
-                let content = composer_document_to_content(&envelope.payload.content)?;
-                validate_user_authored_content(&content)?;
+                let content = if let Some(files) = files {
+                    match files.publish(transaction, &command.camp_id, &envelope.payload.content)? {
+                        Ok(content) => content,
+                        Err(rejection) => return Ok(Err(rejection)),
+                    }
+                } else {
+                    let content = composer_document_to_content(&envelope.payload.content)?;
+                    validate_user_authored_content(&content)?;
+                    content
+                };
                 if let Some(rejection) =
                     invite_pending_thread_mentions(transaction, envelope, &content)?
                 {
@@ -2675,9 +2694,16 @@ impl CollaborationService {
             UserThreadMessageAttachmentCommit {
                 legacy_publication_operation_id: None,
                 managed_ingest_intent_id: None,
-                source: UserThreadMessageSource::Automation,
+                source: UserThreadMessageSource::Automation(envelope.payload.sender_agent_id.as_deref()),
             },
             move |transaction| {
+                // User Automation may delegate public authorship, never Run authority.
+                if !matches!(&envelope.actor, ActorRef::User { user_id } if user_id == crate::current_user::CURRENT_USER_ID) {
+                    return Ok(Err(rejected(
+                        "command.capability_denied",
+                        "Only the local User may send User Automation messages",
+                    )));
+                }
                 let camp_exists = transaction
                     .query_row("SELECT 1 FROM camp WHERE id = ?1", [&camp_id], |row| {
                         row.get::<_, i64>(0)
@@ -2686,6 +2712,22 @@ impl CollaborationService {
                     .is_some();
                 if !camp_exists {
                     return Ok(Err(rejected("camp.not_found", "Thread does not exist")));
+                }
+                if let Some(sender_id) = envelope.payload.sender_agent_id.as_deref() {
+                    if sender_id.trim().is_empty()
+                        || active_address_target(transaction, &camp_id, sender_id)?.is_none()
+                    {
+                        return Ok(Err(rejected(
+                            "automation.sender_unavailable",
+                            "Sender must be a present current Thread member",
+                        )));
+                    }
+                    if sender_id == envelope.payload.agent_id {
+                        return Ok(Err(rejected(
+                            "automation.self_address_not_allowed",
+                            "Sender and recipient must be different Thread members",
+                        )));
+                    }
                 }
                 let display_name = transaction
                     .query_row(
@@ -3159,8 +3201,21 @@ impl CollaborationService {
                             resolution: &resolution,
                             execution: command.execution.as_ref(),
                             actor: &envelope.actor,
-                            message_author: None,
-                            origin_kind: None,
+                            message_author: match attachment_commit.source {
+                                UserThreadMessageSource::Automation(Some(sender_id)) => {
+                                    Some(ThreadMessageAuthor {
+                                        author_type: "agent",
+                                        author_id: sender_id,
+                                        source_agent_run_id: None,
+                                    })
+                                }
+                                _ => None,
+                            },
+                            origin_kind: matches!(
+                                attachment_commit.source,
+                                UserThreadMessageSource::Automation(Some(_))
+                            )
+                            .then_some("automation"),
                             execution_epoch: envelope.execution_epoch,
                             command_id: &envelope.command_id,
                             now: &now,
@@ -3865,7 +3920,7 @@ enum UserThreadMessageSource<'a> {
         crate::steer::UserDeliveryMode,
         Option<&'a [crate::steer::ActiveInputTarget]>,
     ),
-    Automation,
+    Automation(Option<&'a str>),
     #[cfg(test)]
     FixtureComposer,
 }
@@ -4109,11 +4164,21 @@ fn load_structured_content_submission(
     {
         return Ok(Err(rejection));
     }
-    if crate::thread_reference::contains_reference(&content)
-        && !content.iter().any(|segment| matches!(segment, StructuredThreadMessageSegment::Text { text } if !text.trim().is_empty()))
-        && source_attachments.is_empty() && prepared_attachment_ids.is_empty()
-    {
-        return Ok(Err(rejected("camp_message.empty_body", "请补充本轮内容")));
+    let actual_input = content.iter().any(|segment| {
+        matches!(segment,
+        StructuredThreadMessageSegment::Text { text } if !text.trim().is_empty())
+    }) || content.iter().any(|segment| {
+        matches!(
+            segment,
+            StructuredThreadMessageSegment::ProjectFileReference { .. }
+                | StructuredThreadMessageSegment::SkillMention { .. }
+        )
+    });
+    if !actual_input && source_attachments.is_empty() && prepared_attachment_ids.is_empty() {
+        return Ok(Err(rejected(
+            "camp_message.empty_body",
+            "请填写这次的问题后再发送",
+        )));
     }
     let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();
@@ -4138,7 +4203,15 @@ fn load_structured_content_submission(
             display_name.expect("checked Member Mention identity"),
         );
     }
-    let body = render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned())?;
+    let body = match render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned()) {
+        Ok(body) => body,
+        Err(error) => {
+            return Ok(Err(CommandHandlerResult::rejected(
+                "camp_message.invalid_content",
+                json!({"message":error.to_string(),"segmentIndex":error.downcast_ref::<crate::camp_content::ContentSegmentError>().map(|error|error.segment_index).unwrap_or(0)}),
+            )));
+        }
+    };
     if body.trim().is_empty() && prepared_attachment_ids.is_empty() && source_attachments.is_empty()
     {
         return Ok(Err(rejected(
@@ -7004,13 +7077,15 @@ mod slow_tests {
     fn user_automation_send_is_atomic_idempotent_and_never_persists_staging_draft() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let command = user_envelope(
             "automation-send",
             Some(&camp_id),
             SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_1".to_string(),
+                sender_agent_id: None,
                 body: "diagnose runtime".to_string(),
                 execution: Some(ExecutionRequest {
                     task_id: None,
@@ -7036,6 +7111,88 @@ mod slow_tests {
         assert_eq!(row_count(&database, "agent_run"), 0);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
 
+        let legacy_author: String = database
+            .connection()
+            .query_row("SELECT author_type FROM camp_message", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(legacy_author, "user");
+
+        let mut delegated = command.clone();
+        delegated.command_id = "automation-delegated-send".into();
+        delegated.payload.sender_agent_id = Some("agent_2".into());
+        let sent = service
+            .send_user_automation_camp_message(&mut database, &delegated)
+            .unwrap();
+        let replay = service
+            .send_user_automation_camp_message(&mut database, &delegated)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert!(replay.replayed);
+        let message_id = sent.result.payload["threadMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let author: (String, String, Option<String>, String, String) = database.connection().query_row(
+            "SELECT author_type, author_id, source_agent_run_id, origin_kind, recall_state FROM camp_message WHERE id=?1",
+            [&message_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
+        ).unwrap();
+        assert_eq!(
+            author,
+            (
+                "agent".into(),
+                "agent_2".into(),
+                None,
+                "automation".into(),
+                "ineligible".into()
+            )
+        );
+        let audit: (String, String, Option<String>) = database.connection().query_row(
+            "SELECT actor_type, actor_id, source_agent_run_id FROM event_log WHERE command_id=?1 AND event_type='command.result'",
+            [&delegated.command_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            audit,
+            (
+                "user".into(),
+                crate::current_user::CURRENT_USER_ID.into(),
+                None
+            )
+        );
+        assert_eq!(row_count(&database, "camp_message"), 2);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 2);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 0);
+        let sender_name: String = database
+            .connection()
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id='agent_2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        let input = crate::context::project_batch_run_input_for_claim(
+            &transaction,
+            &camp_id,
+            sent.result.payload["sequence"].as_i64().unwrap(),
+            &[message_id],
+            &[],
+            &mut crate::message_sender::SenderNames::default(),
+        )
+        .unwrap();
+        assert_eq!(input["messages"][0]["senderType"], "agent");
+        assert_eq!(input["messages"][0]["senderId"], "agent_2");
+        assert_eq!(input["messages"][0]["senderName"], sender_name);
+        transaction.commit().unwrap();
+        // Existing command IDs return the first result, even if the caller changes its sender.
+        delegated.payload.sender_agent_id = None;
+        let changed_retry = service
+            .send_user_automation_camp_message(&mut database, &delegated)
+            .unwrap();
+        assert!(changed_retry.replayed);
+        assert_eq!(changed_retry.result.payload, sent.result.payload);
+        assert_eq!(row_count(&database, "camp_message"), 2);
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -7055,6 +7212,7 @@ mod slow_tests {
             SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_1".to_string(),
+                sender_agent_id: None,
                 body: "independent automation message".to_string(),
                 execution: None,
             },
@@ -7079,13 +7237,15 @@ mod slow_tests {
     fn user_automation_rejection_is_replayable_without_message_run_or_draft_effects() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let command = user_envelope(
             "automation-send-unavailable-member",
             Some(&camp_id),
             SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: "agent_999".to_string(),
+                sender_agent_id: None,
                 body: "must reject atomically".to_string(),
                 execution: Some(ExecutionRequest {
                     task_id: None,
@@ -7108,6 +7268,48 @@ mod slow_tests {
         assert!(replay.replayed);
         assert_eq!(row_count(&database, "camp_message"), 0);
         assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 0);
+
+        for (index, sender, expected) in [
+            (0, "agent_999", "automation.sender_unavailable"),
+            (1, " ", "automation.sender_unavailable"),
+            (2, "agent_1", "automation.self_address_not_allowed"),
+            (3, "agent_2", "automation.sender_unavailable"),
+        ] {
+            if index == 3 {
+                database.connection().execute(
+                    "UPDATE camp_member SET status='left', left_at=datetime('now') WHERE camp_id=?1 AND agent_id='agent_2'", [&camp_id],
+                ).unwrap();
+            }
+            let mut invalid = command.clone();
+            invalid.command_id = format!("invalid-sender-{index}");
+            invalid.payload.agent_id = "agent_1".into();
+            invalid.payload.sender_agent_id = Some(sender.into());
+            let rejected = service
+                .send_user_automation_camp_message(&mut database, &invalid)
+                .unwrap();
+            assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+            assert_eq!(rejected.result.code, expected);
+            assert!(
+                service
+                    .send_user_automation_camp_message(&mut database, &invalid)
+                    .unwrap()
+                    .replayed
+            );
+        }
+        let mut untrusted = command.clone();
+        untrusted.command_id = "untrusted-automation".into();
+        untrusted.actor = ActorRef::System {
+            component_id: "not-user-automation".into(),
+        };
+        untrusted.payload.agent_id = "agent_1".into();
+        let denied = service
+            .send_user_automation_camp_message(&mut database, &untrusted)
+            .unwrap();
+        assert_eq!(denied.result.code, "command.capability_denied");
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_message_delivery"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
 

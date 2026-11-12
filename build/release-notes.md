@@ -1,31 +1,35 @@
-# Rovai AI v0.5.9
+# Rovai AI v0.5.11
 
 <!-- lang:zh-CN -->
 
-本次更新支持从侧栏导出完整会话，减少打开和切换会话时的查询开销，并修复执行状态显示和智能体收尾时的误判。
+感谢 @NorethSea 在 PR #1020 中加入本地自动化指定发送队员的功能，也感谢其在 Issue #1041 中反馈删除队员后无法保存工具箱设置的问题。感谢 @arschlochnop 在 Issue #1050 中提供 macOS 下 Shell 启动信息干扰智能体检测的复现步骤。
 
-感谢 @caoshuisi 在 Issue #1012 中反馈 Pi 执行结束后被误判为失败，以及 CodeBuddy 报错原因不明确的问题。
-
-- 【功能】**支持从侧栏导出完整会话。** 在会话菜单选择「导出会话」，无需先滚动加载历史消息，即可预览并保存为 HTML、PNG 或 Markdown。需要导出片段时可多选消息，选中文字后的浮条仅提供引用。
-- 【界面】**优化手机端的导出预览。** 长按会话可打开导出菜单，HTML 预览随屏幕宽度排版，底部按钮更便于触控。
-- 【性能】**减少打开和切换会话时对无关历史的扫描。** 执行数量、执行列表和文件变更按当前会话读取。部分旧版执行卡片及其文件变更会从公屏的相应列表中移除，历史消息和原始记录仍保存在数据库中。
-- 【修复】**重新执行后，消息回执会跟随最新状态。** 执行失败或手动停止后再次执行，回执会随新一轮更新，「查看执行」也会打开新一轮的记录。同时修复没有投递或执行记录却误显示「待处理」的问题。
-- 【修复】**修复智能体正常结束却被判为失败的问题。** Pi、Codex、Antigravity 及部分 ACP 智能体明确返回成功时，即使没有最后一条文字回复，执行也会正常结束。
-- 【修复】**CodeBuddy 执行卡片会显示具体报错。** 模型请求失败时，如果 CodeBuddy 返回了鉴权失败、请求参数有误等详情，可直接在执行卡片中查看。
-- 【交互】**项目收起后再展开，从第一页显示会话。** 普通项目、置顶项目和快速对话均先显示 5 条未置顶会话，可点击「查看更多」继续加载。
+- 【功能】**`@` 队员时可以按智能体名称、简称或前缀搜索。** 例如输入 `@com` 可找到使用 Command Code 的队员，当前会话的队员优先显示。公屏、会话草稿和使命描述都支持。
+- 【功能】**Pi 有问题等待回答时会在应用内提醒。** 浏览其他会话或页面时也能收到提示。点击可定位到原公屏或单聊里的问题，开关位于「设置 → 提醒 → 待审批与回答」。
+- 【功能】**Hermes 支持按队员设置推理强度。** 可选择 Hermes 提供的档位，切回「跟随模型默认值」时会清除之前设定的强度。
+- 【功能】**本地自动化支持指定发送队员。** 桌面版运行时，脚本可在 `rovai app thread send` 中用 `--sender-agent-id` 指定消息署名，用 `--agent-id` 指定接收队员。发送受理后会返回消息和投递编号。
+- 【交互】**模型选择器增加手动刷新。** 点击搜索框旁的按钮可重新读取模型列表。打开队员参数设置时按需加载，读取失败时保留已选模型和上次成功读取的列表。
+- 【修复】**智能体检测会重新读取本机版本。** 「检查状态」和「重新检测」只检查安装入口并读取版本，模型列表在打开配置时单独加载。版本查询时限调整为 15 秒，备用安装检查失败时会保留当前入口。
+- 【修复】**修复 macOS 下 Shell 启动输出干扰智能体检测的问题。** Shell 的启动信息没有换行时，也能正确读取 PATH。
+- 【修复】**修复网页端的队员操作和头像加载。** 队员菜单中的「暂时离队」和「归队」恢复可用。头像遇到临时加载错误会自动重试，断线恢复后也会重新加载失败的头像。
+- 【修复】**修复删除队员后无法保存工具箱设置的问题。** 删除队员时会清理其 Skill 分配，已有的残留记录会在保存对应 Skill 时一并清理。
+- 【修复】**HTML 预览减少布局提示误报。** 浏览器原生布局提示会从诊断记录中过滤，辅助诊断限制只在已有的详情里显示。脚本和资源错误照常提示。
+- 【界面】**统一应用内的蓝色标识。** 启动页、导航、关于与更新、网页登录等页面采用相同标识，并调整了无可用队员时「前往队员」和「查看智能体」的按钮样式。
 
 ---
 
 <!-- lang:en -->
 
-This release adds full conversation export, reduces the amount of history scanned when opening or switching conversations, and fixes how execution status and Agent completion are reported.
+Thanks to @NorethSea for adding teammate senders to local automation in PR #1020 and reporting that Toolbox settings could not be saved after deleting a teammate in Issue #1041. Thanks to @arschlochnop for the detailed reproduction of the macOS shell startup output problem in Issue #1050.
 
-Thanks to @caoshuisi for reporting Pi runs being marked as failed after completion and unclear CodeBuddy errors in Issue #1012.
-
-- [Feature] **Export a full conversation from the sidebar.** Choose “Export thread” from the conversation menu to preview and save the conversation as HTML, PNG, or Markdown without scrolling back to load older messages. To export an excerpt, select multiple messages. The text-selection toolbar now offers only quoting.
-- [UI] **Improve export preview on phones.** Long-press a conversation to open the export menu. The HTML preview fits the screen width, and the buttons are easier to tap.
-- [Performance] **Scan less unrelated history when opening or switching conversations.** Run counts, run lists, and file changes are read for the current conversation. Some older run cards and their file changes are removed from these lists. Messages and original records are retained in the database.
-- [Fix] **Show the latest run status after retrying.** After a failed or manually stopped run is retried, the message receipt follows the new attempt and “View run” opens it. Receipts no longer show “Pending” when there is no delivery or run record.
-- [Fix] **Recognize successful runs without a final text reply.** When Pi, Codex, Antigravity, or a supported ACP Agent reports success, the run can complete without a final chat message.
-- [Fix] **Show the error details returned by CodeBuddy.** When a model request fails, the run card shows available details, such as an authentication error or invalid request parameters.
-- [UX] **Show the first page of conversations when a group is reopened.** Regular projects, pinned projects, and Quick Chat initially show five unpinned conversations. Use “Show more” to load additional entries.
+- [Feature] **Find teammates by Agent name when using `@`.** Search by product name, abbreviation, or prefix. For example, `@com` finds teammates using Command Code. Teammates in the current conversation appear first. Search works in public conversations, drafts, and Mission descriptions.
+- [Feature] **Get an in-app reminder when Pi is waiting for an answer.** Select the reminder to jump to the question in its original public conversation or Single Chat. The setting is under Settings → Notifications → Approvals and answers.
+- [Feature] **Set Hermes reasoning effort per teammate.** Choose from the options Hermes exposes. Select Follow model default to clear the previous override.
+- [Feature] **Send a local automation message under a teammate's name.** While Desktop is running, use `--sender-agent-id` with `rovai app thread send` to choose the sender and `--agent-id` to choose the recipient. Accepted sends return the message and delivery IDs.
+- [Interaction] **Refresh the model list from the model picker.** The refresh button sits beside search. Model options load when the relevant teammate settings are opened. If a read fails, the saved selection and last successful list stay available.
+- [Fix] **Agent checks read the installed version again.** Check status and Rescan find the installed entry and read its version. Version reads have a 15-second limit. A failed check of an alternate installation preserves the selected entry.
+- [Fix] **Correct macOS Agent detection when shell startup output has no newline.** Rovai can read PATH when startup text runs into the detection output.
+- [Fix] **Restore Web teammate actions and avatar loading.** The teammate menu supports Away and Rejoin again. Failed avatar loads retry after temporary errors and when the connection recovers.
+- [Fix] **Restore Toolbox saves after a teammate is removed.** Removing a teammate clears their Skill assignments. Saving an affected Skill also clears any older stale assignments.
+- [Fix] **Keep HTML preview diagnostics focused on page errors.** Native browser layout notices are filtered from the diagnostic records, and auxiliary diagnostic limits stay out of the toolbar. Script and resource errors still appear.
+- [UI] **Use a consistent blue mark across the app.** The startup screen, navigation, About and Updates, and Web sign-in share the same mark. The actions shown when no teammates are available have also been adjusted.

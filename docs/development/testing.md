@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-04
+last_updated: 2026-11-10
 ---
 
 # 测试与 Smoke Test
@@ -20,10 +20,11 @@ last_updated: 2026-11-04
 node scripts/smoke-steer.mjs /absolute/empty-fixture /absolute/bin/rovai-core qwen-code
 ```
 
-第三参数为 `codex-cli`（默认）、`claude-code-cli`、`pi`、`codebuddy-cli`、`qwen-code`、`grok-build`、`kiro-cli` 、`zcode-app`、`trae-cn-cli` 或 `minimax-code-cli`。
+第三参数为 `codex-cli`（默认）、`claude-code-cli`、`pi`、`codebuddy-cli`、`qwen-code`、`grok-build`、`kiro-cli` 、`zcode-app`、`trae-cn-cli`、`minimax-code-cli` 或 `opencode-cli`。
 可选第四参数 `steer-only` 仅验同轮文字与纯附件，`mixed-only` 仅验多队员混合投递，`cancel-only`
 仅验取消后的副作用与后继 Run；默认顺序验证同轮输入、普通后继和多队员混合。混合场景额外调用
-OpenCode 作为忙碌且不支持 Steer 的接收者。Claude 使用本机显式配置的 API，报告记录其 endpoint
+OpenCode 作为另一位忙碌接收者，路线按 Core 返回的冻结版本资格断言，不固定假设它不支持 Steer。
+旧版普通排队使用下面的 `ineligible` 探针单独验证。Claude 使用本机显式配置的 API，报告记录其 endpoint
 和模型供核对。单项通过不能覆盖其余场景的超时，失败报告也必须保留。
 
 可选第五参数为目标原生程序绝对路径，保存独立的 Runtime startup 配置并核对安装入口，防止旧版
@@ -152,7 +153,105 @@ cargo test -p rovai-core --lib --features extended-tests native_
 cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
 ```
 
+## Kilo 官方 ACP 验证归属
+
+Kilo 扩展现有 Adapter 默认值/闭集、Context 投递、平台准入、原生配置及数值 owners，不新增 Rust 测试函数。
+`runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 同时覆盖 migration 223/schema 172→173
+七个闭集表、触发器、行保留与事务失败回滚；旧 fixture 的 downgrade/upgrade 链延伸到当前 marker。
+`opencode_detector_plugin_is_additive_to_runtime_config` 增加 Kilo 原生 JSON5 保序、权限/plugin/pure 保留及 instructions 追加与去重，不再生成权限回调；
+`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 增加 Kilo 消息计费与重复 poll 去重。
+最小定向入口为：
+
+```sh
+cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
+cargo test -p rovai-core --features extended-tests --lib opencode_detector_plugin_is_additive_to_runtime_config
+cargo test -p rovai-core --features extended-tests --lib opencode_metadata_excludes_old_pending_child_and_repeated_calls
+```
+
+默认 workspace、TypeScript/Renderer/Node 和跨边界 Desktop build 仍须通过。
+真实官方 CLI 的独立原生探针为 `node scripts/probe-kilo-runtime.mjs`，生产 Core 入口为
+`node scripts/smoke-kilo-runtime.mjs`；均须显式 `ROVAI_KILO_BIN`，不注册到默认测试。
+Core smoke 使用系统临时根的独立 data/Skills/MCP、成员专属 XDG data 与 loopback Provider，
+分别验证首次/warm/cold、原生审批、取消后继与共享部分采样；不使用日常配置或账户。
+当前矩阵与真实证据见[实施记录](../versions/v1.72/kilo-acp-implementation.md)。
+
+复核扩展同一配置 owner 验证全局/Agent 嵌套规则保序及 KILO_DB 的缺省/绝对/相对/:memory: 路径；
+共享 cwd、模型目录、目录来源及 Fleet owners 分别扩展 Kilo，不新增 Rust 测试函数。
+完整门禁和原生权限、MCP A → B → A、Steer 研究的实际边界见[复核记录](../versions/v1.72/kilo-acp-review-fixes.md)。
+
+后续文件/Steer smoke 仍扩展上述两个脚本，不新建并行入口。原生探针增加 write/read/edit 与后台拒绝/前台 task；
+Core smoke 增加同 Run 更正、待回执取消及普通后继。终态汇合和取消等待复用既有 active-input receipt owner，
+文件元数据、exists 与 patch 共用事件归一化和 native patch owners。真实 sub2api 开发 App 与受控 Provider 分开记账，
+结果和范围见[文件与 Steer 实施记录](../versions/v1.72/kilo-files-steer-verification.md)。
+
+边界自检沿原 smoke 限制 Runtime PATH 无 Node，Python MCP 分别使用相同/不同 cwd，
+验证 bundled CLI 的中文/空格路径和逐项 argv，继承 pure=true 的真实权限及相对 write 的持久 Diff。
+共享 MCP wire owner 验证 Kilo/Command Code 的同一原生 launcher；cleanup 原 owner 用 1.75 秒终态验证正式阶段预算。
+模型 metadata/Renderer 原 owners 覆盖 Kilo、Command Code 与 MiniMax effort；新增 Rust 测试函数仍为零。
+结果见[边界收尾](../versions/v1.72/kilo-boundary-fixes.md)。
+
+成功 Steer 复用继续扩展原 active-input owner，核对正常汇合解除退役、错误/未知不解除及两种 RPC 终态顺序；
+Core smoke 使用三个连续 Steer/普通后继转换验证同 Host/Session 与后继 CLI lease，每轮实际发送无重复 final。
+该阶段待回执取消的退役记录保留；当前确认取消后的 Warm 范围由下述简化验收覆盖。
+不新增 Rust 测试函数或并行验收入口。见[复用记录](../versions/v1.72/kilo-steer-reuse.md)。
+
+前台 task 展示扩展原 Prompt-local provenance 与 ACP 公开归一化 owners，包含固定函数标签、运行改名、
+稀疏终态、参数保留、稳定调用 ID 和未知反例；不新增 Rust 测试函数或 classifier。
+原 Core smoke 增加短/超预算 task 报告、超预算命令与重开后永久截断，并确认模型仍收到完整报告。
+共享 Renderer 继续运行 `node --test scripts/lib/command-view.test.mjs`，实际范围见[补全记录](../versions/v1.72/kilo-subagent-display.md)。
+
+自动压缩改用原生 `auto=true`、真实 summary 和压缩后普通请求的完整 Bootstrap 验收，不用 `/compact` 代替。
+原 probe 另用非生成模型切换核对不同模型的 effort；Core smoke 覆盖 threshold、Provider overflow 与冷恢复。
+原 TRAE warm/Fleet owner 增加 child 锁持有时根 PID 不丢失的反例，新增 Rust 测试函数为零；
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib trae_completed_run_enters_lru_and_reuses_the_same_host_session`。
+夹具、失败分工与证据范围见[专项核对](../versions/v1.72/kilo-auto-compaction-and-options.md)。
+
+逐模型 effort 接线扩展既有 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`
+及 `minimax_check_and_catalog_keep_their_intent_and_complete_options`：Kilo/MiniMax 各自的档位、
+初始默认保留、空选项、单模型不可选、普通检查不遍历和完整目录持久保留。没有新增 Rust 测试函数。
+原 Core smoke 增加两组不同 variants 与无 variants 模型，核对目录零生成、真实选中参数和冻结历史；
+原 `scripts/lib/runtime-model-picker.test.mjs` 覆盖队员及引导两个实际入口。结果见[模型选项记录](../versions/v1.72/kilo-model-options.md)。
+
+MCP/原生权限/取消简化继续扩展这些既有 owners：
+
+- `runtime_configuration_writes_preserve_startups_and_retire_changed_command_hosts` 保留 Command Code 主动退役断言，增加受影响 Kilo 成员保存后不退役。
+- `model_options_preserve_native_intent_across_catalog_refresh` 覆盖旧 Kilo permission 的窄兼容和其他未知键/错误容器仍拒绝。
+- `active_input_receipts_preserve_the_original_prompt_and_fence_late_sources` 覆盖全部补充请求收口、已确认取消可解除退役及真实错误不能被 cancelled 掩盖。
+- `cancellation_covers_launch_without_a_handle_and_has_one_total_deadline` 保留原无 handle/迟到启动和 1.75 秒终态断言，增加 Kilo/OpenCode 快速、1.75 秒、超时、不回包、断连、错误、未知、显式停止和旧 cleanup 不杀 epoch 2；原生终态回调不抢先释放已取消 Run。
+- `runtime_cancellation_terminates_and_releases_client_terminals` 保留终端回收与迟到 create 被拒断言；无原生终态只确认终端处理，不可宣称完整取消已确认。
+- 原 Fleet 取消/失败退役/持久回执 owners、ZCode 与 Hermes 专有边界继续回归；新增 Rust 测试函数为零。
+
+官方 Core smoke 覆盖 MCP A→B→A、忙时保存、禁用/删除、精确 Session；原生 allow/ask/deny、用户插件、pure、无 question；
+普通取消与 1/3 条用户 Steer 的同 Host/PID/Session 后继、新 CLI lease、旧租约拒绝、完整冻结 Bootstrap。
+三条用户输入中一条已提交、两条按既有共享调度排队；原生 probe 另验证三条已提交补充，不能混记。
+环境切换验收遵循 cold-spawn，不把 Warm 的环境快照误判为权限覆盖。结果及失败对照见[简化记录](../versions/v1.72/kilo-simplification.md)。
+
 ## Rust 测试准入与退役门槛
+
+OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
+`steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和
+`active_input_receipts_preserve_the_original_prompt_and_fence_late_sources` owners，不新增 Rust 测试函数。
+原 SQL／ACP 进程夹具分别覆盖严格 2.2.7／2.x 冻结资格、Steer 后成功及重开保留 Session／Binding、
+既有 cleanup 后同 Session FIFO、明确未接收回队列及 accepted／unknown 不重发，另覆盖 Host 能力、精确拒绝、
+两种 reader 顺序和原期限内收尾／及时停止。Host 回收不要求 Session 轮换。
+OpenCode 停止探针验证旧 Host 回收及 Rovai 不重投；原生已接收输入可在同 Session 恢复后消费，单独记录原生后续效果。
+最小命令分别是 `cargo test -p rovai-core --features extended-tests --lib <owner名称>`，再运行默认 workspace。
+复用版本探针的 OpenCode 入口必须分别指定官方 2.2.6（`ineligible`）和 2.2.7（`receipts`／`boundaries`）绝对程序路径，
+XDG config/data/state/cache 均隔离，取消继承 `OPENCODE_DB`；不复制原生日常 Session 或数据库。
+受控 ACP fixture 不等同官方 Runtime／真实模型验收；实际覆盖见[本版记录](../versions/v1.72/implementation-plan.md#opencode-steer-局部接入2026-11-10)。
+
+Hermes 思考强度扩展已有 `model_selection_matches_native_provider_forms_without_suffix_matching`、
+`grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs` 与
+`real_acp_session_model_selection_respects_native_adapter_boundaries` owners，不新增 Rust 测试函数。
+纯函数覆盖已知旧 ACP、字段形状及无目录值；原有协议进程 fixture 覆盖 new/cold resume、同模型
+设置、模型后设置、通用默认在适配器内转换为 default、none、拒绝、缺回显和延后回显不阻断。最小命令：
+`cargo test -p rovai-core --lib hermes::`、
+`cargo test -p rovai-core --features extended-tests --lib grouped_acp_models`、
+`cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`。
+官方端到端入口 `node scripts/smoke-hermes-reasoning-effort.mjs <official-source> <prepared-python>`
+使用隔离用户 Home/Profile/Gateway 与生产 Core/CLI；追加 `--legacy` 验旧 ACP 无覆盖可用且有覆盖
+不提交任务，追加 `--real-model` 使用已授权 Responses Provider。Provider 参数断言与 ACP observer
+均仅存在于验收脚本，不进入生产执行。实际版本及覆盖见[Hermes 研究记录](../research/hermes-runtime/README.md)。
 
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess
 根进程清理均扩展原 owner；迁移/历史读取仍保留。原私有 Home controller、维护 CLI 与其专属测试
@@ -192,7 +291,50 @@ Core 的正文、寻址与发布合同继续由 `team_tool::tests` 拥有，真�
 固定配额。评审门槛是每项测试是否拥有清晰、唯一且值得长期维护的合同；相同覆盖应优先扩展既有
 owner，而不是继续增加平行 fixture 和断言。
 
+外部 CLI 成员代发扩展既有 `user_automation_send_is_atomic_idempotent_and_never_persists_staging_draft`
+和 `user_automation_rejection_is_replayable_without_message_run_or_draft_effects`，不新增 Rust owner。
+原 SQLite fixture 继续拥有原子发布、幂等与拒绝零副作用，同时核对 User 审计与 agent 公共作者分离、
+无 source Run、同 commandId 更换发送者仍返回首个结果，以及正式批处理 `RUN_INPUT` 投影的 agent 来源。
+Main dispatcher 传递沿用既有 User Automation 测试；模型投影和持久化边界不能仅由参数 parser 证明。
+最小命令为 `cargo test -p rovai-core --features slow-tests --lib user_automation_` 和
+`pnpm exec vitest run apps/desktop/src/main/user-automation.test.ts`，再运行默认 workspace 回归。
+
+缺省预算／Delivery 回执兼容继续扩展同一 Main owner，覆盖普通和成员发送各自的对象、null 与字段省略，
+并保留非法输入零 Core 调用、重放字段和未知回执失败。旧 Run mock 由真实 Core 的消息／sequence／Delivery
+shape 替代，不能仅用已过时的即时 Run 回执证明发送成功。CLI 现有 Trial admission owner
+`automation_trial_keeps_peer_creation_and_requires_the_run_receipt` 同时保留 peer 创建准入与回执兼容拒绝，
+Unix 子进程连接私有假 IPC，只允许 status，覆盖 wait/no-wait 与 Delivery/缺失能力，并核对空导出目录。
+夹具保留受管标记，既有导出目录保证回归失败也不会进入真实 journal 写入；不启动 Core 或模型。
+不新增 Rust 测试函数；最小命令为 `cargo test -p rovai-core --bin rovai automation_trial_`。
+
 ### 单项 Runtime 检查减重
+
+2026-11-09 安装／版本与目录职责分离扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses`、
+`codex_catalog_waiters_share_refresh_without_satisfying_full_validation`、Pi 观察及目录缓存 owners，覆盖单项仅执行版本、
+首次无健康快照的目录读写、历史失败保留与反馈隔离、同用途合并及身份失效。原
+`catalog_refresh_requires_current_full_acp_evidence` 随健康前置条件、
+`later_success_supersedes_an_older_failed_attempt_for_every_runtime` 随检测页历史错误回填一同退役；
+上述进程／SQL owners 承接实际反例，不为已删除的回填谓词保留平行断言；
+完整 Probe 的认证、能力、早期版本保存和并发写回 owners 保留。Renderer 复用 `MemberRuntimeParameters` 与
+`runtime-model-picker`，覆盖可见目标加载、隐藏区域零查询、缓存复用和迟到响应，不新增 Rust 测试函数或测试文件。
+最低命令为 `cargo test -p rovai-core --features slow-tests --lib` 的上述 owners、默认 workspace，及
+`pnpm test:runtime-model-picker`、相关 Vitest、typecheck 和文档门禁。
+
+主动版本刷新扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses` owner，保留入口替换、
+被动零查询和健康失败记录边界，改为每轮主动重扫读取版本，并覆盖脚本／指纹不变时升级与读取失败的公开投影。
+新增 `full_probe_saves_version_before_connection_and_cancellation`，复用私有 Core／DB 与合成程序夹具，验证版本
+先于连接提交、取消完整检查 future 后仍可读取、同一轮只查询一次且不推进健康成功时间。纯 reader 不能证明
+事务与公开投影，归入既有 `slow-tests` 路由；最小命令为
+`cargo test -p rovai-core --features slow-tests --lib runtime_check_environment::tests::`。无真实 Runtime 或模型调用。
+并行重扫的版本保留由 `full_check_finishes_without_overwriting_a_later_rescan_version` 拥有：合成 ACP 在
+连接阶段阻塞，脚本与指纹不变时重扫读取新版，再分别以健康成功／失败收尾；需要现有私有 Core、DB 与 Manager
+证明事务和公开投影，纯 reader 不能覆盖。既有重扫 owner 同时验证读取恢复后的双来源诊断投影及其他失败保留；
+既有并发合并／Supervisor owners 扩展首次安装目标同步与超时记录，不删除原未知目标、身份漂移或配置变化反例。
+候选入口回归继续扩展 `full_probe_saves_version_before_connection_and_cancellation`，不增加 Rust owner：
+Codex／Claude 合成入口分别覆盖已有选中安装、已有回退安装和首次安装；连接／能力阶段阻塞替代候选，
+确认其版本不会提前改写安装、公开版本或产生成功迁移审计，失败后仍保留选中入口及对应诊断。
+另以合成 ACP 验证候选真正准入后仍提交并展示自己的版本，同一轮每个候选的版本只查询一次。
+私有 Core／DB／Manager 和进程屏障拥有实际写回，纯选择谓词无法覆盖；最小命令沿用上面的 `slow-tests` 路由。
 
 Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口
 验证 npm/pnpm 包升级但包装脚本内容和文件属性不变、旧证据拒收、重复发现身份稳定及损坏 manifest/bin
@@ -209,11 +351,12 @@ CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_
 `cargo test -p rovai-core --lib windows_command_shim_content_changes_compatibility_fingerprint`。
 
 `runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
-拥有 MiniMax 的新健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
+拥有 MiniMax/Kilo 的健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
 写入，不能覆盖此回归，因此复用它的私有 Core/DB/Check Manager fixture 增加一个有真实协议进程的 owner；
 单纯测合并谓词无法证明第一次目录回退或持久化成功时间。表中 2／8 个模型分别执行检查先到／目录先到，
-不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
+MiniMax/Kilo 的单模型用例验证未尝试切换时零 setter；Kilo 的双模型用例验证原生先改状态再报错，仍须恢复初始模型。
+Kilo 的 3 模型用例另含一个不可选候选；不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
 `cargo test -p rovai-core --features slow-tests --lib minimax_check_and_catalog`。
 
 其余扩展既有 health、Pi Host、ZCode transport、Adapter 和 Renderer 参数 owner。Grok 旧的“恢复必须执行
@@ -1754,10 +1897,10 @@ version/auth 零调用及一次正文/零重放。Codex 既有真实 Host owner 
 `cargo test -p rovai-core --features slow-tests --lib dsh_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`。
 
 现有 Core 检查队列 owner `codex_catalog_waiters_share_refresh_without_satisfying_full_validation` 验证其他
-Runtime 的合并与检查强度不变；DSH 原生计数和配置变更屏障进入既有
+Runtime 的同用途合并与目录／完整检查隔离；DSH 原生计数和配置变更屏障进入既有
 `scripts/smoke-dsh-model-availability.mjs`，使用合成凭据和本地接收服务。60 秒过期场景仅在隔离数据库
 将对应成功时间调旧，不通过睡眠拖慢验收，不修改日常数据库。生产参数控件继续由
-`node --test scripts/lib/runtime-model-picker.test.mjs` 验证默认模型零查询、历史显示及迟到结果保护。
+`node --test scripts/lib/runtime-model-picker.test.mjs` 验证可见区域按需读取目录、默认模型不额外查询逐模型参数、历史显示及迟到结果保护。
 
 ## 原生会话恢复 owner（2026-10-12）
 
