@@ -11,6 +11,8 @@ import { useTaskCapability } from './TaskCapabilityProvider'
 import { ShortcutSettings } from './ShortcutSettings'
 import { useShortcutAction } from './ShortcutProvider'
 import { AppToast, type AppToastValue } from './AppToast'
+import { ThreadForkOperation } from './thread-fork'
+import { useForkLoading } from './use-fork-loading'
 export { AppToast } from './AppToast'
 import { EMPTY_SNAPSHOT, isProjectPath } from '../../shared/navigation-preferences-model'
 import { useThreadUserAnchorCache } from './useThreadUserAnchors'
@@ -27,7 +29,7 @@ export { AppHeader } from './AppHeader'
 import { CurrentUserProfileProvider } from './CurrentUserProfile'
 import { readErrorMessage } from './error-message'
 import { CoreSubsystemNotice } from './CoreSubsystemNotice'
-import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { THREAD_SNAPSHOT_SCHEMA_VERSION } from '@contracts'
 import type {
@@ -317,6 +319,7 @@ type ActivateThreadOptions = {
   preserveNotificationFocus?: boolean
   missionPresentation?: 'drawer'
   suppressErrors?: boolean
+  stayOnOpenFailure?: boolean
   anchoredMessages?: readonly ThreadMessageView[]
   anchoredAgentRuns?: readonly AgentRunView[]
   anchoredTasks?: readonly import('@contracts').TaskView[]
@@ -1039,7 +1042,7 @@ export function BusinessApp({
   }
   const initialTarget: RestorableLocation = initialStartupSnapshot
     ? startupTargetFromSnapshot(initialStartupSnapshot) : { kind: 'quick_chat' }
-  type NavigationContext = { campOptions?: ActivateThreadOptions; beforeCommit?: () => void; prepared?: boolean; memberPrepared?: boolean; preserveUnreadReminder?: boolean }
+  type NavigationContext = { campOptions?: ActivateThreadOptions; beforeCommit?: () => void; prepared?: boolean; memberPrepared?: boolean; preserveUnreadReminder?: boolean; onlyIf?: () => boolean }
   const applyNavigationRef = useRef<(target: NavigationTarget, transaction: NavigationTransaction, context?: NavigationContext) => Promise<void>>(async () => undefined)
   const desktopNavigation = useMemo(() => createDesktopNavigation<NavigationContext>(
     (target, transaction, context) => applyNavigationRef.current(target, transaction, context), environment.navigationHistory
@@ -1174,10 +1177,16 @@ export function BusinessApp({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<AppToastValue | null>(null)
+  const forkOperation = useMemo(() => new ThreadForkOperation(client, client.reeditScope), [client])
+  const forkState = useSyncExternalStore(forkOperation.subscribe, forkOperation.getSnapshot, forkOperation.getSnapshot)
+  const forkLoading = useForkLoading(forkState.phase)
+  const forkOpening = useRef(false)
+  const forkOrigin = useRef<{ threadId: string; visit: ReturnType<typeof desktopNavigation.captureVisit> } | null>(null)
+  const forkBusy = forkState.phase === 'pending' || forkState.phase === 'unknown'
   const notify = useCallback((message: string): void => {
     setToast((current) => current?.persistent ? current : { message, tone: 'neutral' })
   }, [])
-  const notifyError = useCallback((message: string, action?: { label: string; onSelect(): void }, persistent = false): void => {
+  const notifyError = useCallback((message: string, action?: AppToastValue['action'], persistent = false): void => {
     setToast((current) => current?.persistent && !persistent
       ? current
       : { message, tone: 'danger', action, persistent })
@@ -1556,7 +1565,7 @@ export function BusinessApp({
         if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
         setToast(null)
       }).catch(() => {
-        notifyError(uiAttribute('删除未完成，请重试。'), { label:uiAttribute("重试"), onSelect: retry }, true)
+        notifyError(uiAttribute('删除未完成，请重试。'), { label:uiAttribute("重试"), icon: 'retry', onSelect: retry }, true)
       })
     }
     retry()
@@ -1571,7 +1580,7 @@ export function BusinessApp({
     shownDeletionIssuesRef.current.add(`${issue.operationId}:${issue.attentionRevision}`)
     notifyError(
       uiAttribute('删除未完成，请重试。'),
-      { label:uiAttribute("重试"), onSelect: () => retryThreadDeletion(issue.operationId) },
+      { label:uiAttribute("重试"), icon: 'retry', onSelect: () => retryThreadDeletion(issue.operationId) },
       true
     )
   }, [client, notifyError, retryThreadDeletion])
@@ -1885,7 +1894,9 @@ export function BusinessApp({
       }
       setView('camp')
     }
-    if (previewSnapshot) {
+    // A preview commits navigation before the authoritative request finishes.
+    // Fork recovery must preserve the current page until full opening succeeds.
+    if (previewSnapshot && !options.stayOnOpenFailure) {
       commitThreadSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
@@ -1933,7 +1944,7 @@ export function BusinessApp({
       // A removed historical resource resolves to a real page by replacing this entry.
       const exists = await client.request<boolean>('threads.exists', { threadId }).catch(() => true)
       if (transaction && !transaction.isCurrent()) return false
-      if (!exists && transaction?.commit({ kind: 'quick_chat' })) {
+      if (!exists && !options.stayOnOpenFailure && transaction?.commit({ kind: 'quick_chat' })) {
         setActiveThreadId(null)
         setThreadSnapshot(null)
         setView('compose')
@@ -1974,6 +1985,65 @@ export function BusinessApp({
     }
     return activated
   }, [desktopNavigation, clearThreadUnreadReminder])
+
+  useEffect(() => {
+    if (startupStatus === 'resolved') void forkOperation.recover()
+  }, [forkOperation, startupStatus])
+  useEffect(() => {
+    if (forkState.phase !== 'rejected') return
+    const timer = setTimeout(() => forkOperation.dismiss(), 3_200)
+    return () => clearTimeout(timer)
+  }, [forkOperation, forkState.phase, forkState.error])
+
+  const openFork = useCallback(async (onlyIf?: () => boolean): Promise<void> => {
+    if (forkOpening.current) return
+    forkOpening.current = true
+    try {
+      const target = forkOperation.persistTarget()
+      if (!target) return
+      if (onlyIf && !onlyIf()) return
+      const targetVisible = viewRef.current === 'camp' && activeThreadIdRef.current === target
+      if (targetVisible && campSnapshotRef.current?.thread.id === target && !campSnapshotEntryPreviewRef.current) {
+        forkOperation.dismiss()
+        return
+      }
+      const navigate = targetVisible && campSnapshotEntryPreviewRef.current
+        ? desktopNavigation.replace : desktopNavigation.push
+      const opened = await navigate({ kind: 'camp', threadId: target }, {
+        campOptions: { reconcileDefaultLead: false, suppressErrors: true, stayOnOpenFailure: true }, onlyIf
+      })
+      const navigation = desktopNavigation.getSnapshot()
+      const destination = navigation.entries[navigation.index]
+      if (opened && destination?.kind === 'camp' && destination.threadId === target
+        && campSnapshotRef.current?.thread.id === target && !campSnapshotEntryPreviewRef.current) {
+        if (forkOperation.getSnapshot().saved?.threadId === target) forkOperation.dismiss()
+      }
+    } catch { /* A known copy remains in navigation; no completion/opening-failure toast. */ }
+    finally { forkOpening.current = false }
+  }, [desktopNavigation, forkOperation])
+
+  const forkThread = useCallback(async (sourceThreadId: string, sourceMessageId?: string): Promise<void> => {
+    if (['pending', 'unknown'].includes(forkOperation.getSnapshot().phase)) return
+    const visit = desktopNavigation.captureVisit()
+    const fromSource = viewRef.current === 'camp' && activeThreadIdRef.current === sourceThreadId
+    forkOrigin.current = fromSource ? { threadId: sourceThreadId, visit } : null
+    const target = await forkOperation.start({ commandId: newCommandId(), sourceThreadId,
+      ...(sourceMessageId ? { sourceMessageId } : {}) })
+    if (target && fromSource && visit.isCurrent()) {
+      await openFork(() => visit.isSameVisit() && viewRef.current === 'camp' && activeThreadIdRef.current === sourceThreadId)
+    }
+  }, [desktopNavigation, forkOperation, openFork])
+
+  const retryFork = async (): Promise<void> => {
+    const origin = forkOrigin.current
+    const automatic = !!origin && origin.visit.isCurrent()
+      && viewRef.current === 'camp' && activeThreadIdRef.current === origin.threadId
+    const target = await forkOperation.retry()
+    if (target && automatic && origin.visit.isCurrent()) {
+      await openFork(() => origin.visit.isSameVisit()
+        && viewRef.current === 'camp' && activeThreadIdRef.current === origin.threadId)
+    }
+  }
 
   useEffect(() => desktop?.userAutomation.onOpenThread(({ threadId }) => {
     void activateThread(threadId, { reconcileDefaultLead: false })
@@ -3015,7 +3085,7 @@ export function BusinessApp({
     const selectionGeneration = ++campSelectionGeneration.current
     clearThreadOpenFeedback()
     const apply = async (): Promise<void> => {
-      if (!transaction.isCurrent()) return
+      if (!transaction.isCurrent() || context?.onlyIf?.() === false) return
       if (target.kind === 'camp') {
         if (viewRef.current === 'camp' && activeThreadIdRef.current === target.threadId && !campSnapshotEntryPreviewRef.current) {
           if (transaction.commit() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
@@ -4427,6 +4497,8 @@ export function BusinessApp({
     }}
     onThread={(target) => { setMobileConversationDrawerOpen(false); chooseThread(target) }}
     onExportThread={conversationExport.reader.open}
+    onForkThread={thread => { void forkThread(thread.id) }}
+    forkBusy={forkBusy}
     onTogglePin={toggleNavigationPin}
     onRemoveProject={removeNavigationProject}
     onRenameProject={renameProject}
@@ -4456,6 +4528,12 @@ export function BusinessApp({
     }}>
     <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
+      {!startupGateVisible && !shuttingDown && (forkLoading || forkState.phase === 'unknown' || forkState.phase === 'rejected') && <AppToast
+        toast={forkState.phase === 'unknown' ? { message: uiAttribute('分叉结果尚未确认'), tone: 'danger', persistent: true, keepOnAction: true, dismissible: false,
+          action: { label: uiAttribute('重试'), icon: 'retry', onSelect: () => { void retryFork() } } }
+          : forkState.phase === 'rejected' ? { message: uiAttribute(forkState.error ?? '分叉失败'), tone: 'danger' }
+          : { message: uiAttribute('正在分叉…'), tone: 'neutral', loading: true, persistent: true }}
+        onClose={() => forkOperation.dismiss()} />}
       {!mobile && renderNavigation()}
       {!startupGateVisible && mobile && ['compose', 'members', 'teams', 'automations'].includes(view) && <MobilePageHeader
         title={({ compose:uiAttribute("新对话"), members:uiAttribute("队员"), teams:uiAttribute("团队"), automations:uiAttribute("定时任务") } as Record<string, string>)[view]}
@@ -4543,6 +4621,8 @@ export function BusinessApp({
               return result.status
             }}
             onWithdrawMessage={withdrawThreadMessage}
+            onForkMessage={message => { void forkThread(activeThreadId!, message.id) }}
+            forkBusy={forkBusy}
             reeditStore={reeditStore}
             onPendingDraftPersisted={refreshPendingThreadNavigation}
             onPendingThreadLeave={settlePendingThreadOnLeave}

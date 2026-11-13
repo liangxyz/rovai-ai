@@ -10441,23 +10441,34 @@ mod compaction_detector_tests {
             }
         }
         // Kilo uses its own config namespace and the native instructions reader.
-        // Only instructions are appended; native rules, plugins and pure mode stay native.
+        // Execution fixes the native default via env; config rules, plugins and pure mode stay native.
         let root =
             std::env::temp_dir().join(format!("rovai-kilo-config-{} 空格", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         for pure in ["true", "false"] {
             let mut command = Command::new("/selected/kilo");
             command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:{'git *':'allow','* --force':'deny'}},agent:{custom:{permission:{bash:{'git *':'allow','* --force':'deny'}}}},instructions:['native.md'],plugin:['file:///native/plugin.mjs'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
-            command.env("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#);
+            command.env("KILO_PERMISSION", r#"{"*":"deny","edit":"ask"}"#);
             command.env("KILO_PURE", pure);
             crate::kilo::configure_command(&mut command);
+            assert_eq!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .find(|(key, _)| *key == "KILO_PERMISSION")
+                    .unwrap()
+                    .1
+                    .unwrap(),
+                r#"{"*":"deny","edit":"ask"}"#,
+                "shared protocol/health setup preserves inherited permission env",
+            );
             let file = root.join("kilo bootstrap 中文.md");
             crate::kilo::configure_execution(&mut command, &file).unwrap();
             crate::kilo::configure_execution(&mut command, &file).unwrap();
             for (key, expected) in [
                 ("KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "false"),
                 ("KILO_PURE", pure),
-                ("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#),
+                ("KILO_PERMISSION", r#"{"*":"allow"}"#),
                 ("KILO_CLIENT", "acp"),
                 ("KILO_ENABLE_QUESTION_TOOL", "false"),
             ] {
@@ -10470,7 +10481,7 @@ mod compaction_detector_tests {
                         .1
                         .unwrap(),
                     expected,
-                    "native permission/plugin controls must not be overridden"
+                    "execution default and independent native controls must agree"
                 );
             }
             let content = command
@@ -17352,6 +17363,23 @@ while IFS= read -r ignored; do :; done
             patch.native_session_compatibility_key
         );
         assert_eq!(v2.host_config_digest, patch.host_config_digest);
+        // Preserve the same-path patch case above, then cover a package-manager
+        // link selecting a new directory without changing the Warm Host owner.
+        let mut relocated = opencode.clone();
+        relocated.executable_path = Path::new(&workspace.execution_root)
+            .join("cellar-new/opencode")
+            .to_string_lossy()
+            .into_owned();
+        let relocated = freeze_native_session_compatibility(relocated, &workspace).unwrap();
+        assert_eq!(patch.host_config_digest, relocated.host_config_digest);
+        assert_eq!(
+            patch.binding_compatibility_digest,
+            relocated.binding_compatibility_digest
+        );
+        assert_eq!(
+            patch.native_session_compatibility_key,
+            relocated.native_session_compatibility_key
+        );
         opencode.reported_version = None;
         assert!(freeze_native_session_compatibility(opencode, &workspace).is_err());
         let first = runtime_compatibility_digest(

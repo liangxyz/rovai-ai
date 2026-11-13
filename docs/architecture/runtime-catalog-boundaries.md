@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-10
+last_updated: 2026-11-12
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-11-10
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v65](../contracts/runtime-launch-and-verification-v65.md)。实测版本和能力只由
+[Runtime Launch and Verification v89](../contracts/runtime-launch-and-verification-v89.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 原生提问边界
@@ -74,7 +74,8 @@ Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与�
 原生会话仍以保存的精确 ID 恢复；不增加 Kilo 私有池、配置镜像或原生历史管理。
 Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；
 无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
-权限完全继承 Kilo 原生配置；Rovai 不提供产品档位或权限 Hook，共享 Approval 只转交原生请求与用户选择。
+正式执行进程启动时由 Rovai 固定 `KILO_PERMISSION={"*":"allow"}`，作为进程级默认；具体权限仍由 Kilo 原生合并和裁决。
+Rovai 不提供产品档位或权限 Hook，共享 Approval 只转交原生请求与用户选择；健康与目录入口不强制此变量。
 instructions 的局部有序追加不重排原生规则；用户插件与 pure 模式保留。
 原生环境关闭后台子代理，前台保留；Steer 复用共享多请求收口；文件结果进入既有 Diff 投影。
 前台 task 通过共享 normalizer 进入既有子代理工具展示，参数与真实报告沿普通详情和输出预算；
@@ -82,9 +83,12 @@ instructions 的局部有序追加不重排原生规则；用户插件与 pure �
 不同 cwd 的 MCP 复用 bundled CLI 的私有 cwd 启动模式，不引入 PATH Node 依赖；取消使用共享绝对阶段期限。
 成功 Steer 与已确认完整收尾的普通取消沿共享 Fleet 复用；异常、未知、超时及显式退役继续回收。
 共享 release outcome 区分旧 Run 隔离与进程已回收，不以缺少 handle 写 cleanup ACK。
-Kilo 完整目录使用临时 Session 逐模型做非生成查询，收集各模型实际提供的 effort；
-普通健康检查不遍历模型，也不覆盖已有完整目录及其成功时间。没有新缓存、参数推断或选择器组件。
-启动、权限、原生来源和数值口径见 [Runtime Launch v84](../contracts/runtime-launch-and-verification-v84.md)。
+Kilo 完整目录只用官方 `models --verbose` 一次读取模型与各自的 variants，进入共享目录缓存；
+不创建 ACP Session 逐模型扫描，也不混合 ACP 模型集合。目录遵循官方 CLI 原生集合，
+不复刻 ACP 路由独有的隐藏过滤；CLI 未报告的默认模型/effort 不推断，实际 Run 继续由 ACP 设置和观察。
+普通健康检查既不读取 CLI 目录也不遍历模型，不覆盖已有完整目录及其成功时间。
+没有新缓存、参数推断或选择器组件；失败继续共享 LKG，不回退扫描。
+启动、权限、原生来源和数值口径见 [Runtime Launch v87](../contracts/runtime-launch-and-verification-v87.md)。
 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。开放范围见
 [macOS 准入](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)和
 [Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)及
@@ -285,7 +289,18 @@ Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统�
 
 配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台与目标；已有驻留能力的 Adapter 由 Fleet
 实际取得健康且兼容的 Host，磁盘文件身份只在创建进程分支检查。取得的 Host 启动身份在首次输入前进入本轮，
-磁盘升级不改写执行中 Run，也不单独退役健康 Host；精确边界见当前 Runtime 启动合同。
+磁盘升级不改写执行中 Run。安装版本刷新在 Run 正常执行后按需提交，十分钟限频且不阻塞输入；
+后台按当前 Runtime 的既有选择规则重新解析安装入口，不能被旧 Host 冻结的 canonical 路径钉住。
+稳定启动链接换目标时更新安装版本，显式固定的旧版本路径仍受尊重，不全量重扫或轮询安装副本。
+现有检查状态保存实际尝试时间与结果顺序，静态缓存命中不算读取。入口替换清理旧入口的尝试记录，
+切回同一路径也不能接纳上次选择期间的迟到结果。当前入口的不同启动环境保持隔离，活跃 Run 的实际读取事实
+不随入口记录清理而丢失。不同安装和有效环境的结果不混用，迟到读取不能覆盖较新安装版本。
+版本成功只更新安装信息，不捕获退役基线、不标记 Host、不改变后继获取、释放或清扫规则。
+健康 Host 按原有兼容性与生命周期复用，版本文字本身不制造配置失效；原有 OpenCode 插话收尾、
+取消、协议/进程故障、配置变化、空闲回收和正常关闭保持。新进程沿原入口和 Session 接续，安装版本不改写运行版本。
+Pi 采用相同规则，不预置升级退役例外；真实原地升级证据按当前版本实施记录维护。
+Hermes 共享 Gateway 不在本功能管理范围。自动失败只记日志，手动等待同一读取仍收到具体错误。
+精确来源、顺序及失败边界见 [Runtime Launch v89](../contracts/runtime-launch-and-verification-v89.md)。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。

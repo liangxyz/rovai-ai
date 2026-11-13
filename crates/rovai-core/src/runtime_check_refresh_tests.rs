@@ -304,6 +304,190 @@ fn configuration(path: Option<&Path>) -> RuntimeStartupConfiguration {
 #[tokio::test]
 async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_state() {
     let fixture = Fixture::new();
+    // A cold launch must publish the identity it just committed before its
+    // actual version read. Otherwise the old discovery record hides a version
+    // already saved in SQLite, and the same-Run receipt suppresses a second read.
+    for previous_version in [Some("opencode v2.0.29"), None] {
+        use crate::agent_profile::{
+            AdapterPermissionConfig, AgentProfileService, FrozenAgentRuntimeConfig,
+            ResolvedModelSelection,
+        };
+        let kind = AdapterKind::OpencodeCli;
+        let root = fixture.root.join(if previous_version.is_some() {
+            "cold-old-version"
+        } else {
+            "cold-empty-version"
+        });
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join(if cfg!(windows) {
+            "opencode.cmd"
+        } else {
+            "opencode"
+        });
+        let calls = root.join("version-calls");
+        let write_program = |version: &str| {
+            #[cfg(windows)]
+            let body = format!(
+                "@echo off\r\necho %*>>\"{}\"\r\nif \"%~1\"==\"--version\" (\r\necho opencode v{}\r\nexit /b 0\r\n)\r\nexit /b 79\r\n",
+                calls.display(),
+                version,
+            );
+            #[cfg(unix)]
+            let body = format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n[ \"$1\" = '--version' ] || exit 79\nprintf 'opencode v{}\\n'\n",
+                calls.display(),
+                version,
+            );
+            std::fs::write(&program, body).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+        };
+        write_program("2.0.29");
+        let mut core = crate::application::tests::runtime_resolution_test_core(&root).unwrap();
+        *core.runtime_search_environment.get_mut() = Arc::new(
+            RuntimeSearchEnvironment::for_test_paths(1, vec![root.clone()]),
+        );
+        let (output, mut notifications) = mpsc::unbounded_channel();
+        core.output = output;
+        let (requests, mut pending) = mpsc::unbounded_channel();
+        core.runtime_check_requests = requests;
+        core.run_runtime_discovery().await;
+        let service = AgentProfileService::default();
+        let (installation, fingerprint) = {
+            let mut database = core.database.lock().await;
+            let installation = service
+                .managed_installation(&database, kind, "default")
+                .unwrap()
+                .unwrap();
+            let (fingerprint, _) = service
+                .recorded_executable_identity(
+                    &database,
+                    &installation.id,
+                    &installation.executable_path,
+                )
+                .unwrap()
+                .unwrap();
+            assert!(
+                service
+                    .record_runtime_version(
+                        &mut database,
+                        &installation.id,
+                        &installation.executable_path,
+                        &fingerprint,
+                        "opencode v2.0.29",
+                    )
+                    .unwrap()
+            );
+            (installation, fingerprint)
+        };
+        core.runtime_discovery
+            .get_mut()
+            .get_mut(&kind)
+            .unwrap()
+            .reported_version = previous_version.map(str::to_owned);
+        let runtime = FrozenAgentRuntimeConfig {
+            environment: None,
+            custom_api: None,
+            camp_fast: None,
+            adapter_kind: kind,
+            installation_id: installation.id.clone(),
+            installation_generation: installation.generation,
+            search_environment_generation: 1,
+            executable_path: installation.executable_path.clone(),
+            auth_scope: "default".into(),
+            reported_version: Some("opencode v2.0.29".into()),
+            executable_fingerprint: fingerprint,
+            capabilities: vec![],
+            protocol_version: "acp-v1".into(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".into(),
+                model_id: "default".into(),
+                options: json!({}),
+                dsh_source: None,
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: kind,
+                schema_version: 1,
+                values: crate::agent_runtime_adapter::AgentRuntimeAdapterRegistry::default()
+                    .member_permission_defaults(kind),
+            },
+            native_session_compatibility_key: None,
+            binding_compatibility_digest: None,
+            host_config_digest: None,
+            config_digest: "cold-version-fixture".into(),
+        };
+        while notifications.try_recv().is_ok() {}
+        assert!(!calls.exists(), "passive discovery cannot query a version");
+        write_program("2.2.7");
+        let prepared = core
+            .prepare_cold_runtime(
+                runtime,
+                &crate::runtime::AgentRunWorkspace::runtime_managed_path(
+                    root.to_string_lossy().into_owned(),
+                ),
+                Some("cold-version-run"),
+            )
+            .await
+            .map_err(|failure| failure.error)
+            .unwrap();
+        assert_eq!(
+            prepared.reported_version.as_deref(),
+            Some("opencode v2.2.7")
+        );
+        let saved = service
+            .managed_installation(&*core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.snapshot.unwrap().reported_version.as_deref(),
+            Some("opencode v2.2.7")
+        );
+        let health = core.runtime_health_payload().await.unwrap();
+        let row = health["runtimeAvailability"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["runtimeKind"] == kind.as_str())
+            .unwrap();
+        assert_eq!(
+            row["reportedVersion"], "opencode v2.2.7",
+            "cold launch must publish the saved version for {previous_version:?}"
+        );
+        let mut published = Vec::new();
+        while let Ok(message) = notifications.try_recv() {
+            let event: Value = serde_json::from_str(&message).unwrap();
+            if event["method"] == "runtime.discovery.updated"
+                && event["params"]["runtimeKind"] == kind.as_str()
+                && event["params"]["reportedVersion"] == "opencode v2.2.7"
+            {
+                published.push(event["params"].clone());
+            }
+        }
+        assert_eq!(published.len(), 1, "publish the actual read once");
+        assert_eq!(published[0]["executablePath"], prepared.executable_path);
+        assert_eq!(
+            published[0]["executableFingerprint"],
+            prepared.executable_fingerprint
+        );
+        assert_eq!(published[0]["versionProbeSucceeded"], true);
+        core.enqueue_automatic_version_refresh(&prepared, "cold-version-run");
+        assert!(matches!(
+            pending.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(calls)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["--version"],
+            "display refresh reuses the launch read"
+        );
+        drop(core);
+    }
     let old = fixture.program("old", "1.0.0", false);
     let new = fixture.program("new", "2.0.0", false);
     *fixture.paths.lock().unwrap() = vec![old.parent().unwrap().into()];
@@ -797,6 +981,8 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                         force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
+                        version_refresh: None,
+                        version_target: None,
                         model_target: None,
                         runtime_kind: KIND,
                         purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -870,6 +1056,8 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                     force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
+                    version_refresh: None,
+                    version_target: None,
                     model_target: None,
                     runtime_kind: KIND,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -1024,6 +1212,8 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
                     force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
+                    version_refresh: None,
+                    version_target: None,
                     model_target: None,
                     runtime_kind: KIND,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -1187,6 +1377,8 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     installation_target,
                     search: search.clone(),
                     startup_preview: None,
+                    version_refresh: None,
+                    version_target: None,
                     model_target: None,
                     attempt_id: attempt_id.clone(),
                     runtime_kind: KIND,
@@ -1209,7 +1401,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     // if its total deadline expires before the Manager's ack.
                     attempt.installation_target = committed_target;
                 }
-                fixture.core.runtime_check_activity.write().await.insert(
+                fixture.core.runtime_check_activity.write().await.activity.insert(
                     KIND,
                     RuntimeCheckActivity {
                         attempt_id,
@@ -2095,6 +2287,8 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
                 force_refresh: false,
                 search,
                 startup_preview: None,
+                version_refresh: None,
+                version_target: None,
                 model_target: None,
                 runtime_kind: KIND,
                 purpose: RuntimeLaunchPurpose::DiscoveryVersion,
@@ -2119,6 +2313,8 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
                 force_refresh: false,
                 search: fixture.core.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
+                version_refresh: None,
+                version_target: None,
                 model_target: None,
                 runtime_kind: KIND,
                 purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -2158,6 +2354,917 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     assert!(catalog.await.unwrap().unwrap_err().contains("模型目录"));
     assert_eq!(std::fs::read_to_string(version_calls).unwrap(), "v");
     fixture.close().await;
+
+    // Unchanged wrapper, two independent reads: a late old result cannot write
+    // over the newer accepted result or retire a Host started with that result.
+    use crate::agent_profile::{
+        AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
+    };
+    use crate::runtime_fleet::{
+        FleetAcquireRequest, FleetReleaseDisposition, FleetReleaseOutcome, RuntimeCompatibilityKey,
+        fake_runtime_process_host,
+    };
+    let fixture = Fixture::new();
+    let program = fixture.program("ordered", "1.0.0", false);
+    let version = fixture.root.join("version");
+    let calls = fixture.root.join("version-calls");
+    let hold = fixture.root.join("hold-next");
+    let started = fixture.root.join("version-started");
+    let release = fixture.root.join("version-release");
+    std::fs::write(&version, "codex-cli 1.0.0").unwrap();
+    std::fs::write(&program, format!(
+        "#!/bin/sh\n[ \"$1\" = '--version' ] || exit 79\nprintf '%s' \"$VERSION_SCOPE_FIXTURE\" > \"$0.env\"\nprintf '%s\\n' \"$*\" >> '{}'\nversion=$(/bin/cat '{}')\nif [ -f '{}' ]; then /bin/mv '{}' '{}'; while [ ! -f '{}' ]; do /bin/sleep 0.01; done; fi\nprintf '%s\\n' \"$version\"\n",
+        calls.display(), version.display(), hold.display(), hold.display(), started.display(), release.display(),
+    )).unwrap();
+    let saved_configuration = configuration(Some(&program));
+    fixture.save(0, &saved_configuration).await;
+    fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+        "runtimeKind":KIND, "edits":[], "commonEnvironment":{
+            "expectedRevision":0, "json":json!({"VERSION_SCOPE_FIXTURE":"formal"}).to_string(),
+        },
+    })).await.unwrap();
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    let search = fixture.core.runtime_search_environment.read().await.clone();
+    let installation = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    let environment =
+        rovai_core::runtime_discovery::with_runtime_configuration(KIND, &search, async {
+            let mut values = rovai_core::runtime_discovery::capture_host_runtime_environment();
+            let mut command = tokio::process::Command::new(&program);
+            rovai_core::runtime_discovery::configure_runtime_command(KIND, &mut command);
+            for (name, value) in command.as_std().get_envs() {
+                if let Some(value) = value {
+                    values.insert(
+                        name.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    );
+                }
+            }
+            crate::member_environment::LaunchEnvironment {
+                values: Some(values),
+                overlay: None,
+            }
+        })
+        .await;
+    let runtime = FrozenAgentRuntimeConfig {
+        environment: Some(environment),
+        custom_api: None,
+        camp_fast: None,
+        adapter_kind: KIND,
+        installation_id: installation.id.clone(),
+        installation_generation: installation.version,
+        // Another Runtime's settings can advance the global search generation
+        // without changing this Host's actual entry or environment.
+        search_environment_generation: search.generation().saturating_sub(1) as i64,
+        executable_path: installation.executable_path.clone(),
+        auth_scope: "default".into(),
+        reported_version: Some("codex-cli 1.0.0".into()),
+        executable_fingerprint: fingerprint_executable(&program).unwrap(),
+        capabilities: vec![],
+        protocol_version: "app-server".into(),
+        model: ResolvedModelSelection {
+            source: "runtime_default".into(),
+            model_id: "default".into(),
+            options: json!({}),
+            dsh_source: None,
+        },
+        permissions: AdapterPermissionConfig {
+            adapter_kind: KIND,
+            schema_version: 1,
+            values: json!({}),
+        },
+        native_session_compatibility_key: None,
+        binding_compatibility_digest: None,
+        host_config_digest: None,
+        config_digest: "fixture".into(),
+    };
+    let target = RuntimeVersionTarget::for_launch(&runtime).unwrap();
+    let empty = std::collections::BTreeMap::new();
+    assert_eq!(
+        version_target(
+            KIND,
+            &runtime.installation_id,
+            &runtime.executable_path,
+            &search,
+            Some(crate::member_environment::LaunchEnvironment {
+                values: Some(empty.clone()),
+                overlay: None
+            })
+        )
+        .await
+        .unwrap(),
+        RuntimeVersionTarget::new(
+            KIND,
+            &runtime.installation_id,
+            &runtime.executable_path,
+            &empty
+        )
+        .unwrap(),
+        "a captured environment cannot regain variables from the current Host environment"
+    );
+    assert!(
+        fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads
+            .contains_key(&target),
+        "manual and actual-launch scopes share equivalent effective environments"
+    );
+    let request = |run: &str, member: &str| FleetAcquireRequest {
+        agent_run_id: run.into(),
+        execution_epoch: 1,
+        adapter_kind: KIND,
+        compatibility: RuntimeCompatibilityKey::member("ordered", member, "same"),
+    };
+    let old_host = fake_runtime_process_host("old-v1");
+    let old = fixture
+        .core
+        .runtime_fleet
+        .acquire(request("old-run", "old"), || async { Ok(old_host) })
+        .await
+        .unwrap();
+    let mut passive = fixture.core.runtime_discovery.read().await[&KIND].clone();
+    passive.version_probe_succeeded = None;
+    std::fs::write(&hold, "").unwrap();
+    let older = tokio::spawn({
+        let core = fixture.core.clone();
+        let search = search.clone();
+        async move {
+            core.discover_runtime_installations_for(true, Some(KIND), search)
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !started.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    std::fs::write(&version, "codex-cli 2.0.0").unwrap();
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    let new_host = fake_runtime_process_host("new-v2");
+    let new = fixture
+        .core
+        .runtime_fleet
+        .acquire(request("new-run", "new"), || async { Ok(new_host) })
+        .await
+        .unwrap();
+    std::fs::write(&release, "").unwrap();
+    assert!(
+        older.await.unwrap().is_none(),
+        "a late discovery cannot publish a terminal result"
+    );
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 2.0.0");
+    assert_eq!(
+        fixture
+            .core
+            .runtime_fleet
+            .release_with_outcome("old-run", 1, FleetReleaseDisposition::Reusable)
+            .await,
+        FleetReleaseOutcome::Reusable
+    );
+    assert_eq!(
+        fixture
+            .core
+            .runtime_fleet
+            .release_with_outcome("new-run", 1, FleetReleaseDisposition::Reusable)
+            .await,
+        FleetReleaseOutcome::Reusable
+    );
+    assert_ne!(old.process_id, new.process_id);
+    let verified = fixture
+        .core
+        .verify_runtime_entry(&passive, None)
+        .await
+        .unwrap();
+    fixture
+        .core
+        .publish_runtime_discovery(
+            passive,
+            Some(verified),
+            Some((installation.id.clone(), installation.version)),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.health().await["reportedVersion"],
+        "codex-cli 2.0.0",
+        "passive cache publication also cannot overwrite an accepted actual read"
+    );
+
+    // Automatic failures consume the interval but do not change public state.
+    let count = || std::fs::read_to_string(&calls).unwrap().lines().count();
+    let initial_calls = count();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "fresh-run");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(count(), initial_calls);
+    let previous_sequence = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let read = state.version_reads.get_mut(&target).unwrap();
+        read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        read.accepted
+    };
+    std::fs::write(&version, "").unwrap();
+    let before = fixture.public_state().await;
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-one");
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-two");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if fixture
+                .core
+                .runtime_check_activity
+                .read()
+                .await
+                .version_reads[&target]
+                .accepted
+                > previous_sequence
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(count(), initial_calls + 1);
+    assert_eq!(fixture.public_state().await, before);
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-after-failure");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(count(), initial_calls + 1);
+
+    // A manual waiter joining that same background command still receives and
+    // publishes the concrete failure. It must not silently start another read.
+    fixture
+        .core
+        .runtime_check_activity
+        .write()
+        .await
+        .version_reads
+        .get_mut(&target)
+        .unwrap()
+        .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+    std::fs::remove_file(&started).unwrap();
+    std::fs::remove_file(&release).unwrap();
+    std::fs::write(&hold, "").unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-with-waiter");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !started.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (acknowledged, acknowledgement) = oneshot::channel();
+    let (completion, completed) = oneshot::channel();
+    fixture
+        .core
+        .runtime_check_requests
+        .send(
+            crate::application::RuntimeCheckRequest {
+                force_refresh: false,
+                search: search.clone(),
+                startup_preview: None,
+                version_refresh: None,
+                version_target: None,
+                model_target: None,
+                runtime_kind: KIND,
+                purpose: RuntimeLaunchPurpose::DiscoveryVersion,
+                trigger: RuntimeCheckTrigger::UserCheck,
+                acknowledged,
+                completion: Some(completion),
+            }
+            .into(),
+        )
+        .unwrap();
+    assert!(
+        !acknowledgement.await.unwrap(),
+        "manual request joins the actual in-flight read"
+    );
+    std::fs::write(&release, "").unwrap();
+    assert_eq!(
+        completed.await.unwrap().unwrap(),
+        RuntimeCheckOutcome::StableFailure
+    );
+    let failed = fixture.health().await;
+    assert_eq!(failed["discovery"]["versionProbeSucceeded"], false);
+    assert_eq!(failed["diagnosticCode"], "runtime_version_empty");
+    assert_eq!(failed["failure"]["code"], failed["diagnosticCode"]);
+    assert_eq!(failed["reportedVersion"], "codex-cli 2.0.0");
+    assert_eq!(count(), initial_calls + 2);
+
+    // An actual launch failure counts; a cached nonempty display string alone
+    // does not. Consuming this Run's receipt never retries its failed command.
+    let failed_read = fixture
+        .core
+        .observe_launch_version(&runtime, &search, Some("launch-read"), async {
+            anyhow::bail!("synthetic launch read failed")
+        })
+        .await;
+    assert!(failed_read.is_err());
+    let state_before = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let read = state.version_reads.get_mut(&target).unwrap();
+        read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        (read.next, read.accepted, read.attempted_at)
+    };
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "launch-read");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    {
+        let state = fixture.core.runtime_check_activity.read().await;
+        let read = &state.version_reads[&target];
+        assert_eq!((read.next, read.accepted, read.attempted_at), state_before);
+        assert!(
+            !state
+                .version_read_runs
+                .iter()
+                .any(|(run_id, ..)| run_id == "launch-read")
+        );
+    }
+    std::fs::write(&version, "codex-cli 2.0.0").unwrap();
+    let draft = saved_configuration.clone();
+    fixture
+        .core
+        .handle_runtime_startup(
+            "runtime.startup.inspect",
+            json!({
+                "runtimeKind": KIND, "configuration": draft,
+                "commonEnvironment":{"expectedRevision":1, "json":json!({"VERSION_SCOPE_FIXTURE":"draft-private"}).to_string()},
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(program.with_file_name("codex.env")).unwrap(),
+        "draft-private"
+    );
+    let state = fixture.core.runtime_check_activity.read().await;
+    let read = &state.version_reads[&target];
+    assert_eq!(
+        (read.next, read.accepted, read.attempted_at),
+        state_before,
+        "unsaved draft reads cannot update the formal target's clock or ordering"
+    );
+    drop(state);
+    assert_eq!(
+        count(),
+        initial_calls + 3,
+        "the only extra command was the explicit draft check"
+    );
+    // A later due successful read updates the installation without claiming a
+    // full health check or changing the old Host's reuse/lifecycle decisions.
+    std::fs::write(&version, "codex-cli 3.0.0").unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-success");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while fixture.health().await["reportedVersion"] != "codex-cli 3.0.0" {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture.core.runtime_fleet.sweep_idle().await;
+    let retained = fixture
+        .core
+        .runtime_fleet
+        .acquire(request("after-version-refresh", "old"), || async {
+            panic!("version publication must not replace a healthy Warm Host")
+        })
+        .await
+        .unwrap();
+    assert_eq!(retained.process_id, old.process_id);
+    assert_eq!(
+        fixture
+            .core
+            .runtime_fleet
+            .release_with_outcome(
+                "after-version-refresh",
+                1,
+                FleetReleaseDisposition::Reusable,
+            )
+            .await,
+        FleetReleaseOutcome::Reusable
+    );
+    let saved = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert!(saved.last_probe_attempt.is_none());
+    let snapshot = saved.snapshot.unwrap();
+    assert_eq!(snapshot.authentication_status, "unknown");
+    assert!(snapshot.last_successful_probe_at.is_none());
+    assert_eq!(count(), initial_calls + 4);
+    assert_eq!(
+        std::fs::read_to_string(program.with_file_name("codex.env")).unwrap(),
+        "formal"
+    );
+    assert!(
+        std::fs::read_to_string(&calls)
+            .unwrap()
+            .lines()
+            .all(|line| line == "--version")
+    );
+    // An unavailable selected entry is an actual failed automatic attempt,
+    // not a cache hit. It must not restart the same work on every later Run.
+    let before_missing = fixture.public_state().await;
+    let prior = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let read = state.version_reads.get_mut(&target).unwrap();
+        read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        read.next
+    };
+    let temporarily_missing = program.with_file_name("codex-held");
+    std::fs::rename(&program, &temporarily_missing).unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "missing-entry");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads[&target]
+            .next
+            == prior
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "missing-entry-again");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+        fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads[&target]
+            .next,
+        prior + 1
+    );
+    assert_eq!(
+        count(),
+        initial_calls + 4,
+        "a failed entry read cannot execute or retry a command"
+    );
+    assert_eq!(fixture.public_state().await, before_missing);
+    std::fs::rename(&temporarily_missing, &program).unwrap();
+
+    // Replacing the saved entry immediately forgets its interval, without
+    // forgetting an active Run's actual read. Returning to A creates a new
+    // scope; a read from A's previous selection cannot commit or mark Hosts.
+    let old_search = fixture.core.runtime_search_environment.read().await.clone();
+    let old_expected = crate::application::runtime_installation_revision(
+        &*fixture.core.database.lock().await,
+        KIND,
+    )
+    .unwrap();
+    let (reading, read_started) = oneshot::channel();
+    let (finish, held) = oneshot::channel();
+    let late = {
+        let core = fixture.core.clone();
+        let runtime = runtime.clone();
+        let search = old_search.clone();
+        tokio::spawn(async move {
+            core.observe_launch_version(&runtime, &search, Some("switch-in-flight"), async {
+                reading.send(()).unwrap();
+                held.await.unwrap();
+                Ok("codex-cli 0.5.0".to_owned())
+            })
+            .await
+        })
+    };
+    read_started.await.unwrap();
+    let old_scope = fixture
+        .core
+        .runtime_check_activity
+        .read()
+        .await
+        .version_reads[&target]
+        .scope_id;
+    let replacement = fixture.program("replacement", "4.0.0", false);
+    let revision = fixture.settings().await["revision"].as_u64().unwrap();
+    fixture
+        .save(revision, &configuration(Some(&replacement)))
+        .await;
+    {
+        let state = fixture.core.runtime_check_activity.read().await;
+        assert!(!state.version_reads.keys().any(|target| target.kind == KIND));
+        assert!(
+            state
+                .version_read_runs
+                .iter()
+                .any(|(run_id, ..)| run_id == "switch-in-flight")
+        );
+    }
+    assert!(
+        begin_version_read(
+            &fixture.core.runtime_check_activity,
+            &fixture.core.database,
+            target.clone(),
+            old_search.generation(),
+            &old_expected,
+        )
+        .await
+        .is_err(),
+        "an old worker cannot recreate the removed scope"
+    );
+    let revision = fixture.settings().await["revision"].as_u64().unwrap();
+    fixture.save(revision, &saved_configuration).await;
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck,
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    let calls_after_return = count();
+    let current_target = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let scopes: Vec<_> = state
+            .version_reads
+            .keys()
+            .filter(|target| target.kind == KIND)
+            .cloned()
+            .collect();
+        assert_eq!(
+            scopes.len(),
+            1,
+            "only the current entry remains after A -> B -> A"
+        );
+        let current_target = scopes[0].clone();
+        let current = state.version_reads.get_mut(&current_target).unwrap();
+        assert_ne!(current.scope_id, old_scope);
+        current.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        current_target
+    };
+    finish.send(()).unwrap();
+    assert_eq!(late.await.unwrap().unwrap(), "codex-cli 0.5.0");
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 3.0.0");
+    let before = fixture
+        .core
+        .runtime_check_activity
+        .read()
+        .await
+        .version_reads[&current_target]
+        .next;
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "switch-in-flight");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+        fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads[&current_target]
+            .next,
+        before
+    );
+    assert_eq!(
+        count(),
+        calls_after_return,
+        "entry cleanup cannot add a second version query to the same Run"
+    );
+    fixture.core.runtime_fleet.shutdown_all().await;
+    fixture.close().await;
+
+    // A package manager can replace a stable launcher while keeping the old
+    // canonical executable and its Warm Host alive (Homebrew Cellar layout).
+    for explicit_launcher in [false, true] {
+        let linked = Fixture::new();
+        let original = linked.program("cellar/1", "1.0.0", false);
+        let upgraded = linked.program("cellar/2", "2.0.0", false);
+        for path in [&original, &upgraded] {
+            let body = std::fs::read_to_string(path).unwrap();
+            std::fs::write(
+                path,
+                body.replace(
+                    "if [ \"$1\" = '--version' ]; then",
+                    &format!(
+                        "if [ \"$1\" = '--version' ]; then printf 'version\\n' >> '{}';",
+                        path.with_extension("calls").display()
+                    ),
+                ),
+            )
+            .unwrap();
+        }
+        let bin = linked.root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let launcher = bin.join("codex");
+        std::os::unix::fs::symlink(&original, &launcher).unwrap();
+        *linked.paths.lock().unwrap() = vec![bin];
+        if explicit_launcher {
+            linked.save(0, &configuration(Some(&launcher))).await;
+        } else {
+            linked
+                .core
+                .refresh_runtime_check_environment()
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            linked
+                .core
+                .await_runtime_check(
+                    KIND,
+                    RuntimeLaunchPurpose::DiscoveryVersion,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let installation = AgentProfileService::default()
+            .managed_installation(&*linked.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap();
+        let mut running = runtime.clone();
+        running.installation_id = installation.id.clone();
+        running.installation_generation = installation.version;
+        running.executable_path = installation.executable_path.clone();
+        running.executable_fingerprint = fingerprint_executable(&original).unwrap();
+        running.reported_version = Some("codex-cli 1.0.0".into());
+        let original_target = RuntimeVersionTarget::for_launch(&running).unwrap();
+        linked
+            .core
+            .runtime_check_activity
+            .write()
+            .await
+            .version_reads
+            .entry(original_target.clone())
+            .or_default()
+            .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        let held_host = fake_runtime_process_host("linked-old-v1");
+        let warm = linked
+            .core
+            .runtime_fleet
+            .acquire(request("linked-old", "linked"), || async { Ok(held_host) })
+            .await
+            .unwrap();
+        linked
+            .core
+            .runtime_fleet
+            .release_with_outcome("linked-old", 1, FleetReleaseDisposition::Reusable)
+            .await;
+        let reads = |path: &Path| {
+            std::fs::read_to_string(path.with_extension("calls"))
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        assert_eq!(reads(&original), 1);
+        std::fs::remove_file(&launcher).unwrap();
+        std::os::unix::fs::symlink(&upgraded, &launcher).unwrap();
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-upgrade");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while linked.health().await["reportedVersion"] != "codex-cli 2.0.0" {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background refresh must follow the current launcher, not the old Host path");
+        assert!(original.exists());
+        assert_eq!(
+            reads(&original),
+            1,
+            "the retained executable must not be queried"
+        );
+        assert_eq!(reads(&upgraded), 1);
+        assert_eq!(running.reported_version.as_deref(), Some("codex-cli 1.0.0"));
+        assert_eq!(running.executable_path, original.to_string_lossy());
+        let current = AgentProfileService::default()
+            .managed_installation(&*linked.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.id, installation.id);
+        assert_eq!(current.executable_path, upgraded.to_string_lossy());
+        let mut current_target = original_target.clone();
+        current_target.executable_path = current.executable_path;
+        let previous = {
+            let state = linked.core.runtime_check_activity.read().await;
+            assert!(!state.version_reads.contains_key(&original_target));
+            assert!(!state.automatic_version_is_due(&current_target));
+            state.version_reads[&current_target].next
+        };
+        let current_search = linked.core.runtime_search_environment.read().await.clone();
+        assert!(
+            linked
+                .core
+                .refresh_runtime_version_for_launch(&running, current_search)
+                .await
+                .unwrap()
+                .is_none(),
+            "an old Warm Host shares the current installation's fresh interval"
+        );
+        linked
+            .core
+            .runtime_check_activity
+            .write()
+            .await
+            .version_reads
+            .get_mut(&current_target)
+            .unwrap()
+            .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-old-host-next-interval");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while linked
+                .core
+                .runtime_check_activity
+                .read()
+                .await
+                .version_reads[&current_target]
+                .accepted
+                <= previous
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(reads(&original), 1);
+        assert_eq!(reads(&upgraded), 2);
+        let reused = linked
+            .core
+            .runtime_fleet
+            .acquire(request("linked-after", "linked"), || async {
+                panic!("updating the installed version cannot retire a healthy Host")
+            })
+            .await
+            .unwrap();
+        assert_eq!(reused.process_id, warm.process_id);
+        linked
+            .core
+            .runtime_fleet
+            .release_with_outcome("linked-after", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        // A failed new target stays silent and cannot fall back to a retained
+        // old executable. A fresh resolved target is a cache hit, not a read.
+        let broken = linked.program("cellar/broken", "3.0.0", false);
+        std::fs::write(
+            &broken,
+            format!(
+                "#!/bin/sh\nprintf 'version\\n' >> '{}'\nexit 2\n",
+                broken.with_extension("calls").display(),
+            ),
+        )
+        .unwrap();
+        std::fs::remove_file(&launcher).unwrap();
+        std::os::unix::fs::symlink(&broken, &launcher).unwrap();
+        let public_before_failure = linked.public_state().await;
+        linked
+            .core
+            .runtime_check_activity
+            .write()
+            .await
+            .version_reads
+            .get_mut(&current_target)
+            .unwrap()
+            .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        let mut broken_target = current_target.clone();
+        broken_target.executable_path = broken.to_string_lossy().into_owned();
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-broken-target");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = linked.core.runtime_check_activity.read().await;
+                if state
+                    .version_reads
+                    .get(&broken_target)
+                    .is_some_and(|read| read.accepted > 0)
+                {
+                    break;
+                }
+                drop(state);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(linked.public_state().await, public_before_failure);
+        assert_eq!(reads(&original), 1);
+        assert_eq!(reads(&upgraded), 2);
+        assert_eq!(reads(&broken), 1);
+        let before_resolved_cache_hit = {
+            let mut state = linked.core.runtime_check_activity.write().await;
+            let read = state.version_reads.get_mut(&current_target).unwrap();
+            read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+            (read.next, read.attempted_at)
+        };
+        let search = linked.core.runtime_search_environment.read().await.clone();
+        assert!(
+            linked
+                .core
+                .refresh_runtime_version_for_launch(&running, search)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let state = linked.core.runtime_check_activity.read().await;
+        let read = &state.version_reads[&current_target];
+        assert_eq!((read.next, read.attempted_at), before_resolved_cache_hit);
+        drop(state);
+        assert_eq!(reads(&broken), 1);
+
+        // A user explicitly pinning the old canonical executable keeps that
+        // selection, even though the normal PATH launcher points to the new one.
+        let revision = linked.settings().await["revision"].as_u64().unwrap();
+        linked.save(revision, &configuration(Some(&original))).await;
+        assert_eq!(
+            linked
+                .core
+                .await_runtime_check(
+                    KIND,
+                    RuntimeLaunchPurpose::DiscoveryVersion,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let before_pin = reads(&original);
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-explicit-pin");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = linked.core.runtime_check_activity.read().await;
+                if state
+                    .version_reads
+                    .get(&original_target)
+                    .is_some_and(|read| read.accepted > 0)
+                    && reads(&original) > before_pin
+                {
+                    break;
+                }
+                drop(state);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(linked.health().await["reportedVersion"], "codex-cli 1.0.0");
+        assert_eq!(reads(&upgraded), 2);
+        linked.core.runtime_fleet.shutdown_all().await;
+        linked.close().await;
+    }
 }
 
 // Owns the save/refresh lock interleaving and the absence of indirect operations.
@@ -2403,12 +3510,30 @@ with (root / 'launches').open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\n'
 if '--version' in sys.argv:
     print('7.8.27' if kilo else '0.6.12'); sys.exit(0)
 count = int((root / 'count').read_text())
-current = 'model-0'
+def model_id(i): return ('fixture/' if kilo else '') + f'model-{i}'
+def wait_gate():
+    if (root / 'gate').exists():
+        (root / 'started').touch()
+        while (root / 'gate').exists(): time.sleep(.01)
+if kilo and sys.argv[1:] == ['models','--verbose']:
+    wait_gate()
+    if (root/'cli-fault').exists():
+        fault=(root/'cli-fault').read_text()
+        if fault=='exit': sys.exit(1)
+        if fault=='malformed': print('fixture/model-0\n{')
+        sys.exit(0)
+    for i in range(count):
+        print(model_id(i))
+        # A real verbose catalog exceeds the ordinary 64 KiB diagnostic capture.
+        print(json.dumps({'name':f'Model {i}', 'unused':('x'*70000 if i==0 else ''),
+            'variants':{value:{} for value in (['low','high'] if i==0 else ['medium','max'] if i==1 else [])}},indent=2))
+    sys.exit(0)
+current = model_id(0)
 def session():
-    values = ['low','high'] if current == 'model-0' else (['medium','max'] if kilo else ['xhigh','max'])
+    values = ['low','high'] if current == model_id(0) else (['medium','max'] if kilo else ['xhigh','max'])
     result = {'sessionId':'fixture-session', 'configOptions':[
         {'id':'model','name':'Model','category':'model','type':'select','currentValue':current,
-         'options':[{'value':f'model-{i}','name':f'Model {i}'} for i in range(count)]},
+         'options':[{'value':model_id(i),'name':f'Model {i}'} for i in range(count)]},
         {'id':'effort' if kilo else 'thinkingEffort','name':'Thinking','type':'select','currentValue':values[-1] if kilo else 'high',
          'options':[{'value':value,'name':value.title()} for value in values]}]}
     if not kilo and current=='model-2': result['configOptions'].pop()
@@ -2417,17 +3542,12 @@ for line in sys.stdin:
     request=json.loads(line); method=request['method']
     with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method, 'value':request.get('params',{}).get('value'), 'current':current})+'\n')
     if method == 'initialize':
-        if (root / 'gate').exists():
-            (root / 'started').touch()
-            while (root / 'gate').exists(): time.sleep(.01)
+        wait_gate()
         result={'protocolVersion':1,'agentCapabilities':{'loadSession':True}}
     elif method == 'session/new': result=session()
     elif method == 'session/set_config_option':
+        assert not kilo, 'Kilo directory discovery must not select Session models'
         assert request['params']['configId']=='model'
-        if kilo and (request['params']['value']=='model-2' or (count==2 and request['params']['value']=='model-1')):
-            current=request['params']['value']
-            print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'Provider unavailable'}}),flush=True)
-            continue
         if request['params']['value']=='model-1' and (root/'fault').exists():
             fault=(root/'fault').read_text()
             if fault=='timeout': time.sleep(31)
@@ -2543,6 +3663,8 @@ for line in sys.stdin:
                         force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
+                        version_refresh: None,
+                        version_target: None,
                         model_target: None,
                         runtime_kind: kind,
                         purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -2578,24 +3700,19 @@ for line in sys.stdin:
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
-        let expected_setters = if kind == AdapterKind::KiloCli && count > 1 {
-            count
-        } else {
-            0
-        };
         assert_eq!(
             methods
                 .iter()
                 .filter(|m| m["method"] == "session/new")
                 .count(),
-            2
+            if kind == AdapterKind::KiloCli { 1 } else { 2 }
         );
         assert_eq!(
             methods
                 .iter()
                 .filter(|m| m["method"] == "session/set_config_option")
                 .count(),
-            expected_setters
+            0
         );
         let mut settings_by_process = std::collections::BTreeMap::new();
         for method in &methods {
@@ -2610,31 +3727,19 @@ for line in sys.stdin:
         settings.sort();
         assert_eq!(
             settings,
-            vec![0, expected_setters],
-            "only the Kilo full catalog traverses models"
+            vec![0; if kind == AdapterKind::KiloCli { 1 } else { 2 }],
+            "directory discovery never traverses Session models"
         );
-        let restore = methods
-            .iter()
-            .filter(|m| m["method"] == "session/set_config_option")
-            .next_back();
-        if expected_setters == 0 {
-            assert!(
-                restore.is_none(),
-                "a directory that does not switch models needs no restore RPC"
-            );
-        } else {
+        if kind == AdapterKind::KiloCli {
             assert_eq!(
-                restore.unwrap()["value"],
-                "model-0",
-                "the disposable Session restores its initial model"
+                std::fs::read_to_string(fixture.root.join("launches"))
+                    .unwrap()
+                    .lines()
+                    .filter(|line| line.contains("models"))
+                    .count(),
+                1,
+                "one CLI command supplies every model's options"
             );
-            if kind == AdapterKind::KiloCli && count == 2 {
-                assert_eq!(
-                    restore.unwrap()["current"],
-                    "model-1",
-                    "a failed selection may have changed native state and still needs restoration"
-                );
-            }
         }
         assert!(!methods.iter().any(|m| m["method"] == "session/prompt"));
         let complete = AgentProfileService::default()
@@ -2647,25 +3752,18 @@ for line in sys.stdin:
         );
         if kind == AdapterKind::KiloCli {
             for model in &complete.snapshot.as_ref().unwrap().models {
-                if kind == AdapterKind::KiloCli
-                    && (model.id == "model-2" || (count == 2 && model.id == "model-1"))
-                {
+                assert!(!model.is_default);
+                assert!(model.runtime_metadata.is_none());
+                if model.id == "fixture/model-2" {
                     assert!(
                         model.options.is_empty(),
-                        "one unavailable model must not hide the catalog"
+                        "native models without variants have no effort control"
                     );
                     continue;
                 }
                 let option = &model.options[0];
-                assert_eq!(
-                    option.key,
-                    if kind == AdapterKind::KiloCli {
-                        "effort"
-                    } else {
-                        "thinkingEffort"
-                    }
-                );
-                let values = if model.id == "model-0" {
+                assert_eq!(option.key, "effort");
+                let values = if model.id == "fixture/model-0" {
                     ["low", "high"]
                 } else {
                     ["medium", "max"]
@@ -2678,7 +3776,7 @@ for line in sys.stdin:
                         .collect::<Vec<_>>(),
                     values
                 );
-                assert_eq!(option.default_value.as_deref(), Some(values[1]));
+                assert_eq!(option.default_value, None);
             }
         } else {
             assert!(
@@ -2767,6 +3865,41 @@ for line in sys.stdin:
         assert_eq!(catalog["refreshStatus"], "completed");
         assert_eq!(catalog["cache"]["status"], "fresh");
         if kind == AdapterKind::KiloCli {
+            if count == 3 {
+                let methods_before = std::fs::read_to_string(fixture.root.join("methods")).unwrap();
+                for fault in ["empty", "malformed", "exit"] {
+                    std::fs::write(fixture.root.join("cli-fault"), fault).unwrap();
+                    let failure = fixture
+                        .core
+                        .open_runtime_model_catalog(kind, true, true)
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        failure
+                            .to_string()
+                            .contains("runtime_model_catalog_unavailable")
+                    );
+                    let retained = AgentProfileService::default()
+                        .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        serde_json::to_value(&retained.snapshot.as_ref().unwrap().models).unwrap(),
+                        catalog["models"],
+                        "last good CLI catalog survives {fault}"
+                    );
+                    assert_eq!(
+                        serde_json::to_value(&retained.model_catalog.observed_at).unwrap(),
+                        catalog["cache"]["observedAt"]
+                    );
+                    assert_eq!(
+                        std::fs::read_to_string(fixture.root.join("methods")).unwrap(),
+                        methods_before,
+                        "a failed CLI query must not fall back to ACP"
+                    );
+                }
+                std::fs::remove_file(fixture.root.join("cli-fault")).unwrap();
+            }
             fixture.close().await;
             continue;
         }
@@ -2928,6 +4061,8 @@ for line in sys.stdin:
                             force_refresh: true,
                             search: fixture.core.runtime_search_environment.read().await.clone(),
                             startup_preview: None,
+                            version_refresh: None,
+                            version_target: None,
                             model_target: Some(crate::application::ModelOptionsTarget {
                                 model_id: model_id.into(),
                                 source: None,
