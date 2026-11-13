@@ -6,10 +6,36 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 通用提示与分叉反馈（2026-11-12）
+
+在独立 worktree 的 `rovai/toast-preview-v4` 实施通用 AppToast 顶部居中、透明文字动作与 SVG 关闭，
+沿用现有五套主题和普通／错误语义色；新版本卡片、右上角会话提醒与其他专用反馈保持原有边界。
+文件打不开进入现有预览区，统一显示“无法打开文件 / Could not open file”，不新增消息或附件旁错误行。
+按 User 后续要求移除分叉完成后／打开副本失败的提示；loading 仅在 200ms 后出现，一旦显示至少持续 600ms，
+不延迟真实分叉与导航。明确拒绝 3.2 秒后收起，未知结果仍使用原请求重试。
+规则归[通用提示](../../ui/components/app-shell-navigation.md#通用操作提示)、[文件预览 v28](../../contracts/file-preview-v28.md#打开失败的预览页)
+和[Thread Fork v1](../../contracts/thread-fork-v1.md#foreground-recovery-and-navigation)；证据见[实施记录](implementation-plan.md#通用提示与分叉反馈2026-11-12)。
+版本指针、Core／Main 协议、模型输入和历史事实保持现状。
+
+## 安装版本刷新当前入口修正（2026-11-11）
+
+后台按当前 Runtime 的既有选择规则重新解析入口，覆盖 Homebrew 稳定链接换目录、旧程序和旧 Host 仍存活的情形。
+安装版本行读取新目标，旧 Host／Run 保留原运行版本；十分钟限频、静默失败和无版本驱动退役的边界保持。
+合同见 [Runtime Launch v89](../../contracts/runtime-launch-and-verification-v89.md)，
+实现与回归见[本版记录](implementation-plan.md#安装版本刷新当前入口修正2026-11-11)。
+
+## Thread 分叉（2026-11-11）
+
+在 `rovai/thread-fork` 从 `origin/main@3568dc1f8831eafadf937159f4cc61e146fe621d` 实施。
+公开历史通过一个应用作用域命令原子复制为普通 Active Thread；不继承执行、Session、渠道绑定或输入草稿。
+规则归 [Thread Fork v1](../../contracts/thread-fork-v1.md)、[会话 UI](../../ui/components/conversation-workspace.md#thread-分叉)
+和[统一侧栏](../../ui/components/app-shell-navigation.md)，实施与验证证据见[本版记录](implementation-plan.md#thread-分叉2026-11-11)。
+版本指针保持 v1.72；没有新增表、后台服务或 Context／Bootstrap／Manifest 格式变更。
 
 ## Kilo 官方 ACP（2026-11-08，Preview）
 
@@ -30,12 +56,22 @@ Windows x64 的真实 Sub2API、用量修复与准入证据见[目标机验收](
 成功 Steer 后的常规 Host 复用及文件/cwd 对照见[复用记录](kilo-steer-reuse.md)。
 前台子代理工具展示补全、7.5 KiB 输出实测、Skills 验收状态与版本/平台判断说明见[补全记录](kilo-subagent-display.md)。
 自动阈值/overflow 压缩、逐模型 effort 原生查询及进程复用比较修正见[专项核对](kilo-auto-compaction-and-options.md)。
-逐模型 effort 已沿临时 Session 的非生成查询接通，包含完整目录／健康结果分离和两入口选择器；
-官方 Core 32 Run 的结果与权限直白解释见[接线记录](kilo-model-options.md)。
+早期逐模型 effort 接线、完整目录／健康结果分离和两入口选择器的官方 Core 32 Run 见
+[阶段记录](kilo-model-options.md)；当前目录已改为下述单次官方 CLI，实际执行仍用 ACP。
 MCP 保存下一轮生效、移除产品权限/Hook、普通取消确认后共用 Fleet Warm 的当前范围见
 [简化记录](kilo-simplification.md)、[Launch v84](../../contracts/runtime-launch-and-verification-v84.md)与 [D82](decisions.md#v1-72-d82)。
 先前记录中的权限 Hook、强制 pure=false 和取消必退役是阶段行为，不再描述当前接入。
 与最新主线的 Steer、MiniMax 按需参数查询及合同编号整合见[主线集成](kilo-simplification.md#主线集成user-sequence-66)。
+官方 CLI 批量 variants 的原生实测、目录/时序差异与 User sequence 75 的生产切换见
+[批量目录记录](kilo-bulk-models-probe.md)，当前合同为 [Launch v87](../../contracts/runtime-launch-and-verification-v87.md)。
+移除逐模型扫描，只投影原生名称、ID 和档位；保留健康／完整目录分离、共享缓存和 ACP 执行，不改变平台资格。
+User sequence 86 随后仅在正式执行进程启动时固定默认 allow，具体权限继续原生裁决；
+现有帮助文案与内部合同同步，官网不新增权限说明，见[实施记录](kilo-bulk-models-probe.md#user-sequence-86执行进程默认-allow)。
+User sequence 88 再移除权限只读行及帮助，模型/思考强度和执行默认保持，见[界面收尾](kilo-bulk-models-probe.md#user-sequence-88移除权限只读行)。
+
+Kilo/OpenCode V1 共用 SQLite 用量 reader 的历史重复读取及身份预算收口见
+[增量读取记录](native-sqlite-usage-incremental.md)；OpenCode V2 的终态数值路径保持。
+
 ## OpenCode Steer 局部接入（2026-11-10）
 
 按 User 确认接通 OpenCode 稳定 2.x 自 2.2.7 起的官方 ACP Steer，旧版继续普通排队。
@@ -1606,6 +1642,15 @@ User 已确认目录与文件共用候选及发送链路，模型只获得目录
 引用正文精简按 [R1](model-context-change-reference-projection-simplification.md)收敛：文件／目录只投影名称，完整 URI 和身份保持；
 链接标签采用必要转义，详情按类型与状态精简。按 User 明确的未上线范围，不升级格式号、不增加迁移或兼容分支。
 
+
+## 安装版本按需刷新与 Host 生命周期解耦（2026-11-11）
+
+Run 正常执行后对实际安装按需、十分钟限频读取版本，失败只记日志；手动读取不受间隔限制，迟到结果不能覆盖新版本。
+版本只更新安装信息，不再触发 Host 退役、后继等待或占用拒绝；原有健康、取消、故障、配置失效与正常关闭规则保持。
+Pi 默认不设升级例外，使用隔离真实安装与模型核验原地升级后旧进程持续运行及冷启动接续。
+合同见 [Runtime Launch v88](../../contracts/runtime-launch-and-verification-v88.md)，
+代码归属、Pi 结果及验证边界见[实施记录](implementation-plan.md#安装版本按需刷新与-host-生命周期解耦2026-11-11)。
+旧候选的 19 种真实模型验收及 Qwen/TRAE 首轮异常继续保留，不能作为当前版本驱动退役仍存在的证据。
 
 ## MiniMax 参数按需读取（2026-11-10）
 

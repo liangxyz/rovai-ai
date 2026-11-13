@@ -3335,6 +3335,7 @@
   "这个文件太大，无法预览": "File is too large to preview",
   "打开的文件太多": "Too many files open",
   "无法在这里预览这个文件": "Cannot preview this file here",
+  "无法打开文件": "Could not open file",
   "暂时无法打开这个文件": "Could not open this file right now",
   "预览资源不足": "Insufficient preview resources",
   "无法重新取得文件，已保留当前预览。": "Unable to reacquire the file; current preview is retained.",
@@ -4360,5 +4361,15 @@
   "使用此模型 ID：{0}": "Use this model ID: {0}",
   "正在读取可选项…": "Loading options…",
   "刷新模型列表": "Refresh model list",
-  "正在刷新模型列表": "Refreshing model list"
+  "正在刷新模型列表": "Refreshing model list",
+  "分叉": "Fork",
+  "从此处分叉": "Fork chat from here",
+  "正在分叉…": "Forking…",
+  "更多消息操作": "More message actions",
+  "会话已分叉，暂时无法打开": "Chat forked, but it cannot be opened right now",
+  "会话副本": "Chat copy",
+  "分叉结果尚未确认": "Fork result is not yet confirmed",
+  "分叉失败": "Fork failed",
+  "这条消息已不可用，无法从这里分叉": "This message is no longer available. Cannot fork from here.",
+  "导出": "Export"
 }

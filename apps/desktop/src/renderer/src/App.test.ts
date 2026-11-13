@@ -38,7 +38,6 @@ import type {
 import {
   activeThreadSurfaceNeedsLeaveGuard,
   App,
-  AppToast,
   applyCancellationResult,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
@@ -274,27 +273,6 @@ function supervisorSnapshot(
     ...overrides
   }
 }
-
-describe('application toast semantics', () => {
-  it('announces file-open failures as a danger alert without changing neutral notifications', () => {
-    const danger = renderToStaticMarkup(createElement(AppToast, {
-      toast: { message: '无法打开该文件', tone: 'danger' },
-      onClose: () => undefined
-    }))
-    const neutral = renderToStaticMarkup(createElement(AppToast, {
-      toast: { message: '响应模式未保存，请重试。', tone: 'neutral' },
-      onClose: () => undefined
-    }))
-
-    expect(danger).toContain('class="app-toast is-danger"')
-    expect(danger).toContain('role="alert"')
-    expect(danger).toContain('aria-live="assertive"')
-    expect(danger).toContain('无法打开该文件')
-    expect(neutral).toContain('class="app-toast"')
-    expect(neutral).toContain('role="status"')
-    expect(neutral).toContain('aria-live="polite"')
-  })
-})
 
 describe('accepted Thread deletion tombstone', () => {
   it('removes a Thread from stale navigation snapshots and adjusts its group count', () => {
@@ -2985,8 +2963,8 @@ describe('task event projections', () => {
   })
 
   it('defines the final unified Thread and Project menu labels', () => {
-    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
-    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '分叉', '导出', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '分叉', '导出', '删除'])
     expect(projectNavigationMenuLabels(false)).toEqual(['新建对话', '置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
     expect(projectNavigationMenuLabels(true)).toEqual(['新建对话', '取消置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
   })
